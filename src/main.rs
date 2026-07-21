@@ -57,7 +57,7 @@ fn main() {
     // ─── Phase 1: Tokenize HTML ──────────────────────────────────
 
     println!("═══════════════════════════════════════════════");
-    println!("  ASTERIA HTML ENGINE — Phase 1+2 Inspector");
+    println!("  ASTERIA HTML ENGINE — Phase 1+2+3 Inspector");
     println!("═══════════════════════════════════════════════\n");
 
     let mut tokenizer = Tokenizer::new(bytes);
@@ -125,11 +125,11 @@ fn main() {
             println!("      }}");
         }
 
-        // ─── Phase 2: Resolve Styles ─────────────────────────────
+        // ─── Phase 3: Resolve Styles (with cascade + inheritance) ─
 
         let styled = resolve_styles(&dom, &stylesheet, bytes);
 
-        println!("\n── Styled DOM Tree ─────────────────────────\n");
+        println!("\n── Styled DOM Tree (typed ComputedStyle) ───\n");
         styled.print_tree(&dom, bytes);
     } else {
         println!("\n── No <style> element found ─────────────────");
@@ -139,7 +139,7 @@ fn main() {
     println!("\n═══════════════════════════════════════════════");
     println!("  Done. {} tokens → {} DOM nodes", tokens.len(), dom.nodes.len());
     if !css_source.is_empty() {
-        println!("  CSS pipeline: tokenize → parse → resolve → styled tree");
+        println!("  CSS pipeline: tokenize → parse → cascade → inherit → compute → styled tree");
     }
     println!("═══════════════════════════════════════════════");
 }

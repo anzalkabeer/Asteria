@@ -5,4 +5,6 @@ pub mod parser;
 pub mod css_tokens;
 pub mod css_tokenizer;
 pub mod css_parser;
+pub mod properties;
+pub mod values;
 pub mod style;

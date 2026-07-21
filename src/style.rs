@@ -2,44 +2,106 @@ use std::collections::HashMap;
 
 use crate::css_parser::{Selector, SimpleSelector, Stylesheet};
 use crate::dom::{Dom, NodeId, NodeKind};
+use crate::properties::{self, PropertyId, ALL_PROPERTIES};
+use crate::values::{self, ComputedStyle};
 
 // ─── Style Resolution ────────────────────────────────────────────
 //
 // This module takes a DOM tree and a Stylesheet and produces a
 // "styled tree" — a separate tree that mirrors the DOM structure
-// but carries computed styles on each element node.
+// but carries typed ComputedStyle on each element node.
 //
-// The approach:
-//   1. Walk the DOM tree recursively
-//   2. For each Element node, test every rule's selectors against it
-//   3. Collect matching declarations into a PropertyMap
-//   4. Later rules override earlier ones (simplified cascade)
-//   5. Build a StyledNode tree with the results
+// The pipeline for each element:
+//   1. Collect all matching rules from the stylesheet
+//   2. Calculate specificity for each matching selector
+//   3. Sort by cascade priority: (origin, specificity, source_order)
+//   4. For each property, pick the winning declaration
+//   5. Apply shorthand expansion (margin → margin-top/right/bottom/left)
+//   6. Default unset properties: inherited → copy parent, non-inherited → initial
+//   7. Resolve font-size first (em/% depend on parent's font-size)
+//   8. Compute absolute values for all other properties (em → px, colors, etc.)
 //
-// This is intentionally simple for v1:
-//   - No specificity calculation (last-match-wins)
-//   - No inherited properties (each node has only directly matched styles)
-//   - No !important support
-//   - No shorthand expansion (margin → margin-top/right/bottom/left)
+// This is V1 — does NOT include:
+//   - Bloom filter optimization (step 2/5 of production engines)
+//   - RuleSet indexing (O(elements*rules) is fine for small pages)
+//   - Style sharing cache
+//   - !important support
+//   - var() / custom properties
+//   - Pseudo-elements (::before, ::after)
 
-/// The computed style for a single DOM node.
-/// Maps CSS property names to their values.
-/// e.g. {"color": "red", "font-size": "16px"}
-pub type PropertyMap = HashMap<String, String>;
+// ─── Specificity ─────────────────────────────────────────────────
+
+/// CSS specificity as (id_count, class_count, tag_count).
+/// Higher tuple wins. Compared lexicographically (ids beat classes beat tags).
+pub type Specificity = (u32, u32, u32);
+
+/// Calculate the specificity of a selector.
+///
+/// For each simple selector across all compound parts:
+///   - Id(#foo)       → increments id_count
+///   - Class(.bar)    → increments class_count
+///   - Tag(div)       → increments tag_count
+///   - Universal(*)   → contributes nothing
+pub fn compute_specificity(selector: &Selector) -> Specificity {
+    let mut ids = 0u32;
+    let mut classes = 0u32;
+    let mut tags = 0u32;
+
+    for compound in &selector.parts {
+        for simple in compound {
+            match simple {
+                SimpleSelector::Id(_) => ids += 1,
+                SimpleSelector::Class(_) => classes += 1,
+                SimpleSelector::Tag(_) => tags += 1,
+                SimpleSelector::Universal => {} // contributes 0
+            }
+        }
+    }
+
+    (ids, classes, tags)
+}
+
+// ─── Cascade Types ───────────────────────────────────────────────
+
+/// The origin of a CSS declaration — determines cascade priority.
+/// Higher numeric value = higher priority.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Origin {
+    /// Stylesheet rules (author origin)
+    Author = 0,
+    /// Inline style="" attribute (always beats author)
+    Inline = 1,
+}
+
+/// A single declaration that matched an element, along with its
+/// cascade metadata for sorting.
+#[derive(Debug)]
+struct MatchedDeclaration {
+    property: String,
+    value: String,
+    specificity: Specificity,
+    source_order: usize,
+    origin: Origin,
+}
+
+// ─── Styled Node ─────────────────────────────────────────────────
 
 /// A node in the styled tree. Mirrors the DOM structure but carries
-/// computed styles attached to each element.
+/// a fully resolved ComputedStyle attached to each element.
 #[derive(Debug)]
 pub struct StyledNode {
     /// Which DOM node this styled node corresponds to
     pub node_id: NodeId,
-    /// Computed styles for this node (only populated for Element nodes)
-    pub styles: PropertyMap,
+    /// Computed styles for this node (fully resolved, typed values)
+    pub styles: ComputedStyle,
     /// Styled children — same order as DOM children
     pub children: Vec<StyledNode>,
 }
 
 // ─── Style Resolution Entry Point ────────────────────────────────
+
+/// Default root font size in px (browser standard).
+const ROOT_FONT_SIZE: f32 = 16.0;
 
 /// Resolve styles for the entire DOM tree.
 /// Returns a StyledNode tree rooted at the Document node.
@@ -48,59 +110,190 @@ pub struct StyledNode {
 /// `stylesheet` — the parsed CSS stylesheet
 /// `source` — the original HTML source buffer (needed to read tag names and attributes)
 pub fn resolve_styles(dom: &Dom, stylesheet: &Stylesheet, source: &[u8]) -> StyledNode {
-    build_styled_node(dom, dom.root(), stylesheet, source)
+    let root_style = ComputedStyle::default();
+    build_styled_node(dom, dom.root(), stylesheet, source, &root_style, ROOT_FONT_SIZE)
 }
 
 /// Recursively build a StyledNode for a DOM node and its descendants.
+///
+/// `parent_style` — the parent's computed style (for inheritance)
+/// `root_font_size` — the root element's computed font-size (for rem units)
 fn build_styled_node(
     dom: &Dom,
     node_id: NodeId,
     stylesheet: &Stylesheet,
     source: &[u8],
+    parent_style: &ComputedStyle,
+    root_font_size: f32,
 ) -> StyledNode {
     let node = dom.get(node_id);
 
     // Compute styles for this node (only Element nodes get matched)
     let styles = match &node.kind {
         NodeKind::Element { .. } => {
-            let mut map = PropertyMap::new();
+            // ── Step 1: Collect all matching declarations ──────────
+            let mut declarations = Vec::new();
 
             // Test every rule against this node
-            for rule in &stylesheet.rules {
-                let matches = rule
-                    .selectors
-                    .iter()
-                    .any(|sel| selector_matches(sel, node_id, dom, source));
+            for (rule_index, rule) in stylesheet.rules.iter().enumerate() {
+                // Find the highest-specificity selector that matches
+                let mut best_specificity: Option<Specificity> = None;
 
-                if matches {
-                    // Apply all declarations from this rule
+                for sel in &rule.selectors {
+                    if selector_matches(sel, node_id, dom, source) {
+                        let spec = compute_specificity(sel);
+                        match best_specificity {
+                            None => best_specificity = Some(spec),
+                            Some(prev) if spec > prev => best_specificity = Some(spec),
+                            _ => {}
+                        }
+                    }
+                }
+
+                if let Some(specificity) = best_specificity {
                     for decl in &rule.declarations {
-                        map.insert(decl.property.clone(), decl.value.clone());
+                        declarations.push(MatchedDeclaration {
+                            property: decl.property.clone(),
+                            value: decl.value.clone(),
+                            specificity,
+                            source_order: rule_index,
+                            origin: Origin::Author,
+                        });
                     }
                 }
             }
 
-            // Also check for inline style="" attribute
+            // Check for inline style="" attribute (highest cascade priority)
             for &(ns, ne, vs, ve) in &node.attributes {
                 let attr_name =
                     std::str::from_utf8(&source[ns as usize..ne as usize]).unwrap_or("");
                 if attr_name.eq_ignore_ascii_case("style") && vs != 0 && ve != 0 {
-                    // Parse inline style declarations
                     let style_text = &source[vs as usize..ve as usize];
-                    parse_inline_style(style_text, &mut map);
+                    let inline_decls = parse_inline_style(style_text);
+                    for (prop, val) in inline_decls {
+                        declarations.push(MatchedDeclaration {
+                            property: prop,
+                            value: val,
+                            specificity: (0, 0, 0), // doesn't matter — origin wins
+                            source_order: usize::MAX,
+                            origin: Origin::Inline,
+                        });
+                    }
                 }
             }
 
-            map
+            // ── Step 2: Sort by cascade priority ──────────────────
+            // (origin ASC, specificity ASC, source_order ASC)
+            // → last entry per property wins
+            declarations.sort_by(|a, b| {
+                a.origin
+                    .cmp(&b.origin)
+                    .then(a.specificity.cmp(&b.specificity))
+                    .then(a.source_order.cmp(&b.source_order))
+            });
+
+            // ── Step 3: Pick winners per property ─────────────────
+            // Last declaration for each property wins (since sorted ascending)
+            let mut specified: HashMap<String, String> = HashMap::new();
+            for decl in &declarations {
+                specified.insert(decl.property.clone(), decl.value.clone());
+            }
+
+            // ── Step 4: Expand shorthands ─────────────────────────
+            let mut expanded: HashMap<String, String> = HashMap::new();
+            for (prop, value) in &specified {
+                if properties::is_shorthand(prop) {
+                    if let Some(longhand_ids) = properties::expand_shorthand(prop) {
+                        let edges = values::parse_edges(value, parent_style.font_size, root_font_size);
+                        let edge_values = [edges.top, edges.right, edges.bottom, edges.left];
+                        for (id, px_val) in longhand_ids.iter().zip(edge_values.iter()) {
+                            let longhand_name = property_id_to_name(*id);
+                            // Only set if not already explicitly set by a longhand
+                            if !specified.contains_key(longhand_name) {
+                                expanded.insert(longhand_name.to_string(), format!("{}px", px_val));
+                            }
+                        }
+                    }
+                }
+            }
+            // Merge expanded shorthands (longhands take priority)
+            for (prop, value) in expanded {
+                specified.entry(prop).or_insert(value);
+            }
+
+            // ── Step 5: Build ComputedStyle with inheritance ──────
+            let mut computed = ComputedStyle::default();
+
+            // First: resolve font-size (other em values depend on it)
+            if let Some(fs_value) = specified.get("font-size") {
+                if fs_value == "inherit" {
+                    computed.font_size = parent_style.font_size;
+                } else if fs_value == "initial" {
+                    computed.font_size = 16.0;
+                } else {
+                    computed.font_size =
+                        values::parse_length(fs_value, parent_style.font_size, root_font_size);
+                }
+            } else if properties::is_inherited(PropertyId::FontSize) {
+                // font-size inherits — copy from parent
+                computed.font_size = parent_style.font_size;
+            }
+            // else: keep default (16.0)
+
+            // Update line-height default based on resolved font-size
+            computed.line_height = computed.font_size * 1.2;
+
+            // Now resolve all other properties
+            for &prop_id in ALL_PROPERTIES {
+                if prop_id == PropertyId::FontSize {
+                    continue; // already handled above
+                }
+
+                let prop_name = property_id_to_name(prop_id);
+
+                if let Some(value) = specified.get(prop_name) {
+                    if value == "inherit" {
+                        copy_property(&mut computed, parent_style, prop_id);
+                    } else if value == "initial" {
+                        // keep initial from Default impl
+                    } else {
+                        computed.set_property(
+                            prop_id,
+                            value,
+                            parent_style.font_size,
+                            root_font_size,
+                        );
+                    }
+                } else {
+                    // Property not specified — apply defaulting
+                    if properties::is_inherited(prop_id) {
+                        copy_property(&mut computed, parent_style, prop_id);
+                    }
+                    // Non-inherited: keep initial value from Default impl
+                }
+            }
+
+            computed
         }
-        _ => PropertyMap::new(),
+        _ => {
+            // Text/Comment/Document nodes inherit everything from parent
+            let mut computed = ComputedStyle::default();
+            for &prop_id in ALL_PROPERTIES {
+                if properties::is_inherited(prop_id) {
+                    copy_property(&mut computed, parent_style, prop_id);
+                }
+            }
+            computed
+        }
     };
 
-    // Recurse into children
+    // Recurse into children, passing our computed style as parent
     let children = node
         .children
         .iter()
-        .map(|&child_id| build_styled_node(dom, child_id, stylesheet, source))
+        .map(|&child_id| {
+            build_styled_node(dom, child_id, stylesheet, source, &styles, root_font_size)
+        })
         .collect();
 
     StyledNode {
@@ -110,10 +303,70 @@ fn build_styled_node(
     }
 }
 
+/// Copy a single property value from parent to child.
+fn copy_property(child: &mut ComputedStyle, parent: &ComputedStyle, prop: PropertyId) {
+    match prop {
+        PropertyId::Display => child.display = parent.display,
+        PropertyId::Position => child.position = parent.position,
+        PropertyId::Width => child.width = parent.width,
+        PropertyId::Height => child.height = parent.height,
+        PropertyId::MarginTop => child.margin.top = parent.margin.top,
+        PropertyId::MarginRight => child.margin.right = parent.margin.right,
+        PropertyId::MarginBottom => child.margin.bottom = parent.margin.bottom,
+        PropertyId::MarginLeft => child.margin.left = parent.margin.left,
+        PropertyId::PaddingTop => child.padding.top = parent.padding.top,
+        PropertyId::PaddingRight => child.padding.right = parent.padding.right,
+        PropertyId::PaddingBottom => child.padding.bottom = parent.padding.bottom,
+        PropertyId::PaddingLeft => child.padding.left = parent.padding.left,
+        PropertyId::BorderTopWidth => child.border_width.top = parent.border_width.top,
+        PropertyId::BorderRightWidth => child.border_width.right = parent.border_width.right,
+        PropertyId::BorderBottomWidth => child.border_width.bottom = parent.border_width.bottom,
+        PropertyId::BorderLeftWidth => child.border_width.left = parent.border_width.left,
+        PropertyId::BorderColor => child.border_color = parent.border_color,
+        PropertyId::BorderStyle => child.border_style = parent.border_style,
+        PropertyId::Color => child.color = parent.color,
+        PropertyId::BackgroundColor => child.background_color = parent.background_color,
+        PropertyId::FontSize => child.font_size = parent.font_size,
+        PropertyId::FontWeight => child.font_weight = parent.font_weight,
+        PropertyId::TextAlign => child.text_align = parent.text_align,
+        PropertyId::LineHeight => child.line_height = parent.line_height,
+    }
+}
+
+/// Map a PropertyId back to its CSS property name string.
+fn property_id_to_name(id: PropertyId) -> &'static str {
+    match id {
+        PropertyId::Display => "display",
+        PropertyId::Position => "position",
+        PropertyId::Width => "width",
+        PropertyId::Height => "height",
+        PropertyId::MarginTop => "margin-top",
+        PropertyId::MarginRight => "margin-right",
+        PropertyId::MarginBottom => "margin-bottom",
+        PropertyId::MarginLeft => "margin-left",
+        PropertyId::PaddingTop => "padding-top",
+        PropertyId::PaddingRight => "padding-right",
+        PropertyId::PaddingBottom => "padding-bottom",
+        PropertyId::PaddingLeft => "padding-left",
+        PropertyId::BorderTopWidth => "border-top-width",
+        PropertyId::BorderRightWidth => "border-right-width",
+        PropertyId::BorderBottomWidth => "border-bottom-width",
+        PropertyId::BorderLeftWidth => "border-left-width",
+        PropertyId::BorderColor => "border-color",
+        PropertyId::BorderStyle => "border-style",
+        PropertyId::Color => "color",
+        PropertyId::BackgroundColor => "background-color",
+        PropertyId::FontSize => "font-size",
+        PropertyId::FontWeight => "font-weight",
+        PropertyId::TextAlign => "text-align",
+        PropertyId::LineHeight => "line-height",
+    }
+}
+
 /// Parse inline style declarations from a style="" attribute value.
-/// e.g. "color: red; font-size: 16px" → inserts into the property map.
-fn parse_inline_style(style_bytes: &[u8], map: &mut PropertyMap) {
+fn parse_inline_style(style_bytes: &[u8]) -> Vec<(String, String)> {
     let style_str = std::str::from_utf8(style_bytes).unwrap_or("");
+    let mut result = Vec::new();
 
     for declaration in style_str.split(';') {
         let declaration = declaration.trim();
@@ -125,10 +378,12 @@ fn parse_inline_style(style_bytes: &[u8], map: &mut PropertyMap) {
             let property = prop.trim().to_ascii_lowercase();
             let value = val.trim().to_string();
             if !property.is_empty() && !value.is_empty() {
-                map.insert(property, value);
+                result.push((property, value));
             }
         }
     }
+
+    result
 }
 
 // ─── Selector Matching ───────────────────────────────────────────
@@ -138,11 +393,6 @@ fn parse_inline_style(style_bytes: &[u8], map: &mut PropertyMap) {
 /// A selector has `parts` — a list of compound selector groups connected
 /// by descendant combinators. The LAST part must match the target node,
 /// and each earlier part must match some ancestor of the target.
-///
-/// e.g. for selector "div.main p":
-///   parts = [[Tag("div"), Class("main")], [Tag("p")]]
-///   - [Tag("p")] must match the target node
-///   - [Tag("div"), Class("main")] must match some ancestor of the target
 fn selector_matches(selector: &Selector, node_id: NodeId, dom: &Dom, source: &[u8]) -> bool {
     if selector.parts.is_empty() {
         return false;
@@ -161,17 +411,16 @@ fn selector_matches(selector: &Selector, node_id: NodeId, dom: &Dom, source: &[u
 
     // For descendant combinator: each preceding compound selector must match
     // some ancestor, walking up the tree from the target's parent.
-    // We match right-to-left through the parts.
     let mut current = dom.get(node_id).parent;
-    let mut part_idx = selector.parts.len() - 2; // start from second-to-last
+    let mut part_idx = selector.parts.len() - 2;
 
     loop {
         match current {
-            None => return false, // ran out of ancestors
+            None => return false,
             Some(ancestor_id) => {
                 if compound_matches(&selector.parts[part_idx], ancestor_id, dom, source) {
                     if part_idx == 0 {
-                        return true; // all parts matched
+                        return true;
                     }
                     part_idx -= 1;
                 }
@@ -191,7 +440,6 @@ fn compound_matches(
 ) -> bool {
     let node = dom.get(node_id);
 
-    // Only Element nodes can match selectors
     let (tag_start, tag_end) = match &node.kind {
         NodeKind::Element {
             tag_start,
@@ -207,17 +455,8 @@ fn compound_matches(
     for simple in compound {
         let matches = match simple {
             SimpleSelector::Tag(name) => tag_name == *name,
-
-            SimpleSelector::Class(class_name) => {
-                // Check if the node has a class attribute containing this class
-                node_has_class(node, class_name, source)
-            }
-
-            SimpleSelector::Id(id_name) => {
-                // Check if the node has an id attribute matching this id
-                node_has_id(node, id_name, source)
-            }
-
+            SimpleSelector::Class(class_name) => node_has_class(node, class_name, source),
+            SimpleSelector::Id(id_name) => node_has_id(node, id_name, source),
             SimpleSelector::Universal => true,
         };
 
@@ -230,7 +469,6 @@ fn compound_matches(
 }
 
 /// Check if a node has a specific class in its class attribute.
-/// The class attribute can contain multiple space-separated class names.
 fn node_has_class(node: &crate::dom::Node, class_name: &str, source: &[u8]) -> bool {
     for &(ns, ne, vs, ve) in &node.attributes {
         let attr_name =
@@ -239,8 +477,6 @@ fn node_has_class(node: &crate::dom::Node, class_name: &str, source: &[u8]) -> b
         if attr_name.eq_ignore_ascii_case("class") && vs != 0 && ve != 0 {
             let attr_value =
                 std::str::from_utf8(&source[vs as usize..ve as usize]).unwrap_or("");
-
-            // Split by whitespace and check each class
             return attr_value.split_whitespace().any(|c| c == class_name);
         }
     }
@@ -294,7 +530,6 @@ impl StyledNode {
                     std::str::from_utf8(&source[*tag_start as usize..*tag_end as usize])
                         .unwrap_or("???");
 
-                // Build attribute string for display
                 if node.attributes.is_empty() {
                     output.push_str(&format!("{}Element <{}>\n", indent, tag_name));
                 } else {
@@ -320,12 +555,11 @@ impl StyledNode {
                     ));
                 }
 
-                // Print computed styles (if any)
-                if !self.styles.is_empty() {
-                    // Sort properties for deterministic output
-                    let mut props: Vec<_> = self.styles.iter().collect();
-                    props.sort_by_key(|(k, _)| k.to_string());
-                    for (prop, value) in props {
+                // Print computed styles — only non-default values for readability
+                let defaults = ComputedStyle::default();
+                let style_entries = self.get_non_default_styles(&defaults);
+                if !style_entries.is_empty() {
+                    for (prop, value) in &style_entries {
                         output.push_str(&format!("{}  [{}:{}]\n", indent, prop, value));
                     }
                 }
@@ -345,10 +579,66 @@ impl StyledNode {
             }
         }
 
-        // Recurse into styled children
         for child in &self.children {
             child.format_node(dom, source, depth + 1, output);
         }
+    }
+
+    /// Get a list of (property_name, value_string) for properties that
+    /// differ from their default/initial values. Makes output cleaner.
+    fn get_non_default_styles(&self, defaults: &ComputedStyle) -> Vec<(&'static str, String)> {
+        let mut entries = Vec::new();
+        let s = &self.styles;
+        let d = defaults;
+
+        if s.display != d.display {
+            entries.push(("display", format!("{}", s.display)));
+        }
+        if s.color != d.color {
+            entries.push(("color", format!("{}", s.color)));
+        }
+        if s.background_color != d.background_color {
+            entries.push(("background-color", format!("{}", s.background_color)));
+        }
+        if s.font_size != d.font_size {
+            entries.push(("font-size", format!("{}px", s.font_size)));
+        }
+        if s.font_weight != d.font_weight {
+            entries.push(("font-weight", format!("{}", s.font_weight)));
+        }
+        if s.margin != d.margin {
+            entries.push(("margin", format!("{}", s.margin)));
+        }
+        if s.padding != d.padding {
+            entries.push(("padding", format!("{}", s.padding)));
+        }
+        if s.width != d.width {
+            entries.push((
+                "width",
+                s.width
+                    .map(|v| format!("{}px", v))
+                    .unwrap_or("auto".to_string()),
+            ));
+        }
+        if s.height != d.height {
+            entries.push((
+                "height",
+                s.height
+                    .map(|v| format!("{}px", v))
+                    .unwrap_or("auto".to_string()),
+            ));
+        }
+        if s.text_align != d.text_align {
+            entries.push(("text-align", format!("{}", s.text_align)));
+        }
+        if s.line_height != d.line_height {
+            entries.push(("line-height", format!("{}px", s.line_height)));
+        }
+        if s.position != d.position {
+            entries.push(("position", format!("{:?}", s.position).to_ascii_lowercase()));
+        }
+
+        entries
     }
 }
 
@@ -360,6 +650,7 @@ mod tests {
     use crate::css_parser::Stylesheet;
     use crate::parser::Parser;
     use crate::tokenizer::Tokenizer;
+    use crate::values::{Color, Display, Edges, TextAlign};
 
     /// Helper: parse HTML and CSS, resolve styles, return the styled tree
     fn styled_tree(html: &str, css: &str) -> (StyledNode, Dom, Vec<u8>) {
@@ -375,24 +666,62 @@ mod tests {
         (styled, dom, html_bytes)
     }
 
+    // ── Specificity Tests ────────────────────────────────────────
+
+    #[test]
+    fn test_specificity_calculation() {
+        use crate::css_parser::SimpleSelector;
+
+        let sel = Selector {
+            parts: vec![vec![SimpleSelector::Tag("div".into())]],
+        };
+        assert_eq!(compute_specificity(&sel), (0, 0, 1));
+
+        let sel = Selector {
+            parts: vec![vec![SimpleSelector::Class("main".into())]],
+        };
+        assert_eq!(compute_specificity(&sel), (0, 1, 0));
+
+        let sel = Selector {
+            parts: vec![vec![SimpleSelector::Id("header".into())]],
+        };
+        assert_eq!(compute_specificity(&sel), (1, 0, 0));
+
+        let sel = Selector {
+            parts: vec![vec![
+                SimpleSelector::Tag("div".into()),
+                SimpleSelector::Class("main".into()),
+                SimpleSelector::Id("hero".into()),
+            ]],
+        };
+        assert_eq!(compute_specificity(&sel), (1, 1, 1));
+
+        let sel = Selector {
+            parts: vec![
+                vec![SimpleSelector::Tag("div".into())],
+                vec![SimpleSelector::Tag("p".into())],
+            ],
+        };
+        assert_eq!(compute_specificity(&sel), (0, 0, 2));
+    }
+
+    // ── Basic Selector Matching (typed) ──────────────────────────
+
     #[test]
     fn test_tag_selector_match() {
         let (styled, _, _) = styled_tree("<h1>Hello</h1>", "h1 { color: red; }");
-
-        // styled root = Document, first child = h1
         let h1 = &styled.children[0];
-        assert_eq!(h1.styles.get("color"), Some(&"red".to_string()));
+        assert_eq!(h1.styles.color, Color::rgb(255, 0, 0));
     }
 
     #[test]
     fn test_class_selector_match() {
         let (styled, _, _) = styled_tree(
             r#"<div class="main">Content</div>"#,
-            ".main { background: white; }",
+            ".main { background-color: white; }",
         );
-
         let div = &styled.children[0];
-        assert_eq!(div.styles.get("background"), Some(&"white".to_string()));
+        assert_eq!(div.styles.background_color, Color::rgb(255, 255, 255));
     }
 
     #[test]
@@ -401,85 +730,132 @@ mod tests {
             r#"<div id="container">Content</div>"#,
             "#container { width: 960px; }",
         );
-
         let div = &styled.children[0];
-        assert_eq!(div.styles.get("width"), Some(&"960px".to_string()));
+        assert_eq!(div.styles.width, Some(960.0));
     }
 
     #[test]
     fn test_universal_selector() {
-        let (styled, _, _) = styled_tree("<p>Text</p>", "* { margin: 0; }");
-
+        let (styled, _, _) = styled_tree("<p>Text</p>", "* { margin: 5px; }");
         let p = &styled.children[0];
-        assert_eq!(p.styles.get("margin"), Some(&"0".to_string()));
+        assert_eq!(p.styles.margin, Edges::uniform(5.0));
     }
 
     #[test]
     fn test_no_match() {
         let (styled, _, _) = styled_tree("<p>Text</p>", "h1 { color: red; }");
-
-        // p should have no styles — h1 selector doesn't match
         let p = &styled.children[0];
-        assert!(p.styles.is_empty());
+        assert_eq!(p.styles.color, Color::BLACK);
     }
 
-    #[test]
-    fn test_compound_selector() {
-        let (styled, _, _) = styled_tree(
-            r#"<div class="main">A</div><div>B</div>"#,
-            "div.main { color: red; }",
-        );
-
-        // First div has class="main" → should match
-        let div1 = &styled.children[0];
-        assert_eq!(div1.styles.get("color"), Some(&"red".to_string()));
-
-        // Second div has no class → should NOT match
-        let div2 = &styled.children[1];
-        assert!(div2.styles.is_empty());
-    }
+    // ── Specificity-Based Cascade ────────────────────────────────
 
     #[test]
-    fn test_descendant_selector() {
+    fn test_specificity_id_beats_class() {
         let (styled, _, _) = styled_tree(
-            "<div><p>Hello</p></div><p>World</p>",
-            "div p { color: blue; }",
+            r#"<div id="header" class="section">Content</div>"#,
+            ".section { color: red; } #header { color: blue; }",
         );
-
-        // p inside div should match
         let div = &styled.children[0];
-        let p_inside = &div.children[0];
-        assert_eq!(p_inside.styles.get("color"), Some(&"blue".to_string()));
-
-        // p outside div should NOT match
-        let p_outside = &styled.children[1];
-        assert!(p_outside.styles.is_empty());
+        assert_eq!(div.styles.color, Color::rgb(0, 0, 255));
     }
 
     #[test]
-    fn test_cascade_last_wins() {
+    fn test_specificity_class_beats_tag() {
+        let (styled, _, _) = styled_tree(
+            r#"<div class="main">Content</div>"#,
+            "div { color: red; } .main { color: blue; }",
+        );
+        let div = &styled.children[0];
+        assert_eq!(div.styles.color, Color::rgb(0, 0, 255));
+    }
+
+    #[test]
+    fn test_same_specificity_last_wins() {
         let (styled, _, _) = styled_tree(
             "<h1>Hello</h1>",
             "h1 { color: red; } h1 { color: blue; }",
         );
-
-        // Later rule should win
         let h1 = &styled.children[0];
-        assert_eq!(h1.styles.get("color"), Some(&"blue".to_string()));
+        assert_eq!(h1.styles.color, Color::rgb(0, 0, 255));
+    }
+
+    // ── Inheritance ──────────────────────────────────────────────
+
+    #[test]
+    fn test_color_inherits() {
+        let (styled, _, _) = styled_tree(
+            "<div><p>Hello</p></div>",
+            "div { color: green; }",
+        );
+        let div = &styled.children[0];
+        let p = &div.children[0];
+        assert_eq!(div.styles.color, Color::rgb(0, 128, 0));
+        assert_eq!(p.styles.color, Color::rgb(0, 128, 0));
     }
 
     #[test]
-    fn test_multiple_properties() {
+    fn test_font_size_inherits() {
         let (styled, _, _) = styled_tree(
-            "<p>Text</p>",
-            "p { color: green; font-size: 14px; margin: 5px; }",
+            "<div><p>Hello</p></div>",
+            "div { font-size: 24px; }",
         );
-
-        let p = &styled.children[0];
-        assert_eq!(p.styles.get("color"), Some(&"green".to_string()));
-        assert_eq!(p.styles.get("font-size"), Some(&"14px".to_string()));
-        assert_eq!(p.styles.get("margin"), Some(&"5px".to_string()));
+        let div = &styled.children[0];
+        let p = &div.children[0];
+        assert_eq!(div.styles.font_size, 24.0);
+        assert_eq!(p.styles.font_size, 24.0);
     }
+
+    #[test]
+    fn test_margin_does_not_inherit() {
+        let (styled, _, _) = styled_tree(
+            "<div><p>Hello</p></div>",
+            "div { margin: 20px; }",
+        );
+        let div = &styled.children[0];
+        let p = &div.children[0];
+        assert_eq!(div.styles.margin, Edges::uniform(20.0));
+        assert_eq!(p.styles.margin, Edges::ZERO);
+    }
+
+    #[test]
+    fn test_background_does_not_inherit() {
+        let (styled, _, _) = styled_tree(
+            "<div><p>Hello</p></div>",
+            "div { background-color: yellow; }",
+        );
+        let div = &styled.children[0];
+        let p = &div.children[0];
+        assert_eq!(div.styles.background_color, Color::rgb(255, 255, 0));
+        assert_eq!(p.styles.background_color, Color::TRANSPARENT);
+    }
+
+    // ── Value Computation ────────────────────────────────────────
+
+    #[test]
+    fn test_em_to_px() {
+        let (styled, _, _) = styled_tree(
+            "<div><p>Hello</p></div>",
+            "div { font-size: 20px; } p { font-size: 2em; }",
+        );
+        let div = &styled.children[0];
+        let p = &div.children[0];
+        assert_eq!(div.styles.font_size, 20.0);
+        assert_eq!(p.styles.font_size, 40.0);
+    }
+
+    #[test]
+    fn test_hex_color_parsing() {
+        let (styled, _, _) = styled_tree(
+            "<h1>Hello</h1>",
+            "h1 { color: #ff0000; background-color: #0f0; }",
+        );
+        let h1 = &styled.children[0];
+        assert_eq!(h1.styles.color, Color::rgb(255, 0, 0));
+        assert_eq!(h1.styles.background_color, Color::rgb(0, 255, 0));
+    }
+
+    // ── Inline Styles ────────────────────────────────────────────
 
     #[test]
     fn test_inline_style() {
@@ -487,35 +863,105 @@ mod tests {
             r#"<p style="color: red; font-size: 20px">Text</p>"#,
             "",
         );
-
         let p = &styled.children[0];
-        assert_eq!(p.styles.get("color"), Some(&"red".to_string()));
-        assert_eq!(p.styles.get("font-size"), Some(&"20px".to_string()));
+        assert_eq!(p.styles.color, Color::rgb(255, 0, 0));
+        assert_eq!(p.styles.font_size, 20.0);
     }
 
     #[test]
-    fn test_inline_style_overrides_stylesheet() {
+    fn test_inline_style_beats_author() {
         let (styled, _, _) = styled_tree(
             r#"<p style="color: green">Text</p>"#,
             "p { color: red; font-size: 14px; }",
         );
-
         let p = &styled.children[0];
-        // inline style should override stylesheet for color
-        assert_eq!(p.styles.get("color"), Some(&"green".to_string()));
-        // font-size should still come from stylesheet
-        assert_eq!(p.styles.get("font-size"), Some(&"14px".to_string()));
+        assert_eq!(p.styles.color, Color::rgb(0, 128, 0));
+        assert_eq!(p.styles.font_size, 14.0);
+    }
+
+    // ── Display Property ─────────────────────────────────────────
+
+    #[test]
+    fn test_display_none() {
+        let (styled, _, _) = styled_tree(
+            "<div>Content</div>",
+            "div { display: none; }",
+        );
+        let div = &styled.children[0];
+        assert_eq!(div.styles.display, Display::None);
     }
 
     #[test]
-    fn test_styled_tree_format() {
-        let (styled, dom, source) = styled_tree("<h1>Hello</h1>", "h1 { color: red; }");
-
-        let output = styled.format_tree(&dom, &source);
-        assert!(output.contains("Element <h1>"));
-        assert!(output.contains("[color:red]"));
-        assert!(output.contains("Text \"Hello\""));
+    fn test_display_block() {
+        let (styled, _, _) = styled_tree(
+            "<span>Content</span>",
+            "span { display: block; }",
+        );
+        let span = &styled.children[0];
+        assert_eq!(span.styles.display, Display::Block);
     }
+
+    // ── Descendant Selector ──────────────────────────────────────
+
+    #[test]
+    fn test_descendant_selector() {
+        let (styled, _, _) = styled_tree(
+            "<div><p>Hello</p></div><p>World</p>",
+            "div p { color: blue; }",
+        );
+        let div = &styled.children[0];
+        let p_inside = &div.children[0];
+        assert_eq!(p_inside.styles.color, Color::rgb(0, 0, 255));
+
+        let p_outside = &styled.children[1];
+        assert_eq!(p_outside.styles.color, Color::BLACK);
+    }
+
+    // ── Compound Selector ────────────────────────────────────────
+
+    #[test]
+    fn test_compound_selector() {
+        let (styled, _, _) = styled_tree(
+            r#"<div class="main">A</div><div>B</div>"#,
+            "div.main { color: red; }",
+        );
+        let div1 = &styled.children[0];
+        assert_eq!(div1.styles.color, Color::rgb(255, 0, 0));
+
+        let div2 = &styled.children[1];
+        assert_eq!(div2.styles.color, Color::BLACK);
+    }
+
+    // ── Shorthand Expansion ──────────────────────────────────────
+
+    #[test]
+    fn test_margin_shorthand() {
+        let (styled, _, _) = styled_tree(
+            "<div>Content</div>",
+            "div { margin: 10px 20px; }",
+        );
+        let div = &styled.children[0];
+        assert_eq!(div.styles.margin.top, 10.0);
+        assert_eq!(div.styles.margin.right, 20.0);
+        assert_eq!(div.styles.margin.bottom, 10.0);
+        assert_eq!(div.styles.margin.left, 20.0);
+    }
+
+    // ── Multiple Properties ──────────────────────────────────────
+
+    #[test]
+    fn test_multiple_properties() {
+        let (styled, _, _) = styled_tree(
+            "<p>Text</p>",
+            "p { color: green; font-size: 14px; margin: 5px; }",
+        );
+        let p = &styled.children[0];
+        assert_eq!(p.styles.color, Color::rgb(0, 128, 0));
+        assert_eq!(p.styles.font_size, 14.0);
+        assert_eq!(p.styles.margin, Edges::uniform(5.0));
+    }
+
+    // ── Multiple Classes ─────────────────────────────────────────
 
     #[test]
     fn test_multiple_classes() {
@@ -523,8 +969,54 @@ mod tests {
             r#"<div class="one two three">Content</div>"#,
             ".two { color: blue; }",
         );
-
         let div = &styled.children[0];
-        assert_eq!(div.styles.get("color"), Some(&"blue".to_string()));
+        assert_eq!(div.styles.color, Color::rgb(0, 0, 255));
+    }
+
+    // ── Styled Tree Formatting ───────────────────────────────────
+
+    #[test]
+    fn test_styled_tree_format() {
+        let (styled, dom, source) = styled_tree("<h1>Hello</h1>", "h1 { color: red; }");
+        let output = styled.format_tree(&dom, &source);
+        assert!(output.contains("Element <h1>"));
+        assert!(output.contains("[color:rgb(255,0,0)]"));
+        assert!(output.contains("Text \"Hello\""));
+    }
+
+    // ── Font Weight ──────────────────────────────────────────────
+
+    #[test]
+    fn test_font_weight_bold() {
+        let (styled, _, _) = styled_tree(
+            "<strong>Bold</strong>",
+            "strong { font-weight: bold; }",
+        );
+        let strong = &styled.children[0];
+        assert_eq!(strong.styles.font_weight, 700.0);
+    }
+
+    // ── Text Align ───────────────────────────────────────────────
+
+    #[test]
+    fn test_text_align_center() {
+        let (styled, _, _) = styled_tree(
+            "<div>Content</div>",
+            "div { text-align: center; }",
+        );
+        let div = &styled.children[0];
+        assert_eq!(div.styles.text_align, TextAlign::Center);
+    }
+
+    #[test]
+    fn test_text_align_inherits() {
+        let (styled, _, _) = styled_tree(
+            "<div><p>Hello</p></div>",
+            "div { text-align: center; }",
+        );
+        let div = &styled.children[0];
+        let p = &div.children[0];
+        assert_eq!(div.styles.text_align, TextAlign::Center);
+        assert_eq!(p.styles.text_align, TextAlign::Center);
     }
 }
