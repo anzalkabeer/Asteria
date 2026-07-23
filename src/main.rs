@@ -134,7 +134,7 @@ fn main() {
 
         // ─── Phase 4: Layout Engine (Calculates 2D Geometry & Box Model) ─
 
-        if let Some(layout_tree) = asteria::layout::layout_document(&styled, 800.0, 600.0) {
+        if let Some(layout_tree) = asteria::layout::layout_document(&styled, &dom, bytes, 800.0, 600.0) {
             println!("\n── Layout Tree (2D Bounding Boxes & Coordinates) ───\n");
             layout_tree.print_tree(&dom, bytes);
         }

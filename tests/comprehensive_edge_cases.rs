@@ -37,7 +37,7 @@ fn parse_and_layout_full<'a>(
         bytes_store,
     ));
 
-    layout_document(styled_store.as_ref().unwrap(), viewport_width, viewport_height).unwrap()
+    layout_document(styled_store.as_ref().unwrap(), dom_store.as_ref().unwrap(), bytes_store, viewport_width, viewport_height).unwrap()
 }
 
 // ═══════════════════════════════════════════════════════════════════

@@ -5,13 +5,8 @@
 // and box model dimensions (width, height, margins, padding, borders)
 // for every visible element.
 //
-// ── Note on 3D Transforms, Depth & Animations ──────────────────────
-// In browser architecture, the Layout stage computes the base 2D content
-// box geometry (x, y, width, height) in document space. 3D transforms
-// (translate3d, perspective), z-index depth layering, and GPU-accelerated
-// animations are applied downstream during Display List generation and
-// wgpu GPU Compositing. The 2D layout tree provides the reference frame
-// that all downstream 3D graphics passes build upon.
+// Supports both Block Formatting Context (vertical block stacking) and
+// Inline Formatting Context (horizontal left-to-right line boxes with line wrapping).
 
 use crate::dom::{Dom, NodeKind};
 use crate::style::StyledNode;
@@ -110,29 +105,28 @@ impl<'a> LayoutBox<'a> {
     }
 
     /// Recursively compute geometry and position for this box and its subtree.
-    ///i was aought that maybe i dont have to do this using recursively
-    pub fn layout(&mut self, containing_block: Dimensions) {
+    pub fn layout(&mut self, containing_block: Dimensions, dom: &Dom, source: &[u8]) {
         match self.box_type {
             BoxType::BlockNode | BoxType::AnonymousBlock => {
-                self.layout_block(containing_block);
+                self.layout_block(containing_block, dom, source);
             }
             BoxType::InlineNode => {
-                self.layout_inline(containing_block);
+                self.layout_inline(containing_block, dom, source);
             }
         }
     }
-/// from here there is ai writing the code for the layout algorithm and i think it is working fine but i am not sure if it is correct or not thats why 
+
     // ─── Block Layout Algorithm ───────────────────────────────────
 
-    fn layout_block(&mut self, containing_block: Dimensions) {
+    fn layout_block(&mut self, containing_block: Dimensions, dom: &Dom, source: &[u8]) {
         // Step 1: Calculate horizontal width and margins
         self.calculate_block_width(containing_block);
 
         // Step 2: Calculate position (x, y) relative to document origin
         self.calculate_block_position(containing_block);
 
-        // Step 3: Lay out children and compute content height
-        self.layout_block_children();
+        // Step 3: Lay out children (block stacking or inline line-box formatting context)
+        self.layout_block_children(dom, source);
 
         // Step 4: Calculate explicit height if specified
         self.calculate_block_height();
@@ -225,22 +219,87 @@ impl<'a> LayoutBox<'a> {
             + self.dimensions.padding.top;
     }
 
-    /// Layout children inside this block box sequentially top to bottom
-    fn layout_block_children(&mut self) {
-        let mut content_height = 0.0;
+    /// Layout children inside this box.
+    /// If children are InlineNodes, format them in a horizontal line box context.
+    /// If children are BlockNodes, stack them vertically.
+    fn layout_block_children(&mut self, dom: &Dom, source: &[u8]) {
+        let is_inline_context = self.children.iter().all(|c| c.box_type == BoxType::InlineNode);
 
-        for child in &mut self.children {
-            // Container for child is current block dimensions with running height
-            let mut container = self.dimensions;
-            container.content.height = content_height;
+        if is_inline_context && !self.children.is_empty() {
+            // ─── Inline Formatting Context (Horizontal Line Flow) ───────────
+            let mut cursor_x = self.dimensions.content.x;
+            let mut cursor_y = self.dimensions.content.y;
+            let mut current_line_height: f32 = 0.0;
+            let container_max_w = self.dimensions.content.width;
 
-            child.layout(container);
+            for child in &mut self.children {
+                let style = child.styled_node.map(|n| &n.styles);
 
-            // Increment parent content height by child's margin box height
-            content_height += child.dimensions.margin_box().height;
+                let margin_left = style.map_or(0.0, |s| s.margin.left);
+                let margin_right = style.map_or(0.0, |s| s.margin.right);
+                let margin_top = style.map_or(0.0, |s| s.margin.top);
+                let margin_bottom = style.map_or(0.0, |s| s.margin.bottom);
+
+                let padding_left = style.map_or(0.0, |s| s.padding.left);
+                let padding_right = style.map_or(0.0, |s| s.padding.right);
+                let padding_top = style.map_or(0.0, |s| s.padding.top);
+                let padding_bottom = style.map_or(0.0, |s| s.padding.bottom);
+
+                let border_left = style.map_or(0.0, |s| s.border_width.left);
+                let border_right = style.map_or(0.0, |s| s.border_width.right);
+                let border_top = style.map_or(0.0, |s| s.border_width.top);
+                let border_bottom = style.map_or(0.0, |s| s.border_width.bottom);
+
+                let content_w = compute_intrinsic_inline_width(child.styled_node, dom, source);
+                let content_h = style.map_or(19.2, |s| s.line_height);
+
+                let outer_w = margin_left + border_left + padding_left + content_w + padding_right + border_right + margin_right;
+                let outer_h = margin_top + border_top + padding_top + content_h + padding_bottom + border_bottom + margin_bottom;
+
+                // Horizontal Line Wrap Check
+                if container_max_w > 0.0
+                    && (cursor_x + outer_w > self.dimensions.content.x + container_max_w)
+                    && (cursor_x > self.dimensions.content.x)
+                {
+                    cursor_y += current_line_height;
+                    cursor_x = self.dimensions.content.x;
+                    current_line_height = 0.0;
+                }
+
+                // Position child horizontally on the current line box
+                child.dimensions.content.x = cursor_x + margin_left + border_left + padding_left;
+                child.dimensions.content.y = cursor_y + margin_top + border_top + padding_top;
+                child.dimensions.content.width = content_w;
+                child.dimensions.content.height = content_h;
+
+                child.dimensions.margin = EdgeSizes { top: margin_top, right: margin_right, bottom: margin_bottom, left: margin_left };
+                child.dimensions.padding = EdgeSizes { top: padding_top, right: padding_right, bottom: padding_bottom, left: padding_left };
+                child.dimensions.border = EdgeSizes { top: border_top, right: border_right, bottom: border_bottom, left: border_left };
+
+                // Recursively layout child's descendants
+                child.layout(child.dimensions, dom, source);
+
+                // Advance horizontal cursor
+                cursor_x += outer_w;
+                current_line_height = current_line_height.max(outer_h);
+            }
+
+            self.dimensions.content.height = (cursor_y + current_line_height) - self.dimensions.content.y;
+        } else {
+            // ─── Block Formatting Context (Vertical Stack Flow) ──────────────
+            let mut content_height = 0.0;
+
+            for child in &mut self.children {
+                let mut container = self.dimensions;
+                container.content.height = content_height;
+
+                child.layout(container, dom, source);
+
+                content_height += child.dimensions.margin_box().height;
+            }
+
+            self.dimensions.content.height = content_height;
         }
-
-        self.dimensions.content.height = content_height;
     }
 
     /// Override content height if explicitly specified on the element's style
@@ -252,18 +311,40 @@ impl<'a> LayoutBox<'a> {
         }
     }
 
-    // ─── Inline Layout Basic Handling ─────────────────────────────
+    // ─── Inline Layout Handling ────────────────────────────────────
 
-    fn layout_inline(&mut self, containing_block: Dimensions) {
-        // Basic inline box geometry inherits container position & default font line-height
-        self.calculate_block_width(containing_block);
-        self.calculate_block_position(containing_block);
+    fn layout_inline(&mut self, containing_block: Dimensions, dom: &Dom, source: &[u8]) {
+        // Inner inline children layout logic
+        self.layout_block_children(dom, source);
+    }
+}
 
-        let line_height = self
-            .styled_node
-            .map_or(16.0, |n| n.styles.line_height);
+/// Compute intrinsic width for an inline styled node (text content length or child sum)
+fn compute_intrinsic_inline_width(styled_node: Option<&StyledNode>, dom: &Dom, source: &[u8]) -> f32 {
+    let Some(styled) = styled_node else {
+        return 0.0;
+    };
 
-        self.dimensions.content.height = line_height;
+    if let Some(w) = styled.styles.width {
+        return w;
+    }
+
+    let node = dom.get(styled.node_id);
+    match &node.kind {
+        NodeKind::Text { start, end } => {
+            let font_size = styled.styles.font_size;
+            let text = std::str::from_utf8(&source[*start as usize..*end as usize]).unwrap_or("");
+            let trimmed_len = text.trim_matches(|c: char| c == '\r' || c == '\n').len() as f32;
+            (trimmed_len * font_size * 0.55).max(0.0)
+        }
+        NodeKind::Element { .. } => {
+            let mut sum = 0.0;
+            for child_styled in &styled.children {
+                sum += compute_intrinsic_inline_width(Some(child_styled), dom, source);
+            }
+            sum
+        }
+        _ => 0.0,
     }
 }
 
@@ -329,6 +410,8 @@ pub fn build_layout_tree<'a>(styled_node: &'a StyledNode) -> Option<LayoutBox<'a
 /// Compute top-level layout for a document given viewport dimensions.
 pub fn layout_document<'a>(
     styled_root: &'a StyledNode,
+    dom: &Dom,
+    source: &[u8],
     viewport_width: f32,
     viewport_height: f32,
 ) -> Option<LayoutBox<'a>> {
@@ -344,7 +427,7 @@ pub fn layout_document<'a>(
         ..Default::default()
     };
 
-    layout_root.layout(initial_containing_block);
+    layout_root.layout(initial_containing_block, dom, source);
     Some(layout_root)
 }
 
