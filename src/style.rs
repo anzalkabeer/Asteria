@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use crate::css_parser::{Selector, SimpleSelector, Stylesheet};
 use crate::dom::{Dom, NodeId, NodeKind};
 use crate::properties::{self, PropertyId, ALL_PROPERTIES};
-use crate::values::{self, ComputedStyle};
+use crate::values::{self, ComputedStyle, Display};
 
 // ─── Style Resolution ────────────────────────────────────────────
 //
@@ -109,6 +109,15 @@ const ROOT_FONT_SIZE: f32 = 16.0;
 /// `dom` — the parsed DOM tree
 /// `stylesheet` — the parsed CSS stylesheet
 /// `source` — the original HTML source buffer (needed to read tag names and attributes)
+/// Check if an HTML tag defaults to display: block in User-Agent stylesheet
+fn is_default_block_tag(tag: &str) -> bool {
+    matches!(
+        tag.to_ascii_lowercase().as_str(),
+        "html" | "body" | "div" | "p" | "h1" | "h2" | "h3" | "h4" | "h5" | "h6"
+            | "header" | "footer" | "section" | "article" | "nav" | "main" | "ul" | "ol" | "li" | "form"
+    )
+}
+
 pub fn resolve_styles(dom: &Dom, stylesheet: &Stylesheet, source: &[u8]) -> StyledNode {
     let root_style = ComputedStyle::default();
     build_styled_node(dom, dom.root(), stylesheet, source, &root_style, ROOT_FONT_SIZE)
@@ -270,6 +279,15 @@ fn build_styled_node(
                         copy_property(&mut computed, parent_style, prop_id);
                     }
                     // Non-inherited: keep initial value from Default impl
+                    // User-Agent default stylesheet: block tags default to Display::Block
+                    if prop_id == PropertyId::Display {
+                        if let NodeKind::Element { tag_start, tag_end } = &node.kind {
+                            let tag_name = std::str::from_utf8(&source[*tag_start as usize..*tag_end as usize]).unwrap_or("");
+                            if is_default_block_tag(tag_name) {
+                                computed.display = Display::Block;
+                            }
+                        }
+                    }
                 }
             }
 
@@ -278,6 +296,9 @@ fn build_styled_node(
         _ => {
             // Text/Comment/Document nodes inherit everything from parent
             let mut computed = ComputedStyle::default();
+            if matches!(node.kind, NodeKind::Document) {
+                computed.display = Display::Block;
+            }
             for &prop_id in ALL_PROPERTIES {
                 if properties::is_inherited(prop_id) {
                     copy_property(&mut computed, parent_style, prop_id);

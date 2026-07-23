@@ -177,22 +177,22 @@ fn test_inline_beats_high_specificity() {
 #[test]
 fn test_non_inherited_defaults() {
     let (styled, _, _) = styled_tree(
-        "<div><p>Hello</p></div>",
+        "<div><span>Hello</span></div>",
         "div { display: block; width: 500px; padding: 15px; }",
     );
 
     let div = &styled.children[0];
-    let p = &div.children[0];
+    let span = &div.children[0];
 
     // div has explicit values
     assert_eq!(div.styles.display, Display::Block);
     assert_eq!(div.styles.width, Some(500.0));
     assert_eq!(div.styles.padding, Edges::uniform(15.0));
 
-    // p: display, width, padding do NOT inherit — get initial values
-    assert_eq!(p.styles.display, Display::Inline); // initial
-    assert_eq!(p.styles.width, None); // initial = auto
-    assert_eq!(p.styles.padding, Edges::ZERO); // initial
+    // span: display, width, padding do NOT inherit — get initial values
+    assert_eq!(span.styles.display, Display::Inline); // initial
+    assert_eq!(span.styles.width, None); // initial = auto
+    assert_eq!(span.styles.padding, Edges::ZERO); // initial
 }
 
 // ─── Shorthand Expansion Test ────────────────────────────────────

@@ -57,7 +57,7 @@ fn main() {
     // ─── Phase 1: Tokenize HTML ──────────────────────────────────
 
     println!("═══════════════════════════════════════════════");
-    println!("  ASTERIA HTML ENGINE — Phase 1+2+3 Inspector");
+    println!("  ASTERIA HTML ENGINE — Phase 1+2+3+4 Inspector");
     println!("═══════════════════════════════════════════════\n");
 
     let mut tokenizer = Tokenizer::new(bytes);
@@ -131,6 +131,13 @@ fn main() {
 
         println!("\n── Styled DOM Tree (typed ComputedStyle) ───\n");
         styled.print_tree(&dom, bytes);
+
+        // ─── Phase 4: Layout Engine (Calculates 2D Geometry & Box Model) ─
+
+        if let Some(layout_tree) = asteria::layout::layout_document(&styled, 800.0, 600.0) {
+            println!("\n── Layout Tree (2D Bounding Boxes & Coordinates) ───\n");
+            layout_tree.print_tree(&dom, bytes);
+        }
     } else {
         println!("\n── No <style> element found ─────────────────");
         println!("  (Add a <style> block to see CSS styling in action)\n");
@@ -139,7 +146,7 @@ fn main() {
     println!("\n═══════════════════════════════════════════════");
     println!("  Done. {} tokens → {} DOM nodes", tokens.len(), dom.nodes.len());
     if !css_source.is_empty() {
-        println!("  CSS pipeline: tokenize → parse → cascade → inherit → compute → styled tree");
+        println!("  Full pipeline: HTML Tokenize/Parse → CSS Parse → Cascade/Style → Layout Engine");
     }
     println!("═══════════════════════════════════════════════");
 }
