@@ -2,3 +2,5 @@ anzal-guide.md
 keshav-guide.md
 collab-model.md
 /target/
+.agent/
+.DS_Store

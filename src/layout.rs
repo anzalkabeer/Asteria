@@ -313,7 +313,7 @@ impl<'a> LayoutBox<'a> {
 
     // ─── Inline Layout Handling ────────────────────────────────────
 
-    fn layout_inline(&mut self, containing_block: Dimensions, dom: &Dom, source: &[u8]) {
+    fn layout_inline(&mut self, _containing_block: Dimensions, dom: &Dom, source: &[u8]) {
         // Inner inline children layout logic
         self.layout_block_children(dom, source);
     }
@@ -413,7 +413,7 @@ pub fn layout_document<'a>(
     dom: &Dom,
     source: &[u8],
     viewport_width: f32,
-    viewport_height: f32,
+    _viewport_height: f32,
 ) -> Option<LayoutBox<'a>> {
     let mut layout_root = build_layout_tree(styled_root)?;
 
