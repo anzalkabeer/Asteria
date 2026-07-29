@@ -1,7 +1,5 @@
 # Asteria Rendering Engine 🌠
 
-_(Codename: Antigravity)_
-
 Asteria is a modular, zero-dependency web rendering engine written entirely from scratch in Rust.
 
 Most modern software sits on top of massive abstraction towers. Web browsers in particular are among the most complex engineering feats on the planet—so much so that building one from scratch is often considered crazy. We built Asteria to take the cover off the black box: parsing raw bytes of HTML and CSS, resolving cascade rules, computing geometry, and placing 2D layout boxes on a coordinate space, all using only the Rust standard library.
