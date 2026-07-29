@@ -1,12 +1,11 @@
 use std::env;
-use std::fs;
 use std::process;
 
 use asteria::tokenizer::Tokenizer;
 use asteria::parser::Parser;
-use asteria::dom::{Dom, NodeId, NodeKind};
 use asteria::css_parser::Stylesheet;
 use asteria::style::resolve_styles;
+use asteria::loader::ResourceLoader;
 
 fn main() {
     // ─── Read Input ──────────────────────────────────────────────
@@ -18,13 +17,16 @@ fn main() {
 
     let args: Vec<String> = env::args().collect();
 
-    let html = if args.len() > 1 {
-        // Read HTML from file path provided as argument
+    let mut loader = ResourceLoader::new();
+
+    let resources = if args.len() > 1 {
+        // Load HTML from file path — the loader handles discovery of
+        // <style> blocks and <link rel="stylesheet"> references
         let path = &args[1];
-        match fs::read_to_string(path) {
-            Ok(content) => content,
+        match loader.load_file(path) {
+            Ok(resources) => resources,
             Err(err) => {
-                eprintln!("Error reading file '{}': {}", path, err);
+                eprintln!("Error: {}", err);
                 process::exit(1);
             }
         }
@@ -32,7 +34,8 @@ fn main() {
         // No file provided — use a built-in sample with embedded CSS
         println!("No file provided. Using built-in sample HTML.\n");
         println!("Usage: cargo run -- <path-to-html-file>\n");
-        String::from(r#"<!DOCTYPE html>
+        loader.load_html_string(
+            r#"<!DOCTYPE html>
 <html>
 <head>
     <title>Asteria Sample</title>
@@ -49,15 +52,17 @@ fn main() {
     <!-- A comment -->
     <br/>
 </body>
-</html>"#)
+</html>"#,
+            "<sample>",
+        )
     };
 
-    let bytes = html.as_bytes();
+    let bytes = &resources.html.bytes;
 
     // ─── Phase 1: Tokenize HTML ──────────────────────────────────
 
     println!("═══════════════════════════════════════════════");
-    println!("  ASTERIA HTML ENGINE — Phase 1+2+3+4 Inspector");
+    println!("  ASTERIA HTML ENGINE — Full Pipeline Inspector");
     println!("═══════════════════════════════════════════════\n");
 
     let mut tokenizer = Tokenizer::new(bytes);
@@ -99,12 +104,26 @@ fn main() {
     println!("\n── DOM Tree ({} nodes) ─────────────────────\n", dom.nodes.len());
     dom.print_tree(bytes);
 
-    // ─── Phase 2: Extract CSS from <style> elements ──────────────
+    // ─── Phase 2: Merge all CSS from discovered stylesheets ──────
 
-    let css_source = extract_style_content(&dom, bytes);
+    println!("\n── Resources Discovered ─────────────────────\n");
+    println!("  HTML: {}", resources.html.url);
+    println!("  Stylesheets: {}", resources.stylesheets.len());
+    for (i, sheet) in resources.stylesheets.iter().enumerate() {
+        println!("    [{}] {} ({} bytes)", i, sheet.url, sheet.bytes.len());
+    }
+    println!("  Cache entries: {}", loader.cache.len());
+
+    // Concatenate all stylesheet content into one CSS source
+    let mut css_source = String::new();
+    for sheet in &resources.stylesheets {
+        let text = std::str::from_utf8(&sheet.bytes).unwrap_or("");
+        css_source.push_str(text);
+        css_source.push('\n');
+    }
 
     if !css_source.is_empty() {
-        println!("\n── Extracted CSS ({} bytes) ────────────────\n", css_source.len());
+        println!("\n── Combined CSS ({} bytes) ─────────────────\n", css_source.len());
         println!("{}", css_source);
 
         // ─── Phase 2: Parse CSS ──────────────────────────────────
@@ -139,56 +158,19 @@ fn main() {
             layout_tree.print_tree(&dom, bytes);
         }
     } else {
-        println!("\n── No <style> element found ─────────────────");
-        println!("  (Add a <style> block to see CSS styling in action)\n");
+        println!("\n── No stylesheets found ────────────────────");
+        println!("  (Add a <style> block or <link rel=\"stylesheet\"> to see CSS in action)\n");
     }
 
     println!("\n═══════════════════════════════════════════════");
     println!("  Done. {} tokens → {} DOM nodes", tokens.len(), dom.nodes.len());
     if !css_source.is_empty() {
-        println!("  Full pipeline: HTML Tokenize/Parse → CSS Parse → Cascade/Style → Layout Engine");
+        println!("  Full pipeline: Load → HTML Tokenize/Parse → CSS Parse → Cascade/Style → Layout Engine");
     }
     println!("═══════════════════════════════════════════════");
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────
-
-/// Walk the DOM to find <style> elements and extract their text content.
-/// Returns the concatenated CSS text from all <style> blocks.
-fn extract_style_content(dom: &Dom, source: &[u8]) -> String {
-    let mut css = String::new();
-    collect_style_text(dom, dom.root(), source, &mut css);
-    css
-}
-
-/// Recursively search for <style> elements and collect their text children.
-fn collect_style_text(dom: &Dom, node_id: NodeId, source: &[u8], css: &mut String) {
-    let node = dom.get(node_id);
-
-    if let NodeKind::Element { tag_start, tag_end } = &node.kind {
-        let tag_name =
-            std::str::from_utf8(&source[*tag_start as usize..*tag_end as usize])
-                .unwrap_or("");
-
-        if tag_name.eq_ignore_ascii_case("style") {
-            // Collect all text children of this <style> element
-            for &child_id in &node.children {
-                let child = dom.get(child_id);
-                if let NodeKind::Text { start, end } = &child.kind {
-                    let text = std::str::from_utf8(&source[*start as usize..*end as usize])
-                        .unwrap_or("");
-                    css.push_str(text);
-                }
-            }
-            return; // Don't recurse into <style> children further
-        }
-    }
-
-    // Recurse into other elements
-    for &child_id in &node.children {
-        collect_style_text(dom, child_id, source, css);
-    }
-}
 
 /// Format a Selector for display.
 fn format_selector(selector: &asteria::css_parser::Selector) -> String {
