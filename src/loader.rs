@@ -158,7 +158,8 @@ impl ResourceLoader {
 
     /// Load from an in-memory HTML string (for testing or built-in samples).
     ///
-    /// `base_url` is used as the cache key and for resolving relative paths.
+    /// `base_url` is used as the cache key only, not for resolving relative
+    /// resource paths, since in-memory documents have no base directory.
     /// For in-memory strings, use something like `"<sample>"`.
     pub fn load_html_string(
         &mut self,
@@ -218,7 +219,7 @@ impl ResourceLoader {
     }
 
     /// Walk a parsed DOM to discover all stylesheets (inline + external).
-    /// Returns them in document order.
+    /// Returns them in document order using an explicit worklist stack.
     fn discover_stylesheets(
         &mut self,
         dom: &Dom,
@@ -226,23 +227,38 @@ impl ResourceLoader {
         base_dir: Option<&Path>,
     ) -> Result<Vec<Resource>, LoadError> {
         let mut stylesheets = Vec::new();
-
-        // Find inline <style> blocks and <link rel="stylesheet"> tags
         let mut inline_counter = 0u32;
-        self.collect_stylesheets(
-            dom,
-            dom.root(),
-            source,
-            base_dir,
-            &mut stylesheets,
-            &mut inline_counter,
-        )?;
+
+        // Worklist stack initialized with root node
+        let mut worklist = vec![dom.root()];
+
+        while let Some(node_id) = worklist.pop() {
+            let handled = self.process_stylesheet_node(
+                dom,
+                node_id,
+                source,
+                base_dir,
+                &mut stylesheets,
+                &mut inline_counter,
+            )?;
+
+            // If this node wasn't a handled stylesheet node (<style> or <link rel="stylesheet">),
+            // enqueue its children in reverse order so popping yields document order (left-to-right).
+            if !handled {
+                let node = dom.get(node_id);
+                for &child_id in node.children.iter().rev() {
+                    worklist.push(child_id);
+                }
+            }
+        }
 
         Ok(stylesheets)
     }
 
-    /// Recursively walk the DOM tree collecting stylesheets.
-    fn collect_stylesheets(
+    /// Process a single DOM node for stylesheet content (<style> or <link rel="stylesheet">).
+    /// Returns Ok(true) if the node was a handled stylesheet (so traversal should stop for its children),
+    /// or Ok(false) if it was not.
+    fn process_stylesheet_node(
         &mut self,
         dom: &Dom,
         node_id: NodeId,
@@ -250,7 +266,7 @@ impl ResourceLoader {
         base_dir: Option<&Path>,
         stylesheets: &mut Vec<Resource>,
         inline_counter: &mut u32,
-    ) -> Result<(), LoadError> {
+    ) -> Result<bool, LoadError> {
         let node = dom.get(node_id);
 
         if let NodeKind::Element {
@@ -285,7 +301,7 @@ impl ResourceLoader {
                     });
                 }
 
-                return Ok(()); // Don't recurse into <style> children
+                return Ok(true); // Handled stylesheet node
             }
 
             // ─── <link rel="stylesheet" href="..."> → external CSS ──
@@ -316,12 +332,10 @@ impl ResourceLoader {
 
                 if is_stylesheet {
                     if let Some(href_value) = href {
-                        // Resolve the path relative to the base directory
                         let resolved = resolve_path(&href_value, base_dir);
                         match self.read_resource(&resolved, ResourceType::Css) {
                             Ok(resource) => stylesheets.push(resource),
                             Err(err) => {
-                                // Warn but don't fail — missing stylesheets are non-fatal
                                 eprintln!(
                                     "Warning: Could not load stylesheet '{}': {}",
                                     href_value, err
@@ -329,27 +343,12 @@ impl ResourceLoader {
                             }
                         }
                     }
+                    return Ok(true); // Handled stylesheet node
                 }
-
-                return Ok(());
             }
         }
 
-        // Recurse into children
-        // Clone children vec to avoid borrow issues
-        let children: Vec<NodeId> = dom.get(node_id).children.clone();
-        for child_id in children {
-            self.collect_stylesheets(
-                dom,
-                child_id,
-                source,
-                base_dir,
-                stylesheets,
-                inline_counter,
-            )?;
-        }
-
-        Ok(())
+        Ok(false)
     }
 }
 
@@ -384,7 +383,8 @@ fn resolve_path(href: &str, base_dir: Option<&Path>) -> String {
     href.to_string()
 }
 
-/// Try to canonicalize a path, falling back to the original string on failure.
+/// Try to canonicalize a path, returning a normalized canonical path string on success
+/// or `LoadError::IoError` on canonicalization failure.
 fn canonicalize_path(path: &str) -> Result<String, LoadError> {
     match fs::canonicalize(path) {
         Ok(canonical) => Ok(normalize_path_string(&canonical.to_string_lossy())),
@@ -395,15 +395,19 @@ fn canonicalize_path(path: &str) -> Result<String, LoadError> {
     }
 }
 
-/// Normalize a path string: convert backslashes to forward slashes
-/// and strip the Windows `\\?\` prefix if present.
+/// Normalize a path string. On Windows, converts backslashes to forward slashes
+/// and strips the extended-length path prefix (`\\?\` or `//?/`).
+/// On non-Windows platforms, preserves the path unchanged.
 fn normalize_path_string(path: &str) -> String {
-    let normalized = path.replace('\\', "/");
-    // Strip Windows extended-length path prefix
-    if normalized.starts_with("//?/") {
-        normalized[4..].to_string()
+    if cfg!(windows) {
+        let normalized = path.replace('\\', "/");
+        if normalized.starts_with("//?/") {
+            normalized[4..].to_string()
+        } else {
+            normalized
+        }
     } else {
-        normalized
+        path.to_string()
     }
 }
 
@@ -652,11 +656,13 @@ mod tests {
     // ── Normalize path ───────────────────────────────────────────
 
     #[test]
+    #[cfg(windows)]
     fn test_normalize_backslashes() {
         assert_eq!(normalize_path_string("C:\\Users\\test\\file.css"), "C:/Users/test/file.css");
     }
 
     #[test]
+    #[cfg(windows)]
     fn test_normalize_strips_prefix() {
         assert_eq!(normalize_path_string("//?/C:/Users/test/file.css"), "C:/Users/test/file.css");
     }
