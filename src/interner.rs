@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::rc::Rc;
 
 // ─── String Interner ─────────────────────────────────────────────
 //
@@ -169,9 +170,9 @@ const PRE_SEEDED: &[&str] = &[
 /// so they always have known, deterministic `Symbol` values.
 pub struct Interner {
     /// Forward map: string → Symbol index
-    map: HashMap<String, Symbol>,
+    map: HashMap<Rc<str>, Symbol>,
     /// Reverse table: Symbol index → owned string
-    strings: Vec<String>,
+    strings: Vec<Rc<str>>,
 }
 
 impl Interner {
@@ -203,8 +204,9 @@ impl Interner {
         }
 
         let sym = Symbol(self.strings.len() as u32);
-        self.strings.push(name.to_string());
-        self.map.insert(name.to_string(), sym);
+        let rc: Rc<str> = Rc::from(name);
+        self.strings.push(Rc::clone(&rc));
+        self.map.insert(rc, sym);
         sym
     }
 
@@ -231,7 +233,7 @@ impl Interner {
 
     /// Try to resolve a Symbol, returning `None` if the index is out of bounds.
     pub fn try_resolve(&self, sym: Symbol) -> Option<&str> {
-        self.strings.get(sym.0 as usize).map(|s| s.as_str())
+        self.strings.get(sym.0 as usize).map(|s| &**s)
     }
 
     /// Look up a string without interning it. Returns `Some(Symbol)`
@@ -375,6 +377,20 @@ mod tests {
     fn test_pre_seeded_count() {
         let interner = Interner::new();
         assert_eq!(interner.len(), PRE_SEEDED.len());
+    }
+
+    #[test]
+    fn test_pre_seeded_all_exhaustive() {
+        let interner = Interner::new();
+        for (index, &expected) in PRE_SEEDED.iter().enumerate() {
+            let sym = Symbol(index as u32);
+            assert_eq!(
+                interner.resolve(sym),
+                expected,
+                "Pre-seeded entry at index {} did not match expected symbol constant",
+                index
+            );
+        }
     }
 
     #[test]
