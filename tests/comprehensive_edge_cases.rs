@@ -207,7 +207,7 @@ fn test_css_hex_color_variants() {
     let dom = Dom::new(); // Dummy DOM
     let html = b"<html></html>";
 
-    let styled = resolve_styles(&dom, &stylesheet, html);
+    let _styled = resolve_styles(&dom, &stylesheet, html);
     // Parse verifies hex and named color handling
     assert_eq!(stylesheet.rules.len(), 4);
 }
@@ -225,7 +225,7 @@ fn test_style_inline_attribute_override() {
         div { color: black; }
     "#;
     let bytes = html.as_bytes();
-    let tokenizer = Tokenizer::new(bytes);
+    let _tokenizer = Tokenizer::new(bytes);
     let tokens = Tokenizer::new(bytes).tokenize();
     let dom = Parser::new(&tokens, bytes).parse();
     let stylesheet = Stylesheet::parse(css.as_bytes());

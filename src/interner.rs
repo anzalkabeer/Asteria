@@ -226,6 +226,12 @@ pub struct Interner {
     strings: Vec<Rc<str>>,
 }
 
+impl Default for Interner {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Interner {
     /// Create a new interner pre-seeded with common HTML tags,
     /// attribute names, and CSS property names.
@@ -473,6 +479,7 @@ mod tests {
     // ── Symbol Properties ────────────────────────────────────────
 
     #[test]
+    #[allow(clippy::clone_on_copy)]
     fn test_symbol_copy_and_clone() {
         let sym = SYM_DIV;
         let copy = sym; // Copy

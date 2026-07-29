@@ -68,6 +68,12 @@ pub struct ResourceCache {
     entries: HashMap<String, Resource>,
 }
 
+impl Default for ResourceCache {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ResourceCache {
     pub fn new() -> Self {
         ResourceCache {
@@ -113,6 +119,12 @@ impl ResourceCache {
 pub struct ResourceLoader {
     /// In-memory cache to avoid re-reading files
     pub cache: ResourceCache,
+}
+
+impl Default for ResourceLoader {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl ResourceLoader {
@@ -389,8 +401,8 @@ fn canonicalize_path(path: &str) -> Result<String, LoadError> {
 fn normalize_path_string(path: &str) -> String {
     if cfg!(windows) {
         let normalized = path.replace('\\', "/");
-        if normalized.starts_with("//?/") {
-            normalized[4..].to_string()
+        if let Some(stripped) = normalized.strip_prefix("//?/") {
+            stripped.to_string()
         } else {
             normalized
         }

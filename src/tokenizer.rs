@@ -507,8 +507,8 @@ impl<'a> Tokenizer<'a> {
         if pos + needle.len() > self.input.len() {
             return false;
         }
-        for i in 0..needle.len() {
-            if self.input[pos + i].to_ascii_lowercase() != needle[i].to_ascii_lowercase() {
+        for (i, &b) in needle.iter().enumerate() {
+            if !self.input[pos + i].eq_ignore_ascii_case(&b) {
                 return false;
             }
         }

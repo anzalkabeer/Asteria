@@ -364,7 +364,7 @@ impl<'a> CssParser<'a> {
         }
 
         // Trim trailing whitespace from value
-        while value_parts.last().map_or(false, |s| s == " ") {
+        while value_parts.last().map(|s| s.as_str()) == Some(" ") {
             value_parts.pop();
         }
 

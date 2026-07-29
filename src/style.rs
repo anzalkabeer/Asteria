@@ -152,6 +152,7 @@ pub fn resolve_styles(dom: &Dom, stylesheet: &Stylesheet, source: &[u8]) -> Styl
 ///
 /// `parent_style` — the parent's computed style (for inheritance)
 /// `root_font_size` — the root element's computed font-size (for rem units)
+#[allow(clippy::collapsible_if)]
 fn build_styled_node(
     dom: &Dom,
     node_id: NodeId,

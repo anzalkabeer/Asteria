@@ -155,11 +155,7 @@ fn main() {
             stylesheet.rules.len()
         );
         for (i, rule) in stylesheet.rules.iter().enumerate() {
-            let selectors: Vec<String> = rule
-                .selectors
-                .iter()
-                .map(|sel| format_selector(sel))
-                .collect();
+            let selectors: Vec<String> = rule.selectors.iter().map(format_selector).collect();
             println!("  [{}] {} {{", i, selectors.join(", "));
             for decl in &rule.declarations {
                 println!("        {}: {};", decl.property, decl.value);

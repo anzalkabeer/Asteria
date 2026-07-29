@@ -134,27 +134,28 @@ impl<'a> LayoutBox<'a> {
 
     /// Calculate width, padding, border, and margins for a block box
     /// using W3C width constraint equations.
+    #[allow(clippy::unnecessary_map_or)]
     fn calculate_block_width(&mut self, containing_block: Dimensions) {
         let style = self.styled_node.map(|n| &n.styles);
 
         // Read values or defaults
-        let auto_width = style.map_or(true, |s| s.width.is_none());
+        let auto_width = style.map(|s| s.width.is_none()).unwrap_or(true);
         let mut width = style.and_then(|s| s.width).unwrap_or(0.0);
 
-        let mut margin_left = style.map_or(0.0, |s| s.margin.left);
-        let mut margin_right = style.map_or(0.0, |s| s.margin.right);
-        let margin_top = style.map_or(0.0, |s| s.margin.top);
-        let margin_bottom = style.map_or(0.0, |s| s.margin.bottom);
+        let mut margin_left = style.map(|s| s.margin.left).unwrap_or(0.0);
+        let mut margin_right = style.map(|s| s.margin.right).unwrap_or(0.0);
+        let margin_top = style.map(|s| s.margin.top).unwrap_or(0.0);
+        let margin_bottom = style.map(|s| s.margin.bottom).unwrap_or(0.0);
 
-        let padding_left = style.map_or(0.0, |s| s.padding.left);
-        let padding_right = style.map_or(0.0, |s| s.padding.right);
-        let padding_top = style.map_or(0.0, |s| s.padding.top);
-        let padding_bottom = style.map_or(0.0, |s| s.padding.bottom);
+        let padding_left = style.map(|s| s.padding.left).unwrap_or(0.0);
+        let padding_right = style.map(|s| s.padding.right).unwrap_or(0.0);
+        let padding_top = style.map(|s| s.padding.top).unwrap_or(0.0);
+        let padding_bottom = style.map(|s| s.padding.bottom).unwrap_or(0.0);
 
-        let border_left = style.map_or(0.0, |s| s.border_width.left);
-        let border_right = style.map_or(0.0, |s| s.border_width.right);
-        let border_top = style.map_or(0.0, |s| s.border_width.top);
-        let border_bottom = style.map_or(0.0, |s| s.border_width.bottom);
+        let border_left = style.map(|s| s.border_width.left).unwrap_or(0.0);
+        let border_right = style.map(|s| s.border_width.right).unwrap_or(0.0);
+        let border_top = style.map(|s| s.border_width.top).unwrap_or(0.0);
+        let border_bottom = style.map(|s| s.border_width.bottom).unwrap_or(0.0);
 
         let total_non_width =
             margin_left + margin_right + padding_left + padding_right + border_left + border_right;
@@ -331,10 +332,8 @@ impl<'a> LayoutBox<'a> {
 
     /// Override content height if explicitly specified on the element's style
     fn calculate_block_height(&mut self) {
-        if let Some(style) = self.styled_node.map(|n| &n.styles) {
-            if let Some(h) = style.height {
-                self.dimensions.content.height = h;
-            }
+        if let Some(h) = self.styled_node.and_then(|n| n.styles.height) {
+            self.dimensions.content.height = h;
         }
     }
 

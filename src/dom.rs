@@ -83,6 +83,12 @@ pub struct Dom {
     pub nodes: Vec<Node>,
 }
 
+impl Default for Dom {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Dom {
     /// Create a new DOM with just a Document root node (NodeId(0))
     pub fn new() -> Self {
@@ -340,7 +346,7 @@ mod tests {
     #[test]
     fn test_tree_structure() {
         // Manually build: Document → html → (head, body)
-        let source = b"htmlheadbody";
+        let _source = b"htmlheadbody";
         //             0123456789...
         // "html" = 0..4, "head" = 4..8, "body" = 8..12
 
