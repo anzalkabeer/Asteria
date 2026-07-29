@@ -1,6 +1,4 @@
 // ─── CSS Token Types ─────────────────────────────────────────────
-//
-// These mirror the HTML token types but for CSS.
 // Each token stores offsets into the original CSS source buffer — zero-copy,
 // just like the HTML tokenizer.
 //
