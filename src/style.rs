@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use crate::css_parser::{Selector, SimpleSelector, Stylesheet};
 use crate::dom::{Dom, NodeId, NodeKind};
-use crate::properties::{self, PropertyId, ALL_PROPERTIES};
+use crate::properties::{self, ALL_PROPERTIES, PropertyId};
 use crate::values::{self, ComputedStyle, Display};
 
 // ─── Style Resolution ────────────────────────────────────────────
@@ -113,14 +113,39 @@ const ROOT_FONT_SIZE: f32 = 16.0;
 fn is_default_block_tag(tag: &str) -> bool {
     matches!(
         tag.to_ascii_lowercase().as_str(),
-        "html" | "body" | "div" | "p" | "h1" | "h2" | "h3" | "h4" | "h5" | "h6"
-            | "header" | "footer" | "section" | "article" | "nav" | "main" | "ul" | "ol" | "li" | "form"
+        "html"
+            | "body"
+            | "div"
+            | "p"
+            | "h1"
+            | "h2"
+            | "h3"
+            | "h4"
+            | "h5"
+            | "h6"
+            | "header"
+            | "footer"
+            | "section"
+            | "article"
+            | "nav"
+            | "main"
+            | "ul"
+            | "ol"
+            | "li"
+            | "form"
     )
 }
 
 pub fn resolve_styles(dom: &Dom, stylesheet: &Stylesheet, source: &[u8]) -> StyledNode {
     let root_style = ComputedStyle::default();
-    build_styled_node(dom, dom.root(), stylesheet, source, &root_style, ROOT_FONT_SIZE)
+    build_styled_node(
+        dom,
+        dom.root(),
+        stylesheet,
+        source,
+        &root_style,
+        ROOT_FONT_SIZE,
+    )
 }
 
 /// Recursively build a StyledNode for a DOM node and its descendants.
@@ -213,7 +238,8 @@ fn build_styled_node(
             for (prop, value) in &specified {
                 if properties::is_shorthand(prop) {
                     if let Some(longhand_ids) = properties::expand_shorthand(prop) {
-                        let edges = values::parse_edges(value, parent_style.font_size, root_font_size);
+                        let edges =
+                            values::parse_edges(value, parent_style.font_size, root_font_size);
                         let edge_values = [edges.top, edges.right, edges.bottom, edges.left];
                         for (id, px_val) in longhand_ids.iter().zip(edge_values.iter()) {
                             let longhand_name = property_id_to_name(*id);
@@ -282,7 +308,10 @@ fn build_styled_node(
                     // User-Agent default stylesheet: block tags default to Display::Block
                     if prop_id == PropertyId::Display {
                         if let NodeKind::Element { tag_start, tag_end } = &node.kind {
-                            let tag_name = std::str::from_utf8(&source[*tag_start as usize..*tag_end as usize]).unwrap_or("");
+                            let tag_name = std::str::from_utf8(
+                                &source[*tag_start as usize..*tag_end as usize],
+                            )
+                            .unwrap_or("");
                             if is_default_block_tag(tag_name) {
                                 computed.display = Display::Block;
                             }
@@ -462,10 +491,7 @@ fn compound_matches(
     let node = dom.get(node_id);
 
     let (tag_start, tag_end) = match &node.kind {
-        NodeKind::Element {
-            tag_start,
-            tag_end,
-        } => (*tag_start, *tag_end),
+        NodeKind::Element { tag_start, tag_end } => (*tag_start, *tag_end),
         _ => return false,
     };
 
@@ -492,12 +518,10 @@ fn compound_matches(
 /// Check if a node has a specific class in its class attribute.
 fn node_has_class(node: &crate::dom::Node, class_name: &str, source: &[u8]) -> bool {
     for &(ns, ne, vs, ve) in &node.attributes {
-        let attr_name =
-            std::str::from_utf8(&source[ns as usize..ne as usize]).unwrap_or("");
+        let attr_name = std::str::from_utf8(&source[ns as usize..ne as usize]).unwrap_or("");
 
         if attr_name.eq_ignore_ascii_case("class") && vs != 0 && ve != 0 {
-            let attr_value =
-                std::str::from_utf8(&source[vs as usize..ve as usize]).unwrap_or("");
+            let attr_value = std::str::from_utf8(&source[vs as usize..ve as usize]).unwrap_or("");
             return attr_value.split_whitespace().any(|c| c == class_name);
         }
     }
@@ -507,12 +531,10 @@ fn node_has_class(node: &crate::dom::Node, class_name: &str, source: &[u8]) -> b
 /// Check if a node has a specific id attribute value.
 fn node_has_id(node: &crate::dom::Node, id_name: &str, source: &[u8]) -> bool {
     for &(ns, ne, vs, ve) in &node.attributes {
-        let attr_name =
-            std::str::from_utf8(&source[ns as usize..ne as usize]).unwrap_or("");
+        let attr_name = std::str::from_utf8(&source[ns as usize..ne as usize]).unwrap_or("");
 
         if attr_name.eq_ignore_ascii_case("id") && vs != 0 && ve != 0 {
-            let attr_value =
-                std::str::from_utf8(&source[vs as usize..ve as usize]).unwrap_or("");
+            let attr_value = std::str::from_utf8(&source[vs as usize..ve as usize]).unwrap_or("");
             return attr_value == id_name;
         }
     }
@@ -543,13 +565,9 @@ impl StyledNode {
             NodeKind::Document => {
                 output.push_str(&format!("{}Document\n", indent));
             }
-            NodeKind::Element {
-                tag_start,
-                tag_end,
-            } => {
-                let tag_name =
-                    std::str::from_utf8(&source[*tag_start as usize..*tag_end as usize])
-                        .unwrap_or("???");
+            NodeKind::Element { tag_start, tag_end } => {
+                let tag_name = std::str::from_utf8(&source[*tag_start as usize..*tag_end as usize])
+                    .unwrap_or("???");
 
                 if node.attributes.is_empty() {
                     output.push_str(&format!("{}Element <{}>\n", indent, tag_name));
@@ -557,14 +575,12 @@ impl StyledNode {
                     let mut attr_parts = Vec::new();
                     for &(ns, ne, vs, ve) in &node.attributes {
                         let name =
-                            std::str::from_utf8(&source[ns as usize..ne as usize])
-                                .unwrap_or("???");
+                            std::str::from_utf8(&source[ns as usize..ne as usize]).unwrap_or("???");
                         if vs == 0 && ve == 0 {
                             attr_parts.push(name.to_string());
                         } else {
-                            let value =
-                                std::str::from_utf8(&source[vs as usize..ve as usize])
-                                    .unwrap_or("???");
+                            let value = std::str::from_utf8(&source[vs as usize..ve as usize])
+                                .unwrap_or("???");
                             attr_parts.push(format!("{}=\"{}\"", name, value));
                         }
                     }
@@ -586,16 +602,16 @@ impl StyledNode {
                 }
             }
             NodeKind::Text { start, end } => {
-                let text = std::str::from_utf8(&source[*start as usize..*end as usize])
-                    .unwrap_or("???");
+                let text =
+                    std::str::from_utf8(&source[*start as usize..*end as usize]).unwrap_or("???");
                 let trimmed = text.trim();
                 if !trimmed.is_empty() {
                     output.push_str(&format!("{}Text \"{}\"\n", indent, trimmed));
                 }
             }
             NodeKind::Comment { start, end } => {
-                let comment = std::str::from_utf8(&source[*start as usize..*end as usize])
-                    .unwrap_or("???");
+                let comment =
+                    std::str::from_utf8(&source[*start as usize..*end as usize]).unwrap_or("???");
                 output.push_str(&format!("{}Comment \"{}\"\n", indent, comment.trim()));
             }
         }
@@ -793,10 +809,8 @@ mod tests {
 
     #[test]
     fn test_same_specificity_last_wins() {
-        let (styled, _, _) = styled_tree(
-            "<h1>Hello</h1>",
-            "h1 { color: red; } h1 { color: blue; }",
-        );
+        let (styled, _, _) =
+            styled_tree("<h1>Hello</h1>", "h1 { color: red; } h1 { color: blue; }");
         let h1 = &styled.children[0];
         assert_eq!(h1.styles.color, Color::rgb(0, 0, 255));
     }
@@ -805,10 +819,7 @@ mod tests {
 
     #[test]
     fn test_color_inherits() {
-        let (styled, _, _) = styled_tree(
-            "<div><p>Hello</p></div>",
-            "div { color: green; }",
-        );
+        let (styled, _, _) = styled_tree("<div><p>Hello</p></div>", "div { color: green; }");
         let div = &styled.children[0];
         let p = &div.children[0];
         assert_eq!(div.styles.color, Color::rgb(0, 128, 0));
@@ -817,10 +828,7 @@ mod tests {
 
     #[test]
     fn test_font_size_inherits() {
-        let (styled, _, _) = styled_tree(
-            "<div><p>Hello</p></div>",
-            "div { font-size: 24px; }",
-        );
+        let (styled, _, _) = styled_tree("<div><p>Hello</p></div>", "div { font-size: 24px; }");
         let div = &styled.children[0];
         let p = &div.children[0];
         assert_eq!(div.styles.font_size, 24.0);
@@ -829,10 +837,7 @@ mod tests {
 
     #[test]
     fn test_margin_does_not_inherit() {
-        let (styled, _, _) = styled_tree(
-            "<div><p>Hello</p></div>",
-            "div { margin: 20px; }",
-        );
+        let (styled, _, _) = styled_tree("<div><p>Hello</p></div>", "div { margin: 20px; }");
         let div = &styled.children[0];
         let p = &div.children[0];
         assert_eq!(div.styles.margin, Edges::uniform(20.0));
@@ -880,10 +885,7 @@ mod tests {
 
     #[test]
     fn test_inline_style() {
-        let (styled, _, _) = styled_tree(
-            r#"<p style="color: red; font-size: 20px">Text</p>"#,
-            "",
-        );
+        let (styled, _, _) = styled_tree(r#"<p style="color: red; font-size: 20px">Text</p>"#, "");
         let p = &styled.children[0];
         assert_eq!(p.styles.color, Color::rgb(255, 0, 0));
         assert_eq!(p.styles.font_size, 20.0);
@@ -904,20 +906,14 @@ mod tests {
 
     #[test]
     fn test_display_none() {
-        let (styled, _, _) = styled_tree(
-            "<div>Content</div>",
-            "div { display: none; }",
-        );
+        let (styled, _, _) = styled_tree("<div>Content</div>", "div { display: none; }");
         let div = &styled.children[0];
         assert_eq!(div.styles.display, Display::None);
     }
 
     #[test]
     fn test_display_block() {
-        let (styled, _, _) = styled_tree(
-            "<span>Content</span>",
-            "span { display: block; }",
-        );
+        let (styled, _, _) = styled_tree("<span>Content</span>", "span { display: block; }");
         let span = &styled.children[0];
         assert_eq!(span.styles.display, Display::Block);
     }
@@ -957,10 +953,7 @@ mod tests {
 
     #[test]
     fn test_margin_shorthand() {
-        let (styled, _, _) = styled_tree(
-            "<div>Content</div>",
-            "div { margin: 10px 20px; }",
-        );
+        let (styled, _, _) = styled_tree("<div>Content</div>", "div { margin: 10px 20px; }");
         let div = &styled.children[0];
         assert_eq!(div.styles.margin.top, 10.0);
         assert_eq!(div.styles.margin.right, 20.0);
@@ -1009,10 +1002,7 @@ mod tests {
 
     #[test]
     fn test_font_weight_bold() {
-        let (styled, _, _) = styled_tree(
-            "<strong>Bold</strong>",
-            "strong { font-weight: bold; }",
-        );
+        let (styled, _, _) = styled_tree("<strong>Bold</strong>", "strong { font-weight: bold; }");
         let strong = &styled.children[0];
         assert_eq!(strong.styles.font_weight, 700.0);
     }
@@ -1021,20 +1011,14 @@ mod tests {
 
     #[test]
     fn test_text_align_center() {
-        let (styled, _, _) = styled_tree(
-            "<div>Content</div>",
-            "div { text-align: center; }",
-        );
+        let (styled, _, _) = styled_tree("<div>Content</div>", "div { text-align: center; }");
         let div = &styled.children[0];
         assert_eq!(div.styles.text_align, TextAlign::Center);
     }
 
     #[test]
     fn test_text_align_inherits() {
-        let (styled, _, _) = styled_tree(
-            "<div><p>Hello</p></div>",
-            "div { text-align: center; }",
-        );
+        let (styled, _, _) = styled_tree("<div><p>Hello</p></div>", "div { text-align: center; }");
         let div = &styled.children[0];
         let p = &div.children[0];
         assert_eq!(div.styles.text_align, TextAlign::Center);

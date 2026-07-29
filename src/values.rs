@@ -202,7 +202,7 @@ impl Default for ComputedStyle {
             border_style: BorderStyleValue::None,
             color: Color::BLACK,
             background_color: Color::TRANSPARENT,
-            font_size: 16.0,   // browser default
+            font_size: 16.0,    // browser default
             font_weight: 400.0, // normal
             text_align: TextAlign::Left,
             line_height: 19.2, // 1.2 * 16px default
@@ -252,27 +252,61 @@ impl ComputedStyle {
     /// `parent_font_size` is needed to resolve em/% on font-size.
     /// `self.font_size` must already be resolved before calling this
     /// for non-font-size properties (em depends on element's own font-size).
-    pub fn set_property(&mut self, prop: PropertyId, value: &str, parent_font_size: f32, root_font_size: f32) {
+    pub fn set_property(
+        &mut self,
+        prop: PropertyId,
+        value: &str,
+        parent_font_size: f32,
+        root_font_size: f32,
+    ) {
         match prop {
             PropertyId::Display => self.display = parse_display(value),
             PropertyId::Position => self.position = parse_position(value),
-            PropertyId::Width => self.width = parse_optional_length(value, self.font_size, root_font_size),
-            PropertyId::Height => self.height = parse_optional_length(value, self.font_size, root_font_size),
+            PropertyId::Width => {
+                self.width = parse_optional_length(value, self.font_size, root_font_size)
+            }
+            PropertyId::Height => {
+                self.height = parse_optional_length(value, self.font_size, root_font_size)
+            }
 
-            PropertyId::MarginTop => self.margin.top = parse_length(value, self.font_size, root_font_size),
-            PropertyId::MarginRight => self.margin.right = parse_length(value, self.font_size, root_font_size),
-            PropertyId::MarginBottom => self.margin.bottom = parse_length(value, self.font_size, root_font_size),
-            PropertyId::MarginLeft => self.margin.left = parse_length(value, self.font_size, root_font_size),
+            PropertyId::MarginTop => {
+                self.margin.top = parse_length(value, self.font_size, root_font_size)
+            }
+            PropertyId::MarginRight => {
+                self.margin.right = parse_length(value, self.font_size, root_font_size)
+            }
+            PropertyId::MarginBottom => {
+                self.margin.bottom = parse_length(value, self.font_size, root_font_size)
+            }
+            PropertyId::MarginLeft => {
+                self.margin.left = parse_length(value, self.font_size, root_font_size)
+            }
 
-            PropertyId::PaddingTop => self.padding.top = parse_length(value, self.font_size, root_font_size),
-            PropertyId::PaddingRight => self.padding.right = parse_length(value, self.font_size, root_font_size),
-            PropertyId::PaddingBottom => self.padding.bottom = parse_length(value, self.font_size, root_font_size),
-            PropertyId::PaddingLeft => self.padding.left = parse_length(value, self.font_size, root_font_size),
+            PropertyId::PaddingTop => {
+                self.padding.top = parse_length(value, self.font_size, root_font_size)
+            }
+            PropertyId::PaddingRight => {
+                self.padding.right = parse_length(value, self.font_size, root_font_size)
+            }
+            PropertyId::PaddingBottom => {
+                self.padding.bottom = parse_length(value, self.font_size, root_font_size)
+            }
+            PropertyId::PaddingLeft => {
+                self.padding.left = parse_length(value, self.font_size, root_font_size)
+            }
 
-            PropertyId::BorderTopWidth => self.border_width.top = parse_length(value, self.font_size, root_font_size),
-            PropertyId::BorderRightWidth => self.border_width.right = parse_length(value, self.font_size, root_font_size),
-            PropertyId::BorderBottomWidth => self.border_width.bottom = parse_length(value, self.font_size, root_font_size),
-            PropertyId::BorderLeftWidth => self.border_width.left = parse_length(value, self.font_size, root_font_size),
+            PropertyId::BorderTopWidth => {
+                self.border_width.top = parse_length(value, self.font_size, root_font_size)
+            }
+            PropertyId::BorderRightWidth => {
+                self.border_width.right = parse_length(value, self.font_size, root_font_size)
+            }
+            PropertyId::BorderBottomWidth => {
+                self.border_width.bottom = parse_length(value, self.font_size, root_font_size)
+            }
+            PropertyId::BorderLeftWidth => {
+                self.border_width.left = parse_length(value, self.font_size, root_font_size)
+            }
             PropertyId::BorderColor => self.border_color = parse_color(value),
             PropertyId::BorderStyle => self.border_style = parse_border_style(value),
 
@@ -280,11 +314,15 @@ impl ComputedStyle {
             PropertyId::BackgroundColor => self.background_color = parse_color(value),
 
             // font-size is special: em/% are relative to PARENT's font-size
-            PropertyId::FontSize => self.font_size = parse_length(value, parent_font_size, root_font_size),
+            PropertyId::FontSize => {
+                self.font_size = parse_length(value, parent_font_size, root_font_size)
+            }
 
             PropertyId::FontWeight => self.font_weight = parse_font_weight(value),
             PropertyId::TextAlign => self.text_align = parse_text_align(value),
-            PropertyId::LineHeight => self.line_height = parse_line_height(value, self.font_size, root_font_size),
+            PropertyId::LineHeight => {
+                self.line_height = parse_line_height(value, self.font_size, root_font_size)
+            }
         }
     }
 }
@@ -518,7 +556,9 @@ pub fn parse_line_height(value: &str, font_size: f32, rem_base: f32) -> f32 {
         return parse_length(s, font_size, rem_base);
     }
     // Unitless number: multiply by font-size
-    s.parse::<f32>().map(|v| v * font_size).unwrap_or(font_size * 1.2)
+    s.parse::<f32>()
+        .map(|v| v * font_size)
+        .unwrap_or(font_size * 1.2)
 }
 
 /// Parse a shorthand margin/padding value into 4 edge values.

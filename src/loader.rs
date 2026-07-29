@@ -137,9 +137,7 @@ impl ResourceLoader {
     /// (This is intentional: the loader is infrastructure, not the engine.)
     pub fn load_file(&mut self, path: &str) -> Result<PageResources, LoadError> {
         let canonical = canonicalize_path(path)?;
-        let base_dir = Path::new(&canonical)
-            .parent()
-            .map(|p| p.to_path_buf());
+        let base_dir = Path::new(&canonical).parent().map(|p| p.to_path_buf());
 
         // Load the HTML resource
         let html = self.read_resource(&canonical, ResourceType::Html)?;
@@ -161,11 +159,7 @@ impl ResourceLoader {
     /// `base_url` is used as the cache key only, not for resolving relative
     /// resource paths, since in-memory documents have no base directory.
     /// For in-memory strings, use something like `"<sample>"`.
-    pub fn load_html_string(
-        &mut self,
-        html: &str,
-        base_url: &str,
-    ) -> PageResources {
+    pub fn load_html_string(&mut self, html: &str, base_url: &str) -> PageResources {
         let html_resource = Resource {
             url: base_url.to_string(),
             resource_type: ResourceType::Html,
@@ -269,14 +263,9 @@ impl ResourceLoader {
     ) -> Result<bool, LoadError> {
         let node = dom.get(node_id);
 
-        if let NodeKind::Element {
-            tag_start,
-            tag_end,
-        } = &node.kind
-        {
+        if let NodeKind::Element { tag_start, tag_end } = &node.kind {
             let tag_name =
-                std::str::from_utf8(&source[*tag_start as usize..*tag_end as usize])
-                    .unwrap_or("");
+                std::str::from_utf8(&source[*tag_start as usize..*tag_end as usize]).unwrap_or("");
 
             // ─── <style> → inline CSS ────────────────────────
             if tag_name.eq_ignore_ascii_case("style") {
@@ -284,9 +273,8 @@ impl ResourceLoader {
                 for &child_id in &node.children {
                     let child = dom.get(child_id);
                     if let NodeKind::Text { start, end } = &child.kind {
-                        let text =
-                            std::str::from_utf8(&source[*start as usize..*end as usize])
-                                .unwrap_or("");
+                        let text = std::str::from_utf8(&source[*start as usize..*end as usize])
+                            .unwrap_or("");
                         css_text.push_str(text);
                     }
                 }
@@ -626,7 +614,8 @@ mod tests {
     #[test]
     fn test_discover_link_stylesheet_no_file() {
         // <link rel="stylesheet" href="missing.css"> should warn but not fail
-        let html = br#"<html><head><link rel="stylesheet" href="missing.css"></head><body></body></html>"#;
+        let html =
+            br#"<html><head><link rel="stylesheet" href="missing.css"></head><body></body></html>"#;
         let mut tokenizer = crate::tokenizer::Tokenizer::new(html);
         let tokens = tokenizer.tokenize();
         let parser = crate::parser::Parser::new(&tokens, html);
@@ -642,7 +631,8 @@ mod tests {
     #[test]
     fn test_discover_link_not_stylesheet() {
         // <link rel="icon" href="favicon.ico"> should be ignored
-        let html = br#"<html><head><link rel="icon" href="favicon.ico"></head><body></body></html>"#;
+        let html =
+            br#"<html><head><link rel="icon" href="favicon.ico"></head><body></body></html>"#;
         let mut tokenizer = crate::tokenizer::Tokenizer::new(html);
         let tokens = tokenizer.tokenize();
         let parser = crate::parser::Parser::new(&tokens, html);
@@ -658,13 +648,19 @@ mod tests {
     #[test]
     #[cfg(windows)]
     fn test_normalize_backslashes() {
-        assert_eq!(normalize_path_string("C:\\Users\\test\\file.css"), "C:/Users/test/file.css");
+        assert_eq!(
+            normalize_path_string("C:\\Users\\test\\file.css"),
+            "C:/Users/test/file.css"
+        );
     }
 
     #[test]
     #[cfg(windows)]
     fn test_normalize_strips_prefix() {
-        assert_eq!(normalize_path_string("//?/C:/Users/test/file.css"), "C:/Users/test/file.css");
+        assert_eq!(
+            normalize_path_string("//?/C:/Users/test/file.css"),
+            "C:/Users/test/file.css"
+        );
     }
 
     // ── LoadError Display ────────────────────────────────────────

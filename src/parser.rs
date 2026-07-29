@@ -13,8 +13,8 @@ use crate::tokens::{Token, TokenKind};
 // https://html.spec.whatwg.org/multipage/syntax.html#void-elements
 
 const VOID_ELEMENTS: &[&[u8]] = &[
-    b"area", b"base", b"br", b"col", b"embed", b"hr", b"img", b"input", b"link", b"meta",
-    b"param", b"source", b"track", b"wbr",
+    b"area", b"base", b"br", b"col", b"embed", b"hr", b"img", b"input", b"link", b"meta", b"param",
+    b"source", b"track", b"wbr",
 ];
 
 /// Check if a tag name (from the source buffer) is a void element.
@@ -113,12 +113,9 @@ impl<'a> Parser<'a> {
     fn handle_start_tag(&mut self, token: &Token) {
         let parent = self.current_parent();
 
-        let node_id = self.dom.add_element(
-            parent,
-            token.start,
-            token.end,
-            &token.attributes,
-        );
+        let node_id = self
+            .dom
+            .add_element(parent, token.start, token.end, &token.attributes);
 
         // Only push onto the open elements stack if it's NOT a void element.
         // Void elements like <br>, <img>, <input> can never have children,
@@ -144,13 +141,8 @@ impl<'a> Parser<'a> {
         for i in (1..self.open_elements.len()).rev() {
             // Skip index 0 (Document root — never pop it)
             let node = self.dom.get(self.open_elements[i]);
-            if let crate::dom::NodeKind::Element {
-                tag_start,
-                tag_end,
-            } = &node.kind
-            {
-                let open_tag_name =
-                    &self.source[*tag_start as usize..*tag_end as usize];
+            if let crate::dom::NodeKind::Element { tag_start, tag_end } = &node.kind {
+                let open_tag_name = &self.source[*tag_start as usize..*tag_end as usize];
                 if tag_names_match(open_tag_name, end_tag_name) {
                     match_index = Some(i);
                     break;
@@ -169,12 +161,8 @@ impl<'a> Parser<'a> {
         let parent = self.current_parent();
 
         // Self-closing tags are like start tags but never pushed onto the stack
-        self.dom.add_element(
-            parent,
-            token.start,
-            token.end,
-            &token.attributes,
-        );
+        self.dom
+            .add_element(parent, token.start, token.end, &token.attributes);
     }
 
     fn handle_text(&mut self, token: &Token) {
@@ -192,7 +180,8 @@ impl<'a> Parser<'a> {
     /// The current parent is the top of the open_elements stack.
     /// New nodes get appended as children of this node.
     fn current_parent(&self) -> NodeId {
-        *self.open_elements
+        *self
+            .open_elements
             .last()
             .expect("open_elements stack should never be empty (Document root is always there)")
     }
@@ -361,8 +350,7 @@ mod tests {
         assert_eq!(dom.get(div).children.len(), 1);
         let comment = dom.get(div).children[0];
         if let NodeKind::Comment { start, end } = dom.get(comment).kind {
-            let text =
-                std::str::from_utf8(&source[start as usize..end as usize]).unwrap();
+            let text = std::str::from_utf8(&source[start as usize..end as usize]).unwrap();
             assert_eq!(text.trim(), "hello");
         } else {
             panic!("Expected Comment node");
@@ -467,8 +455,7 @@ Document
 
     #[test]
     fn test_deeply_nested() {
-        let (dom, source) =
-            parse_html("<a><b><c><d><e>Deep</e></d></c></b></a>");
+        let (dom, source) = parse_html("<a><b><c><d><e>Deep</e></d></c></b></a>");
 
         let root = dom.root();
         let a = dom.get(root).children[0];
@@ -485,8 +472,7 @@ Document
 
     #[test]
     fn test_siblings_with_mixed_content() {
-        let (dom, source) =
-            parse_html("<div><p>One</p>Between<p>Two</p></div>");
+        let (dom, source) = parse_html("<div><p>One</p>Between<p>Two</p></div>");
 
         let root = dom.root();
         let div = dom.get(root).children[0];
@@ -528,6 +514,9 @@ Document
 
         // The </span> is orphaned and ignored — div's children are just the text
         assert_eq!(dom.get(div).children.len(), 1);
-        assert_eq!(text_content(&dom, dom.get(div).children[0], &source), "Hello");
+        assert_eq!(
+            text_content(&dom, dom.get(div).children[0], &source),
+            "Hello"
+        );
     }
 }

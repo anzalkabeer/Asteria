@@ -9,9 +9,9 @@
 
 use asteria::css_parser::Stylesheet;
 use asteria::dom::Dom;
-use asteria::layout::{layout_document, BoxType, LayoutBox};
+use asteria::layout::{BoxType, LayoutBox, layout_document};
 use asteria::parser::Parser;
-use asteria::style::{resolve_styles, StyledNode};
+use asteria::style::{StyledNode, resolve_styles};
 use asteria::tokenizer::Tokenizer;
 
 fn parse_and_layout<'a>(
@@ -36,7 +36,14 @@ fn parse_and_layout<'a>(
         bytes_store,
     ));
 
-    layout_document(styled_store.as_ref().unwrap(), dom_store.as_ref().unwrap(), bytes_store, viewport_width, viewport_height).unwrap()
+    layout_document(
+        styled_store.as_ref().unwrap(),
+        dom_store.as_ref().unwrap(),
+        bytes_store,
+        viewport_width,
+        viewport_height,
+    )
+    .unwrap()
 }
 
 #[test]
@@ -133,7 +140,10 @@ fn test_layout_inline_horizontal_flow_and_line_wrap() {
 
     // Span 2: 61.6 + 61.6 = 123.2px > 80px container width -> line wraps to next line (x = p_x, y = p_y + 19.2px)!
     assert_eq!(span2.dimensions.content.x, p_box.dimensions.content.x);
-    assert_eq!(span2.dimensions.content.y, p_box.dimensions.content.y + 19.2);
+    assert_eq!(
+        span2.dimensions.content.y,
+        p_box.dimensions.content.y + 19.2
+    );
 }
 
 #[test]
@@ -171,5 +181,8 @@ fn test_layout_inline_side_by_side_flow() {
 
     // Span 2 x is horizontally offset by Span 1 width (x = p_x + 44px)
     assert_eq!(span1.dimensions.content.x, p_box.dimensions.content.x);
-    assert_eq!(span2.dimensions.content.x, p_box.dimensions.content.x + 44.0);
+    assert_eq!(
+        span2.dimensions.content.x,
+        p_box.dimensions.content.x + 44.0
+    );
 }

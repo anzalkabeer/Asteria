@@ -596,12 +596,24 @@ mod tests {
         assert_eq!(tokens[0].attributes.len(), 2);
 
         let attr0 = &tokens[0].attributes[0];
-        assert_eq!(&html[attr0.name_start as usize..attr0.name_end as usize], "class");
-        assert_eq!(&html[attr0.value_start as usize..attr0.value_end as usize], "main");
+        assert_eq!(
+            &html[attr0.name_start as usize..attr0.name_end as usize],
+            "class"
+        );
+        assert_eq!(
+            &html[attr0.value_start as usize..attr0.value_end as usize],
+            "main"
+        );
 
         let attr1 = &tokens[0].attributes[1];
-        assert_eq!(&html[attr1.name_start as usize..attr1.name_end as usize], "id");
-        assert_eq!(&html[attr1.value_start as usize..attr1.value_end as usize], "container");
+        assert_eq!(
+            &html[attr1.name_start as usize..attr1.name_end as usize],
+            "id"
+        );
+        assert_eq!(
+            &html[attr1.value_start as usize..attr1.value_end as usize],
+            "container"
+        );
     }
 
     #[test]
@@ -609,8 +621,14 @@ mod tests {
         let html = "<div class='main'></div>";
         let tokens = tokenize(html);
         let attr = &tokens[0].attributes[0];
-        assert_eq!(&html[attr.name_start as usize..attr.name_end as usize], "class");
-        assert_eq!(&html[attr.value_start as usize..attr.value_end as usize], "main");
+        assert_eq!(
+            &html[attr.name_start as usize..attr.name_end as usize],
+            "class"
+        );
+        assert_eq!(
+            &html[attr.value_start as usize..attr.value_end as usize],
+            "main"
+        );
     }
 
     #[test]
@@ -618,8 +636,14 @@ mod tests {
         let html = "<div class=main></div>";
         let tokens = tokenize(html);
         let attr = &tokens[0].attributes[0];
-        assert_eq!(&html[attr.name_start as usize..attr.name_end as usize], "class");
-        assert_eq!(&html[attr.value_start as usize..attr.value_end as usize], "main");
+        assert_eq!(
+            &html[attr.name_start as usize..attr.name_end as usize],
+            "class"
+        );
+        assert_eq!(
+            &html[attr.value_start as usize..attr.value_end as usize],
+            "main"
+        );
     }
 
     #[test]
@@ -629,7 +653,10 @@ mod tests {
         assert_eq!(tokens[0].kind, TokenKind::StartTag);
         assert_eq!(tokens[0].attributes.len(), 1);
         let attr = &tokens[0].attributes[0];
-        assert_eq!(&html[attr.name_start as usize..attr.name_end as usize], "disabled");
+        assert_eq!(
+            &html[attr.name_start as usize..attr.name_end as usize],
+            "disabled"
+        );
         // No value — both offsets are 0
         assert_eq!(attr.value_start, 0);
         assert_eq!(attr.value_end, 0);
@@ -674,7 +701,11 @@ mod tests {
         let tokens = tokenize(html);
 
         // Verify we get a reasonable number of tokens and the structure is correct
-        assert!(tokens.len() > 10, "Expected many tokens, got {}", tokens.len());
+        assert!(
+            tokens.len() > 10,
+            "Expected many tokens, got {}",
+            tokens.len()
+        );
 
         // First token should be Doctype
         assert_eq!(tokens[0].kind, TokenKind::Doctype);
@@ -697,8 +728,14 @@ mod tests {
             .expect("Expected an h1 tag");
         assert_eq!(h1.attributes.len(), 1);
         let attr = &h1.attributes[0];
-        assert_eq!(&html[attr.name_start as usize..attr.name_end as usize], "class");
-        assert_eq!(&html[attr.value_start as usize..attr.value_end as usize], "main");
+        assert_eq!(
+            &html[attr.name_start as usize..attr.name_end as usize],
+            "class"
+        );
+        assert_eq!(
+            &html[attr.value_start as usize..attr.value_end as usize],
+            "main"
+        );
     }
 
     #[test]
@@ -710,12 +747,24 @@ mod tests {
         assert_eq!(tokens[0].attributes.len(), 2);
 
         let attr0 = &tokens[0].attributes[0];
-        assert_eq!(&html[attr0.name_start as usize..attr0.name_end as usize], "src");
-        assert_eq!(&html[attr0.value_start as usize..attr0.value_end as usize], "photo.jpg");
+        assert_eq!(
+            &html[attr0.name_start as usize..attr0.name_end as usize],
+            "src"
+        );
+        assert_eq!(
+            &html[attr0.value_start as usize..attr0.value_end as usize],
+            "photo.jpg"
+        );
 
         let attr1 = &tokens[0].attributes[1];
-        assert_eq!(&html[attr1.name_start as usize..attr1.name_end as usize], "alt");
-        assert_eq!(&html[attr1.value_start as usize..attr1.value_end as usize], "A photo");
+        assert_eq!(
+            &html[attr1.name_start as usize..attr1.name_end as usize],
+            "alt"
+        );
+        assert_eq!(
+            &html[attr1.value_start as usize..attr1.value_end as usize],
+            "A photo"
+        );
     }
 
     #[test]
@@ -754,8 +803,14 @@ mod tests {
 
         // type has a value
         let attr0 = &tokens[0].attributes[0];
-        assert_eq!(&html[attr0.name_start as usize..attr0.name_end as usize], "type");
-        assert_eq!(&html[attr0.value_start as usize..attr0.value_end as usize], "text");
+        assert_eq!(
+            &html[attr0.name_start as usize..attr0.name_end as usize],
+            "type"
+        );
+        assert_eq!(
+            &html[attr0.value_start as usize..attr0.value_end as usize],
+            "text"
+        );
 
         // disabled, required, readonly have no values
         for attr in &tokens[0].attributes[1..] {

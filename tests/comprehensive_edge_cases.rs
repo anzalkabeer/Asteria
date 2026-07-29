@@ -8,9 +8,9 @@
 
 use asteria::css_parser::Stylesheet;
 use asteria::dom::{Dom, NodeKind};
-use asteria::layout::{layout_document, BoxType, LayoutBox};
+use asteria::layout::{BoxType, LayoutBox, layout_document};
 use asteria::parser::Parser;
-use asteria::style::{resolve_styles, StyledNode};
+use asteria::style::{StyledNode, resolve_styles};
 use asteria::tokenizer::Tokenizer;
 use asteria::values::Color;
 
@@ -37,7 +37,14 @@ fn parse_and_layout_full<'a>(
         bytes_store,
     ));
 
-    layout_document(styled_store.as_ref().unwrap(), dom_store.as_ref().unwrap(), bytes_store, viewport_width, viewport_height).unwrap()
+    layout_document(
+        styled_store.as_ref().unwrap(),
+        dom_store.as_ref().unwrap(),
+        bytes_store,
+        viewport_width,
+        viewport_height,
+    )
+    .unwrap()
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -92,7 +99,9 @@ fn test_html_unquoted_single_quoted_boolean_attributes() {
             let val = if vs == 0 && ve == 0 {
                 "".to_string()
             } else {
-                std::str::from_utf8(&bytes[vs as usize..ve as usize]).unwrap().to_string()
+                std::str::from_utf8(&bytes[vs as usize..ve as usize])
+                    .unwrap()
+                    .to_string()
             };
             (name.to_string(), val)
         })

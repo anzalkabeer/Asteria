@@ -1,11 +1,11 @@
 use std::env;
 use std::process;
 
-use asteria::tokenizer::Tokenizer;
-use asteria::parser::Parser;
 use asteria::css_parser::Stylesheet;
-use asteria::style::resolve_styles;
 use asteria::loader::ResourceLoader;
+use asteria::parser::Parser;
+use asteria::style::resolve_styles;
+use asteria::tokenizer::Tokenizer;
 
 fn main() {
     // ─── Read Input ──────────────────────────────────────────────
@@ -69,7 +69,10 @@ fn main() {
     let tokens = tokenizer.tokenize();
 
     // Print all tokens
-    println!("── HTML Tokens ({}) ─────────────────────────\n", tokens.len());
+    println!(
+        "── HTML Tokens ({}) ─────────────────────────\n",
+        tokens.len()
+    );
     for (i, token) in tokens.iter().enumerate() {
         let slice = if (token.start as usize) < bytes.len() && (token.end as usize) <= bytes.len() {
             std::str::from_utf8(&bytes[token.start as usize..token.end as usize]).unwrap_or("???")
@@ -81,15 +84,26 @@ fn main() {
 
         // Print token with its attributes if any
         if token.attributes.is_empty() {
-            println!("  [{:>3}] {:<20} {:>4}..{:<4}  {:?}", i, kind_str, token.start, token.end, slice);
+            println!(
+                "  [{:>3}] {:<20} {:>4}..{:<4}  {:?}",
+                i, kind_str, token.start, token.end, slice
+            );
         } else {
-            println!("  [{:>3}] {:<20} {:>4}..{:<4}  {:?}", i, kind_str, token.start, token.end, slice);
+            println!(
+                "  [{:>3}] {:<20} {:>4}..{:<4}  {:?}",
+                i, kind_str, token.start, token.end, slice
+            );
             for attr in &token.attributes {
-                let name = std::str::from_utf8(&bytes[attr.name_start as usize..attr.name_end as usize]).unwrap_or("???");
+                let name =
+                    std::str::from_utf8(&bytes[attr.name_start as usize..attr.name_end as usize])
+                        .unwrap_or("???");
                 if attr.value_start == 0 && attr.value_end == 0 {
                     println!("        └─ attr: {}", name);
                 } else {
-                    let value = std::str::from_utf8(&bytes[attr.value_start as usize..attr.value_end as usize]).unwrap_or("???");
+                    let value = std::str::from_utf8(
+                        &bytes[attr.value_start as usize..attr.value_end as usize],
+                    )
+                    .unwrap_or("???");
                     println!("        └─ attr: {}=\"{}\"", name, value);
                 }
             }
@@ -101,7 +115,10 @@ fn main() {
     let parser = Parser::new(&tokens, bytes);
     let dom = parser.parse();
 
-    println!("\n── DOM Tree ({} nodes) ─────────────────────\n", dom.nodes.len());
+    println!(
+        "\n── DOM Tree ({} nodes) ─────────────────────\n",
+        dom.nodes.len()
+    );
     dom.print_tree(bytes);
 
     // ─── Phase 2: Merge all CSS from discovered stylesheets ──────
@@ -123,14 +140,20 @@ fn main() {
     }
 
     if !css_source.is_empty() {
-        println!("\n── Combined CSS ({} bytes) ─────────────────\n", css_source.len());
+        println!(
+            "\n── Combined CSS ({} bytes) ─────────────────\n",
+            css_source.len()
+        );
         println!("{}", css_source);
 
         // ─── Phase 2: Parse CSS ──────────────────────────────────
 
         let stylesheet = Stylesheet::parse(css_source.as_bytes());
 
-        println!("── CSS Rules ({}) ──────────────────────────\n", stylesheet.rules.len());
+        println!(
+            "── CSS Rules ({}) ──────────────────────────\n",
+            stylesheet.rules.len()
+        );
         for (i, rule) in stylesheet.rules.iter().enumerate() {
             let selectors: Vec<String> = rule
                 .selectors
@@ -153,7 +176,9 @@ fn main() {
 
         // ─── Phase 4: Layout Engine (Calculates 2D Geometry & Box Model) ─
 
-        if let Some(layout_tree) = asteria::layout::layout_document(&styled, &dom, bytes, 800.0, 600.0) {
+        if let Some(layout_tree) =
+            asteria::layout::layout_document(&styled, &dom, bytes, 800.0, 600.0)
+        {
             println!("\n── Layout Tree (2D Bounding Boxes & Coordinates) ───\n");
             layout_tree.print_tree(&dom, bytes);
         }
@@ -163,9 +188,15 @@ fn main() {
     }
 
     println!("\n═══════════════════════════════════════════════");
-    println!("  Done. {} tokens → {} DOM nodes", tokens.len(), dom.nodes.len());
+    println!(
+        "  Done. {} tokens → {} DOM nodes",
+        tokens.len(),
+        dom.nodes.len()
+    );
     if !css_source.is_empty() {
-        println!("  Full pipeline: Load → HTML Tokenize/Parse → CSS Parse → Cascade/Style → Layout Engine");
+        println!(
+            "  Full pipeline: Load → HTML Tokenize/Parse → CSS Parse → Cascade/Style → Layout Engine"
+        );
     }
     println!("═══════════════════════════════════════════════");
 }

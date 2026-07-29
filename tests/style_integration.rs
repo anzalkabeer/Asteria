@@ -12,7 +12,7 @@
 use asteria::css_parser::Stylesheet;
 use asteria::dom::Dom;
 use asteria::parser::Parser;
-use asteria::style::{resolve_styles, StyledNode};
+use asteria::style::{StyledNode, resolve_styles};
 use asteria::tokenizer::Tokenizer;
 use asteria::values::{Color, Display, Edges, TextAlign};
 
@@ -153,7 +153,7 @@ fn test_em_chain() {
     let span = &p.children[0];
 
     assert_eq!(div.styles.font_size, 10.0);
-    assert_eq!(p.styles.font_size, 20.0);  // 2 * 10
+    assert_eq!(p.styles.font_size, 20.0); // 2 * 10
     assert_eq!(span.styles.font_size, 40.0); // 2 * 20
 }
 
@@ -217,10 +217,7 @@ fn test_shorthand_with_longhand_override() {
 
 #[test]
 fn test_display_none_typed() {
-    let (styled, _, _) = styled_tree(
-        "<div>Hidden</div>",
-        "div { display: none; }",
-    );
+    let (styled, _, _) = styled_tree("<div>Hidden</div>", "div { display: none; }");
 
     let div = &styled.children[0];
     assert_eq!(div.styles.display, Display::None);
@@ -238,7 +235,19 @@ fn test_styled_tree_output_contains_typed_values() {
     let output = styled.format_tree(&dom, &source);
 
     // Should contain typed color output, not raw "red"
-    assert!(output.contains("rgb(255,0,0)"), "Expected rgb color in output: {}", output);
-    assert!(output.contains("24px"), "Expected 24px font-size in output: {}", output);
-    assert!(output.contains("700"), "Expected 700 font-weight in output: {}", output);
+    assert!(
+        output.contains("rgb(255,0,0)"),
+        "Expected rgb color in output: {}",
+        output
+    );
+    assert!(
+        output.contains("24px"),
+        "Expected 24px font-size in output: {}",
+        output
+    );
+    assert!(
+        output.contains("700"),
+        "Expected 700 font-weight in output: {}",
+        output
+    );
 }

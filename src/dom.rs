@@ -36,24 +36,15 @@ pub enum NodeKind {
     /// An HTML element like <div>, <p>, <h1>, etc.
     /// tag_start..tag_end is the slice of the tag name in the source buffer
     /// e.g. for "<div>" → tag_start=1, tag_end=4 → "div"
-    Element {
-        tag_start: u32,
-        tag_end: u32,
-    },
+    Element { tag_start: u32, tag_end: u32 },
 
     /// Raw text content between tags
     /// e.g. for "<p>Hello</p>" → start points to 'H', end points past 'o'
-    Text {
-        start: u32,
-        end: u32,
-    },
+    Text { start: u32, end: u32 },
 
     /// A comment like <!-- ... -->
     /// start..end is the comment content (without the <!-- and --> markers)
-    Comment {
-        start: u32,
-        end: u32,
-    },
+    Comment { start: u32, end: u32 },
 }
 
 // ─── DOM Node ────────────────────────────────────────────────────
@@ -138,10 +129,7 @@ impl Dom {
             .collect();
 
         let node = Node {
-            kind: NodeKind::Element {
-                tag_start,
-                tag_end,
-            },
+            kind: NodeKind::Element { tag_start, tag_end },
             parent: Some(parent),
             children: Vec::new(),
             attributes,
@@ -225,13 +213,9 @@ impl Dom {
             NodeKind::Document => {
                 output.push_str(&format!("{}Document\n", indent));
             }
-            NodeKind::Element {
-                tag_start,
-                tag_end,
-            } => {
-                let tag_name =
-                    std::str::from_utf8(&source[*tag_start as usize..*tag_end as usize])
-                        .unwrap_or("???");
+            NodeKind::Element { tag_start, tag_end } => {
+                let tag_name = std::str::from_utf8(&source[*tag_start as usize..*tag_end as usize])
+                    .unwrap_or("???");
 
                 // Build attribute string for display
                 if node.attributes.is_empty() {
@@ -240,15 +224,13 @@ impl Dom {
                     let mut attr_parts = Vec::new();
                     for &(ns, ne, vs, ve) in &node.attributes {
                         let name =
-                            std::str::from_utf8(&source[ns as usize..ne as usize])
-                                .unwrap_or("???");
+                            std::str::from_utf8(&source[ns as usize..ne as usize]).unwrap_or("???");
                         if vs == 0 && ve == 0 {
                             // Attribute with no value (e.g. "disabled")
                             attr_parts.push(name.to_string());
                         } else {
-                            let value =
-                                std::str::from_utf8(&source[vs as usize..ve as usize])
-                                    .unwrap_or("???");
+                            let value = std::str::from_utf8(&source[vs as usize..ve as usize])
+                                .unwrap_or("???");
                             attr_parts.push(format!("{}=\"{}\"", name, value));
                         }
                     }
@@ -261,8 +243,8 @@ impl Dom {
                 }
             }
             NodeKind::Text { start, end } => {
-                let text = std::str::from_utf8(&source[*start as usize..*end as usize])
-                    .unwrap_or("???");
+                let text =
+                    std::str::from_utf8(&source[*start as usize..*end as usize]).unwrap_or("???");
                 // Trim whitespace for display, skip whitespace-only text nodes
                 let trimmed = text.trim();
                 if !trimmed.is_empty() {
@@ -270,8 +252,8 @@ impl Dom {
                 }
             }
             NodeKind::Comment { start, end } => {
-                let comment = std::str::from_utf8(&source[*start as usize..*end as usize])
-                    .unwrap_or("???");
+                let comment =
+                    std::str::from_utf8(&source[*start as usize..*end as usize]).unwrap_or("???");
                 output.push_str(&format!("{}Comment \"{}\"\n", indent, comment.trim()));
             }
         }

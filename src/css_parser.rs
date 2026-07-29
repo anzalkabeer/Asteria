@@ -396,8 +396,7 @@ impl<'a> CssParser<'a> {
     /// Get the source slice of the current token.
     fn current_slice(&self) -> &str {
         let token = &self.tokens[self.pos];
-        std::str::from_utf8(&self.source[token.start as usize..token.end as usize])
-            .unwrap_or("")
+        std::str::from_utf8(&self.source[token.start as usize..token.end as usize]).unwrap_or("")
     }
 
     /// Advance to the next token.

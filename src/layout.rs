@@ -156,12 +156,8 @@ impl<'a> LayoutBox<'a> {
         let border_top = style.map_or(0.0, |s| s.border_width.top);
         let border_bottom = style.map_or(0.0, |s| s.border_width.bottom);
 
-        let total_non_width = margin_left
-            + margin_right
-            + padding_left
-            + padding_right
-            + border_left
-            + border_right;
+        let total_non_width =
+            margin_left + margin_right + padding_left + padding_right + border_left + border_right;
 
         // Constraint solving: if width is auto, expand content width to fill containing block
         if auto_width {
@@ -223,7 +219,10 @@ impl<'a> LayoutBox<'a> {
     /// If children are InlineNodes, format them in a horizontal line box context.
     /// If children are BlockNodes, stack them vertically.
     fn layout_block_children(&mut self, dom: &Dom, source: &[u8]) {
-        let is_inline_context = self.children.iter().all(|c| c.box_type == BoxType::InlineNode);
+        let is_inline_context = self
+            .children
+            .iter()
+            .all(|c| c.box_type == BoxType::InlineNode);
 
         if is_inline_context && !self.children.is_empty() {
             // ─── Inline Formatting Context (Horizontal Line Flow) ───────────
@@ -253,8 +252,20 @@ impl<'a> LayoutBox<'a> {
                 let content_w = compute_intrinsic_inline_width(child.styled_node, dom, source);
                 let content_h = style.map_or(19.2, |s| s.line_height);
 
-                let outer_w = margin_left + border_left + padding_left + content_w + padding_right + border_right + margin_right;
-                let outer_h = margin_top + border_top + padding_top + content_h + padding_bottom + border_bottom + margin_bottom;
+                let outer_w = margin_left
+                    + border_left
+                    + padding_left
+                    + content_w
+                    + padding_right
+                    + border_right
+                    + margin_right;
+                let outer_h = margin_top
+                    + border_top
+                    + padding_top
+                    + content_h
+                    + padding_bottom
+                    + border_bottom
+                    + margin_bottom;
 
                 // Horizontal Line Wrap Check
                 if container_max_w > 0.0
@@ -272,9 +283,24 @@ impl<'a> LayoutBox<'a> {
                 child.dimensions.content.width = content_w;
                 child.dimensions.content.height = content_h;
 
-                child.dimensions.margin = EdgeSizes { top: margin_top, right: margin_right, bottom: margin_bottom, left: margin_left };
-                child.dimensions.padding = EdgeSizes { top: padding_top, right: padding_right, bottom: padding_bottom, left: padding_left };
-                child.dimensions.border = EdgeSizes { top: border_top, right: border_right, bottom: border_bottom, left: border_left };
+                child.dimensions.margin = EdgeSizes {
+                    top: margin_top,
+                    right: margin_right,
+                    bottom: margin_bottom,
+                    left: margin_left,
+                };
+                child.dimensions.padding = EdgeSizes {
+                    top: padding_top,
+                    right: padding_right,
+                    bottom: padding_bottom,
+                    left: padding_left,
+                };
+                child.dimensions.border = EdgeSizes {
+                    top: border_top,
+                    right: border_right,
+                    bottom: border_bottom,
+                    left: border_left,
+                };
 
                 // Recursively layout child's descendants
                 child.layout(child.dimensions, dom, source);
@@ -284,7 +310,8 @@ impl<'a> LayoutBox<'a> {
                 current_line_height = current_line_height.max(outer_h);
             }
 
-            self.dimensions.content.height = (cursor_y + current_line_height) - self.dimensions.content.y;
+            self.dimensions.content.height =
+                (cursor_y + current_line_height) - self.dimensions.content.y;
         } else {
             // ─── Block Formatting Context (Vertical Stack Flow) ──────────────
             let mut content_height = 0.0;
@@ -320,7 +347,11 @@ impl<'a> LayoutBox<'a> {
 }
 
 /// Compute intrinsic width for an inline styled node (text content length or child sum)
-fn compute_intrinsic_inline_width(styled_node: Option<&StyledNode>, dom: &Dom, source: &[u8]) -> f32 {
+fn compute_intrinsic_inline_width(
+    styled_node: Option<&StyledNode>,
+    dom: &Dom,
+    source: &[u8],
+) -> f32 {
     let Some(styled) = styled_node else {
         return 0.0;
     };
@@ -390,9 +421,8 @@ pub fn build_layout_tree<'a>(styled_node: &'a StyledNode) -> Option<LayoutBox<'a
                 }
                 final_children.push(child);
             } else {
-                let anon = anonymous_buffer.get_or_insert_with(|| {
-                    LayoutBox::new(BoxType::AnonymousBlock, None)
-                });
+                let anon = anonymous_buffer
+                    .get_or_insert_with(|| LayoutBox::new(BoxType::AnonymousBlock, None));
                 anon.children.push(child);
             }
         }
