@@ -1,5 +1,6 @@
 # Asteria Rendering Engine 🌠
-*(Codename: Antigravity)*
+
+_(Codename: Antigravity)_
 
 Asteria is a modular, zero-dependency web rendering engine written entirely from scratch in Rust.
 
@@ -36,8 +37,8 @@ CSS Bytes  ──► Tokenizer ──► Parser ──► Stylesheet
 
 The project is developed across two distinct engineering tracks:
 
-- **Engine Core & Runtime** (*Anzal*): HTML tokenizer & parser, DOM tree, CSS tokenizer/parser, style resolution, block/inline layout algorithms, paint display list, and wgpu rendering.
-- **Architecture & Infrastructure** (*Keshav*): Multi-threaded task scheduler, resource loader & cache, string interner, memory optimization, browser shell, and devtools overlays.
+- **Engine Core & Runtime** (_Anzal Kabeer_): HTML tokenizer & parser, DOM tree, CSS tokenizer/parser, style resolution, block/inline layout algorithms, paint display list, and wgpu rendering.
+- **Architecture & Infrastructure** (_Keshav Ghai_): Multi-threaded task scheduler, resource loader & cache, string interner, memory optimization, browser shell, and devtools overlays.
 
 ---
 
@@ -56,6 +57,7 @@ Here is where Asteria stands:
 ## 🛠️ Getting Started
 
 ### Prerequisites
+
 - [Rust 2024 edition](https://www.rust-lang.org/)
 
 ### Building & Running
