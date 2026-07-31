@@ -177,6 +177,29 @@ fn main() {
         {
             println!("\n── Layout Tree (2D Bounding Boxes & Coordinates) ───\n");
             layout_tree.print_tree(&dom, bytes);
+
+            // ─── Phase 5: Paint Engine (Generates Backend-Agnostic Display List) ─
+
+            let display_list = asteria::paint::build_display_list(&layout_tree, &dom, bytes);
+            println!("\n── Display List (Visual Draw Commands) ───\n");
+            asteria::paint::print_display_list(&display_list);
+
+            // ─── Phase 6: Scene Graph & Segment Builder (GPU-First Architecture) ─
+
+            let scene = asteria::scene::build_scene_graph(&display_list, 256.0);
+            println!("\n{}", scene);
+
+            let mut segments = asteria::segment::SegmentBuilder::new(256.0);
+            segments.build_segments(800.0, 600.0);
+            println!("{}", segments);
+
+            // Frame budget report
+            let budget = asteria::frame::FrameBudget::new_60hz();
+            println!(
+                "── Frame Budget ── target: {:.2}ms | remaining: {:.2}ms\n",
+                budget.target_ms,
+                budget.remaining(),
+            );
         }
     } else {
         println!("\n── No stylesheets found ────────────────────");
@@ -191,7 +214,7 @@ fn main() {
     );
     if !css_source.is_empty() {
         println!(
-            "  Full pipeline: Load → HTML Tokenize/Parse → CSS Parse → Cascade/Style → Layout Engine"
+            "  Full pipeline: Load → HTML → CSS → Style → Layout → Paint → Scene Graph → Segments"
         );
     }
     println!("═══════════════════════════════════════════════");

@@ -45,6 +45,11 @@ impl Color {
     pub const BLACK: Color = Color::rgb(0, 0, 0);
     /// Default background: transparent
     pub const TRANSPARENT: Color = Color::new(0, 0, 0, 0);
+
+    /// Return (r, g, b, a) tuple for GPU color conversion
+    pub const fn to_rgba(self) -> (u8, u8, u8, u8) {
+        (self.r, self.g, self.b, self.a)
+    }
 }
 
 impl std::fmt::Display for Color {
