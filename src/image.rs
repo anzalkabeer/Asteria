@@ -1,6 +1,7 @@
 //Engine-Side Image Decoder & Resource Pipeline 
 
 use std::collections::HashMap;
+use std::rc::Rc;
 use crate::paint::DisplayCommand;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -70,7 +71,7 @@ impl ImageDecoder {
 /// ImageCache caching boundary for ResourceLoader
 /// Flow: ResourceLoader -> ImageCache -> Already decoded? (Yes -> return, No -> decode & cache)
 pub struct ImageCache {
-    cache: HashMap<String, DecodeImage>,
+    cache: HashMap<String, Rc<DecodeImage>>,
     decoder: ImageDecoder,
 }
 
@@ -82,12 +83,12 @@ impl ImageCache {
         }
     }
 
-    pub fn get_or_decode(&mut self, id: &str, data: &[u8]) -> Result<DecodeImage, String> {
+    pub fn get_or_decode(&mut self, id: &str, data: &[u8]) -> Result<Rc<DecodeImage>, String> {
         if let Some(cached) = self.cache.get(id) {
-            return Ok(cached.clone());
+            return Ok(Rc::clone(cached));
         }
-        let decoded = self.decoder.decode_image(id, data)?;
-        self.cache.insert(id.to_string(), decoded.clone());
+        let decoded = Rc::new(self.decoder.decode_image(id, data)?);
+        self.cache.insert(id.to_string(), Rc::clone(&decoded));
         Ok(decoded)
     }
 
@@ -110,7 +111,7 @@ impl ImageCache {
         data: &[u8],
         image_rect: &crate::layout::Rect,
         viewport: &crate::layout::Rect,
-    ) -> Option<DecodeImage> {
+    ) -> Option<Rc<DecodeImage>> {
         // Visibility check: does the image box intersect the viewport?
         if !rects_intersect(image_rect, viewport) {
             return None; // Keep compressed — don't waste CPU/memory
@@ -141,6 +142,42 @@ fn parse_image_dimensions(format: ImageFormat, data: &[u8]) -> (u32, u32) {
             let width = u32::from_be_bytes([data[16], data[17], data[18], data[19]]);
             let height = u32::from_be_bytes([data[20], data[21], data[22], data[23]]);
             (width.max(1), height.max(1))
+        }
+        ImageFormat::Jpeg => {
+            let mut i = 2;
+            while i + 1 < data.len() {
+                if data[i] != 0xFF {
+                    break;
+                }
+                let marker = data[i + 1];
+                i += 2;
+
+                if marker == 0xD9 || marker == 0xDA {
+                    break; // End of image or start of scan
+                }
+
+                if i + 1 >= data.len() {
+                    break;
+                }
+                let length = u16::from_be_bytes([data[i], data[i + 1]]) as usize;
+                i += 2;
+
+                if length < 2 || i + length - 2 > data.len() {
+                    break;
+                }
+
+                if (0xC0..=0xC3).contains(&marker) || (0xC5..=0xC7).contains(&marker) || (0xC9..=0xCB).contains(&marker) || (0xCD..=0xCF).contains(&marker) {
+                    if i + 5 < data.len() {
+                        let height = u16::from_be_bytes([data[i + 1], data[i + 2]]) as u32;
+                        let width = u16::from_be_bytes([data[i + 3], data[i + 4]]) as u32;
+                        return (width.max(1), height.max(1));
+                    }
+                    break;
+                }
+
+                i += length - 2;
+            }
+            (300, 150)
         }
         ImageFormat::Bmp if data.len() >= 26 => {
             let width = u32::from_le_bytes([data[18], data[19], data[20], data[21]]);

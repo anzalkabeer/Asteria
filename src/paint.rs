@@ -163,10 +163,7 @@ fn render_children<'a>(
     display_list: &mut DisplayList,
 ) {
     for child in &layout_box.children {
-        render_background(child, display_list);
-        render_borders(child, display_list);
-        render_text(child, dom, source, display_list);
-        render_children(child, dom, source, display_list); // recursively render the children of the current box
+        render_layout_box(child, dom, source, display_list);
     }
 }
 

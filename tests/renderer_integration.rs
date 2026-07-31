@@ -245,7 +245,7 @@ fn test_build_scene_graph_from_display_list() {
 #[test]
 fn test_segment_builder_divides_viewport() {
     let mut builder = SegmentBuilder::new(256.0);
-    builder.build_segments(800.0, 1024.0);
+    builder.build_segments(800.0, 1024.0).expect("Invalid viewport dimensions");
 
     assert_eq!(builder.len(), 4); // 1024 / 256 = 4 segments
     assert_eq!(builder.segments[0].rect.y, 0.0);
@@ -260,7 +260,7 @@ fn test_segment_builder_divides_viewport() {
 #[test]
 fn test_segment_builder_dirty_rect_intersection() {
     let mut builder = SegmentBuilder::new(256.0);
-    builder.build_segments(800.0, 1024.0);
+    builder.build_segments(800.0, 1024.0).expect("Invalid viewport dimensions");
 
     // Mark all clean
     for i in 0..4 {

@@ -70,7 +70,12 @@ impl SegmentBuilder {
 
     /// Divide the viewport into horizontal segments.
     /// Called on window creation and on every resize event.
-    pub fn build_segments(&mut self, viewport_width: f32, viewport_height: f32) {
+    pub fn build_segments(&mut self, viewport_width: f32, viewport_height: f32) -> Result<(), String> {
+        if !viewport_width.is_finite() || !viewport_height.is_finite() {
+            return Err("Invalid viewport dimensions".into());
+        }
+
+        let previous_generations: Vec<u64> = self.segments.iter().map(|s| s.generation).collect();
         self.segments.clear();
         self.viewport_width = viewport_width;
         self.viewport_height = viewport_height;
@@ -80,6 +85,16 @@ impl SegmentBuilder {
 
         while y < viewport_height {
             let h = self.segment_height.min(viewport_height - y);
+            if id == u16::MAX && y + h < viewport_height {
+                return Err("Viewport height exceeds maximum segment count".to_string());
+            }
+
+            let generation = previous_generations
+                .get(id as usize)
+                .copied()
+                .unwrap_or(0)
+                .saturating_add(1);
+
             self.segments.push(ViewportSegment {
                 id,
                 rect: Rect {
@@ -89,11 +104,18 @@ impl SegmentBuilder {
                     height: h,
                 },
                 dirty: true, // First frame: everything is dirty
-                generation: 0,
+                generation,
             });
+
             y += h;
-            id += 1;
+            if y < viewport_height {
+                id = id
+                    .checked_add(1)
+                    .ok_or_else(|| String::from("Viewport height exceeds maximum segment count"))?;
+            }
         }
+
+        Ok(())
     }
 
     /// Mark all segments as dirty (used after full re-layout, e.g., window resize)
@@ -158,7 +180,7 @@ impl SegmentBuilder {
 
     /// Determine which segment ID a y-coordinate falls into
     pub fn segment_for_y(&self, y: f32) -> Option<u16> {
-        if self.segment_height <= 0.0 || y < 0.0 {
+        if self.segment_height <= 0.0 || !y.is_finite() || y < 0.0 || y >= self.viewport_height {
             return None;
         }
         let id = (y / self.segment_height) as u16;
