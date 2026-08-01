@@ -166,7 +166,11 @@ fn parse_image_dimensions(format: ImageFormat, data: &[u8]) -> (u32, u32) {
                     break;
                 }
 
-                if (0xC0..=0xC3).contains(&marker) || (0xC5..=0xC7).contains(&marker) || (0xC9..=0xCB).contains(&marker) || (0xCD..=0xCF).contains(&marker) {
+                if (0xC0..=0xC3).contains(&marker)
+                    || (0xC5..=0xC7).contains(&marker)
+                    || (0xC9..=0xCB).contains(&marker)
+                    || (0xCD..=0xCF).contains(&marker)
+                {
                     if i + 5 < data.len() {
                         let height = u16::from_be_bytes([data[i + 1], data[i + 2]]) as u32;
                         let width = u16::from_be_bytes([data[i + 3], data[i + 4]]) as u32;

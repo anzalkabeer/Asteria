@@ -142,10 +142,8 @@ impl SceneGraph {
 
     // ─── Incremental Invalidation (Pillar 3) ─────────────────────
 
-    /// Mark a node as dirty and propagate dirtiness up to available ancestors.
-    ///
-    /// DisplayList-derived scene graphs currently do not populate parent links,
-    /// so ancestor propagation only occurs when `SceneNode::parent` is set.
+    /// Mark a node as dirty and propagate dirtiness up to ancestors.
+    /// Only walks until it hits an already-dirty ancestor (early exit).
     pub fn invalidate(&mut self, node_id: SceneNodeId) {
         let idx = node_id.index();
         if idx >= self.nodes.len() {
@@ -153,7 +151,7 @@ impl SceneGraph {
         }
         self.nodes[idx].dirty = true;
 
-        // Walk up to root marking ancestors dirty when parent references are available.
+        // Walk up to root marking ancestors dirty
         let mut current = self.nodes[idx].parent;
         while let Some(parent_id) = current {
             let pidx = parent_id.index();

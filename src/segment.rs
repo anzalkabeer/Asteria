@@ -72,7 +72,7 @@ impl SegmentBuilder {
     /// Called on window creation and on every resize event.
     pub fn build_segments(&mut self, viewport_width: f32, viewport_height: f32) -> Result<(), String> {
         if !viewport_width.is_finite() || !viewport_height.is_finite() {
-            return Err("Invalid viewport dimensions".into());
+            return Err("Invalid viewport dimensions".to_string());
         }
 
         let previous_generations: Vec<u64> = self.segments.iter().map(|s| s.generation).collect();
@@ -106,7 +106,6 @@ impl SegmentBuilder {
                 dirty: true, // First frame: everything is dirty
                 generation,
             });
-
             y += h;
             if y < viewport_height {
                 id = id

@@ -29,6 +29,7 @@ impl FrameArena {
     pub fn alloc_typed<T: Copy + Default>(&mut self) -> Option<&mut T> {
         let size = std::mem::size_of::<T>();
         let align = std::mem::align_of::<T>();
+        
         let ptr = self.buffer.as_mut_ptr();
         let current_addr = unsafe { ptr.add(self.offset) } as usize;
         let aligned_addr = (current_addr + align - 1) & !(align - 1);
@@ -38,7 +39,7 @@ impl FrameArena {
             return None;
         }
         self.offset = align_offset + size;
-
+        
         unsafe {
             let obj_ptr = ptr.add(align_offset) as *mut T;
             obj_ptr.write(T::default());

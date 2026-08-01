@@ -19,7 +19,7 @@ fn main() {
 
     let mut loader = ResourceLoader::new();
 
-    let resources = if args.len() > 1 {
+    let resources = if args.len() > 1 && args[1] != "--window" {
         // Load HTML from file path — the loader handles discovery of
         // <style> blocks and <link rel="stylesheet"> references
         let path = &args[1];
@@ -32,8 +32,8 @@ fn main() {
         }
     } else {
         // No file provided — use a built-in sample with embedded CSS
-        println!("No file provided. Using built-in sample HTML.\n");
-        println!("Usage: cargo run -- <path-to-html-file>\n");
+        println!("No file provided (or only --window passed). Using built-in sample HTML.\n");
+        println!("Usage: cargo run -- <path-to-html-file> [--window]\n");
         loader.load_html_string(
             r#"<!DOCTYPE html>
 <html>
@@ -110,10 +110,21 @@ fn main() {
         }
     }
 
+    // ─── AOF Initialization ──────────────────────────────────────────
+    asteria::devtools::config::AofConfig::full_inspection().apply();
+    asteria::devtools::inspector::AofInspector::init(asteria::devtools::config::AofConfig::full_inspection());
+    asteria::devtools::trace::record_event(asteria::devtools::trace::TraceEventKind::FrameBegin { frame_id: 1 });
+    asteria::devtools::metrics::reset_frame_metrics();
+
     // ─── Phase 1: Parse into DOM ─────────────────────────────────
 
+    asteria::devtools::trace::record_event(asteria::devtools::trace::TraceEventKind::ParseStart);
     let parser = Parser::new(&tokens, bytes);
     let dom = parser.parse();
+    asteria::devtools::trace::record_event(asteria::devtools::trace::TraceEventKind::ParseEnd { 
+        node_count: dom.nodes.len(), 
+        duration_ms: 0.0, 
+    });
 
     println!(
         "\n── DOM Tree ({} nodes) ─────────────────────\n",
@@ -165,40 +176,82 @@ fn main() {
 
         // ─── Phase 3: Resolve Styles (with cascade + inheritance) ─
 
+        asteria::devtools::trace::record_event(asteria::devtools::trace::TraceEventKind::StyleStart);
         let styled = resolve_styles(&dom, &stylesheet, bytes);
+        asteria::devtools::trace::record_event(asteria::devtools::trace::TraceEventKind::StyleEnd {
+            styled_count: dom.nodes.len(),
+            duration_ms: 0.0,
+        });
 
         println!("\n── Styled DOM Tree (typed ComputedStyle) ───\n");
         styled.print_tree(&dom, bytes);
 
         // ─── Phase 4: Layout Engine (Calculates 2D Geometry & Box Model) ─
 
+        asteria::devtools::trace::record_event(asteria::devtools::trace::TraceEventKind::LayoutStart);
         if let Some(layout_tree) =
             asteria::layout::layout_document(&styled, &dom, bytes, 800.0, 600.0)
         {
+            asteria::devtools::trace::record_event(asteria::devtools::trace::TraceEventKind::LayoutEnd {
+                box_count: 0,
+                duration_ms: 0.0,
+            });
             println!("\n── Layout Tree (2D Bounding Boxes & Coordinates) ───\n");
             layout_tree.print_tree(&dom, bytes);
 
             // ─── Phase 5: Paint Engine (Generates Backend-Agnostic Display List) ─
-
-            let mut budget = asteria::frame::FrameBudget::new_60hz();
+            
+            asteria::devtools::trace::record_event(asteria::devtools::trace::TraceEventKind::PaintStart);
             let display_list = asteria::paint::build_display_list(&layout_tree, &dom, bytes);
+            asteria::devtools::trace::record_event(asteria::devtools::trace::TraceEventKind::PaintEnd {
+                command_count: display_list.commands.len(),
+                duration_ms: 0.0,
+            });
             println!("\n── Display List (Visual Draw Commands) ───\n");
             asteria::paint::print_display_list(&display_list);
 
             // ─── Phase 6: Scene Graph & Segment Builder (GPU-First Architecture) ─
-
+            
+            asteria::devtools::trace::record_event(asteria::devtools::trace::TraceEventKind::SceneStart);
             let scene = asteria::scene::build_scene_graph(&display_list, 256.0);
+            asteria::devtools::trace::record_event(asteria::devtools::trace::TraceEventKind::SceneEnd {
+                node_count: scene.len(),
+                duration_ms: 0.0,
+            });
             println!("\n{}", scene);
 
             let mut segments = asteria::segment::SegmentBuilder::new(256.0);
             segments.build_segments(800.0, 600.0).expect("Invalid viewport dimensions");
             println!("{}", segments);
 
-            // Frame budget report
-            println!(
-                "── Frame Budget ── target: {:.2}ms | remaining: {:.2}ms\n",
-                budget.target_ms,
-                budget.remaining(),
+            if args.contains(&"--window".to_string()) {
+                println!("\n── Launching Hardware Renderer (wgpu) ─────────");
+                asteria::renderer::window::window::run_window_loop(scene);
+                return;
+            }
+
+            // ─── AOF Inspection ───────────────────────────────────────────────
+            asteria::devtools::trace::record_event(asteria::devtools::trace::TraceEventKind::FrameEnd { 
+                frame_id: 1, 
+                duration_ms: 0.0, 
+            });
+
+            let snapshot = asteria::devtools::snapshot::EngineSnapshot::new()
+                .with_dom(&dom)
+                .with_style(&styled)
+                .with_layout(&layout_tree)
+                .with_scene(&scene)
+                .with_segments(&segments);
+
+            let mut energy = asteria::devtools::metrics::EnergyDiagnostics::new();
+            energy.allocations = asteria::devtools::metrics::MEMORY_ALLOCATED.load(std::sync::atomic::Ordering::Relaxed);
+            energy.gpu_uploads = asteria::devtools::metrics::GPU_VRAM_USED.load(std::sync::atomic::Ordering::Relaxed);
+            energy.impact = energy.analyze_impact();
+
+            asteria::devtools::inspector::AofInspector::inspect(
+                snapshot, 
+                &energy, 
+                "trace.json"
             );
         }
     } else {
