@@ -13,6 +13,7 @@ pub mod loader;
 pub mod paint;
 pub mod parser;
 pub mod pool;
+pub mod profiler;
 pub mod properties;
 pub mod renderer;
 pub mod scene;
