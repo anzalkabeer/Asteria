@@ -4,7 +4,7 @@
 // and DecodedImageToDisplayCommand integration.
 
 use asteria::image::{
-    DecodedImageToDisplayCommand, DetectImageFormat, DecodeImage, ImageCache, ImageFormat,
+    DecodeImage, DecodedImageToDisplayCommand, DetectImageFormat, ImageCache, ImageFormat,
 };
 use asteria::paint::DisplayCommand;
 
@@ -24,9 +24,9 @@ fn test_detect_image_format() {
 fn test_image_cache_boundary_hit_and_miss() {
     let mut cache = ImageCache::new();
     let fake_png = [
-        0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A, 0, 0, 0, 0, 0, 0, 0, 0,
-        0, 0, 0, 100, // width: 100
-        0, 0, 0, 50,  // height: 50
+        0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        100, // width: 100
+        0, 0, 0, 50, // height: 50
     ];
 
     // Cache miss -> decode and store
@@ -52,7 +52,14 @@ fn test_decoded_image_to_display_command() {
     };
 
     let cmd = DecodedImageToDisplayCommand(&img, 10.0, 20.0);
-    if let DisplayCommand::Image { image_id, x, y, width, height } = cmd {
+    if let DisplayCommand::Image {
+        image_id,
+        x,
+        y,
+        width,
+        height,
+    } = cmd
+    {
         assert_eq!(image_id, "hero.png");
         assert_eq!(x, 10.0);
         assert_eq!(y, 20.0);

@@ -1,5 +1,5 @@
-use crate::renderer::graph::render_pass::RenderPass;
 use crate::renderer::commands::batch_builder::{BatchBuilder, Vertex};
+use crate::renderer::graph::render_pass::RenderPass;
 use wgpu::util::DeviceExt;
 
 pub struct RectPass {
@@ -16,11 +16,12 @@ impl RectPass {
             source: wgpu::ShaderSource::Wgsl(include_str!("shader.wgsl").into()),
         });
 
-        let render_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("Rect Pipeline Layout"),
-            bind_group_layouts: &[],
-            push_constant_ranges: &[],
-        });
+        let render_pipeline_layout =
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("Rect Pipeline Layout"),
+                bind_group_layouts: &[],
+                push_constant_ranges: &[],
+            });
 
         let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("Rect Render Pipeline"),
@@ -77,17 +78,21 @@ impl RectPass {
             return;
         }
 
-        self.vertex_buffer = Some(device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Rect Vertex Buffer"),
-            contents: bytemuck::cast_slice(&batch.vertices),
-            usage: wgpu::BufferUsages::VERTEX,
-        }));
+        self.vertex_buffer = Some(
+            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("Rect Vertex Buffer"),
+                contents: bytemuck::cast_slice(&batch.vertices),
+                usage: wgpu::BufferUsages::VERTEX,
+            }),
+        );
 
-        self.index_buffer = Some(device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Rect Index Buffer"),
-            contents: bytemuck::cast_slice(&batch.indices),
-            usage: wgpu::BufferUsages::INDEX,
-        }));
+        self.index_buffer = Some(
+            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("Rect Index Buffer"),
+                contents: bytemuck::cast_slice(&batch.indices),
+                usage: wgpu::BufferUsages::INDEX,
+            }),
+        );
 
         self.num_indices = batch.indices.len() as u32;
     }

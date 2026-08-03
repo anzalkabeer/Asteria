@@ -1,8 +1,8 @@
-//Engine-Side Image Decoder & Resource Pipeline 
+//Engine-Side Image Decoder & Resource Pipeline
 
+use crate::paint::DisplayCommand;
 use std::collections::HashMap;
 use std::rc::Rc;
-use crate::paint::DisplayCommand;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ImageFormat {
@@ -33,9 +33,14 @@ pub fn DetectImageFormat(data: &[u8]) -> Option<ImageFormat> {
         Some(ImageFormat::Bmp)
     } else if data.starts_with(&[b'G', b'I', b'F']) {
         Some(ImageFormat::Gif)
-    } else if data.starts_with(&[b'R', b'I', b'F', b'F']) && data.len() > 8 && &data[8..12] == b"WEBP" {
+    } else if data.starts_with(&[b'R', b'I', b'F', b'F'])
+        && data.len() >= 12
+        && &data[8..12] == b"WEBP"
+    {
         Some(ImageFormat::WebP)
-    } else if data.starts_with(&[b'I', b'I', 0x2A, 0x00]) || data.starts_with(&[b'M', b'M', 0x00, 0x2A]) {
+    } else if data.starts_with(&[b'I', b'I', 0x2A, 0x00])
+        || data.starts_with(&[b'M', b'M', 0x00, 0x2A])
+    {
         Some(ImageFormat::Tiff)
     } else if data.starts_with(b"<?xml") || data.windows(5).any(|window| window == b"<svg ") {
         Some(ImageFormat::Svg)
@@ -55,7 +60,8 @@ impl ImageDecoder {
         // Implement the image decoding logic here
         // For example, you can use the `image` crate to decode the image data
         // and return a DecodeImage struct with the decoded information.
-        let format = DetectImageFormat(data).ok_or_else(|| format!("Unknown image format for '{}'", id))?;
+        let format =
+            DetectImageFormat(data).ok_or_else(|| format!("Unknown image format for '{}'", id))?;
         let (width, height) = parse_image_dimensions(format, data);
 
         Ok(DecodeImage {
@@ -123,10 +129,7 @@ impl ImageCache {
 
 /// Check if two rectangles intersect (used for viewport visibility testing)
 fn rects_intersect(a: &crate::layout::Rect, b: &crate::layout::Rect) -> bool {
-    a.x < b.x + b.width
-        && a.x + a.width > b.x
-        && a.y < b.y + b.height
-        && a.y + a.height > b.y
+    a.x < b.x + b.width && a.x + a.width > b.x && a.y < b.y + b.height && a.y + a.height > b.y
 }
 
 impl Default for ImageCache {

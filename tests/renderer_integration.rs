@@ -4,15 +4,15 @@
 // FrameBudget, TaskScheduler, and lazy image decoding.
 // All tests in separate file per project convention.
 
-use asteria::cache::LruCache;
-use asteria::pool::Pool;
 use asteria::arena::FrameArena;
+use asteria::cache::LruCache;
 use asteria::frame::{FrameBudget, FrameTimer};
-use asteria::scheduler::{TaskScheduler, TaskPriority};
-use asteria::scene::{SceneGraph, SceneNode, SceneNodeKind, SceneNodeId, build_scene_graph};
-use asteria::segment::SegmentBuilder;
 use asteria::layout::Rect;
-use asteria::paint::{DisplayList, DisplayCommand};
+use asteria::paint::{DisplayCommand, DisplayList};
+use asteria::pool::Pool;
+use asteria::scene::{SceneGraph, SceneNode, SceneNodeId, SceneNodeKind, build_scene_graph};
+use asteria::scheduler::{TaskPriority, TaskScheduler};
+use asteria::segment::SegmentBuilder;
 use asteria::values::Color;
 
 // ─── Pool Tests ──────────────────────────────────────────────────
@@ -155,7 +155,12 @@ fn test_scene_graph_flat_storage() {
 
     let id = scene.push(
         SceneNode {
-            rect: Rect { x: 0.0, y: 0.0, width: 100.0, height: 50.0 },
+            rect: Rect {
+                x: 0.0,
+                y: 0.0,
+                width: 100.0,
+                height: 50.0,
+            },
             kind: SceneNodeKind::SolidRect,
             parent: None,
             z_order: 0,
@@ -177,7 +182,12 @@ fn test_scene_graph_dirty_propagation() {
     // Parent node
     let parent_id = scene.push(
         SceneNode {
-            rect: Rect { x: 0.0, y: 0.0, width: 800.0, height: 600.0 },
+            rect: Rect {
+                x: 0.0,
+                y: 0.0,
+                width: 800.0,
+                height: 600.0,
+            },
             kind: SceneNodeKind::Container,
             parent: None,
             z_order: 0,
@@ -191,7 +201,12 @@ fn test_scene_graph_dirty_propagation() {
     // Child node
     let child_id = scene.push(
         SceneNode {
-            rect: Rect { x: 10.0, y: 10.0, width: 100.0, height: 50.0 },
+            rect: Rect {
+                x: 10.0,
+                y: 10.0,
+                width: 100.0,
+                height: 50.0,
+            },
             kind: SceneNodeKind::SolidRect,
             parent: Some(parent_id),
             z_order: 1,
@@ -218,7 +233,12 @@ fn test_build_scene_graph_from_display_list() {
     let mut list = DisplayList::default();
     list.commands.push(DisplayCommand::SolidColor {
         color: Color::rgb(255, 0, 0),
-        rect: Rect { x: 0.0, y: 0.0, width: 800.0, height: 100.0 },
+        rect: Rect {
+            x: 0.0,
+            y: 0.0,
+            width: 800.0,
+            height: 100.0,
+        },
     });
     list.commands.push(DisplayCommand::Text {
         text: "Hello".into(),
@@ -245,7 +265,9 @@ fn test_build_scene_graph_from_display_list() {
 #[test]
 fn test_segment_builder_divides_viewport() {
     let mut builder = SegmentBuilder::new(256.0);
-    builder.build_segments(800.0, 1024.0).expect("Invalid viewport dimensions");
+    builder
+        .build_segments(800.0, 1024.0)
+        .expect("Invalid viewport dimensions");
 
     assert_eq!(builder.len(), 4); // 1024 / 256 = 4 segments
     assert_eq!(builder.segments[0].rect.y, 0.0);
@@ -260,7 +282,9 @@ fn test_segment_builder_divides_viewport() {
 #[test]
 fn test_segment_builder_dirty_rect_intersection() {
     let mut builder = SegmentBuilder::new(256.0);
-    builder.build_segments(800.0, 1024.0).expect("Invalid viewport dimensions");
+    builder
+        .build_segments(800.0, 1024.0)
+        .expect("Invalid viewport dimensions");
 
     // Mark all clean
     for i in 0..4 {
@@ -289,22 +313,38 @@ fn test_segment_builder_dirty_rect_intersection() {
 fn test_lazy_decode_skips_offscreen_images() {
     let mut cache = asteria::image::ImageCache::new();
     let fake_png = [
-        0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A, 0, 0, 0, 0, 0, 0, 0, 0,
-        0, 0, 0, 100,
-        0, 0, 0, 50,
+        0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 100, 0, 0,
+        0, 50,
     ];
 
-    let viewport = Rect { x: 0.0, y: 0.0, width: 800.0, height: 600.0 };
+    let viewport = Rect {
+        x: 0.0,
+        y: 0.0,
+        width: 800.0,
+        height: 600.0,
+    };
 
     // Image far below viewport — should NOT decode
-    let offscreen_rect = Rect { x: 0.0, y: 2000.0, width: 100.0, height: 50.0 };
-    let result = cache.get_or_decode_if_visible("offscreen.png", &fake_png, &offscreen_rect, &viewport);
+    let offscreen_rect = Rect {
+        x: 0.0,
+        y: 2000.0,
+        width: 100.0,
+        height: 50.0,
+    };
+    let result =
+        cache.get_or_decode_if_visible("offscreen.png", &fake_png, &offscreen_rect, &viewport);
     assert!(result.is_none());
     assert_eq!(cache.len(), 0); // Nothing cached
 
     // Image inside viewport — SHOULD decode
-    let onscreen_rect = Rect { x: 10.0, y: 10.0, width: 100.0, height: 50.0 };
-    let result = cache.get_or_decode_if_visible("onscreen.png", &fake_png, &onscreen_rect, &viewport);
+    let onscreen_rect = Rect {
+        x: 10.0,
+        y: 10.0,
+        width: 100.0,
+        height: 50.0,
+    };
+    let result =
+        cache.get_or_decode_if_visible("onscreen.png", &fake_png, &onscreen_rect, &viewport);
     assert!(result.is_some());
     assert_eq!(cache.len(), 1);
 }

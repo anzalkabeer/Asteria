@@ -15,10 +15,7 @@ use crate::values::Color;
 #[derive(Debug, Clone, PartialEq)]
 pub enum DisplayCommand {
     /// here i have to write the solidcolor enum variant for the display command
-    SolidColor {
-        color: Color,
-        rect: Rect,
-    },
+    SolidColor { color: Color, rect: Rect },
     /// drawing the ofour edges
     Border {
         color: Color,
@@ -123,12 +120,7 @@ fn render_borders(layout_box: &LayoutBox, display_list: &mut DisplayList) {
     }
 }
 
-fn render_text(
-    layout_box: &LayoutBox,
-    dom: &Dom,
-    source: &[u8],
-    display_list: &mut DisplayList,
-) {
+fn render_text(layout_box: &LayoutBox, dom: &Dom, source: &[u8], display_list: &mut DisplayList) {
     let Some(styled) = layout_box.styled_node else {
         return;
     };
@@ -187,7 +179,15 @@ impl fmt::Display for DisplayCommand {
                 write!(
                     f,
                     "Border rect=(x: {:.1}, y: {:.1}, w: {:.1}, h: {:.1}) widths=(L{:.1} R{:.1} T{:.1} B{:.1}) color={}",
-                    rect.x, rect.y, rect.width, rect.height, border_width.left, border_width.right, border_width.top, border_width.bottom, color
+                    rect.x,
+                    rect.y,
+                    rect.width,
+                    rect.height,
+                    border_width.left,
+                    border_width.right,
+                    border_width.top,
+                    border_width.bottom,
+                    color
                 )
             }
             DisplayCommand::Text {
@@ -222,7 +222,10 @@ impl fmt::Display for DisplayCommand {
 
 pub fn print_display_list(list: &DisplayList) {
     //printing header
-    println!("── Display List ({} commands) ─────────────────\n", list.commands.len());
+    println!(
+        "── Display List ({} commands) ─────────────────\n",
+        list.commands.len()
+    );
     for (i, command) in list.commands.iter().enumerate() {
         println!("  [{:>2}] {}", i, command);
     }

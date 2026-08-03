@@ -3,8 +3,8 @@
 // Converts internal snapshots and metrics into terminal ASCII reports.
 // Does NOT run if telemetry is disabled.
 
+use crate::devtools::metrics::{EnergyDiagnostics, EnergyImpact, GPU_VRAM_USED, MEMORY_ALLOCATED};
 use crate::devtools::snapshot::EngineSnapshot;
-use crate::devtools::metrics::{EnergyDiagnostics, EnergyImpact, MEMORY_ALLOCATED, GPU_VRAM_USED};
 use std::sync::atomic::Ordering;
 
 pub fn format_memory_inspector() -> String {
@@ -58,7 +58,7 @@ pub fn format_segment_inspector(snapshot: &EngineSnapshot) -> String {
         output.push_str("  ┌─────────┬──────────────────────────┬────────┬──────────┐\n");
         output.push_str("  │ Tile ID │ Y-Range                  │ Status │ Gen      │\n");
         output.push_str("  ├─────────┼──────────────────────────┼────────┼──────────┤\n");
-        
+
         for seg in &segments.segments {
             let status = if seg.dirty { "DIRTY " } else { "CLEAN " };
             let row = format!(

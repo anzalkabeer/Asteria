@@ -1,5 +1,5 @@
-use wgpu::util::DeviceExt;
 use std::collections::VecDeque;
+use wgpu::util::DeviceExt;
 
 pub struct BufferPool {
     free_vertex_buffers: VecDeque<wgpu::Buffer>,

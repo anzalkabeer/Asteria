@@ -29,7 +29,7 @@ impl<T: Default> Pool<T> {
     pub fn len(&self) -> usize {
         self.free_list.len()
     }
-    
+
     /// Returns true if there are no items currently available in the free list.
     pub fn is_empty(&self) -> bool {
         self.free_list.is_empty()

@@ -32,11 +32,11 @@ impl FrameBudget {
 
     /// The total ms spent in tracked stages so far in the current frame
     pub fn total_used(&self) -> f64 {
-        self.input_ms 
-            + self.style_ms 
-            + self.layout_ms 
-            + self.paint_ms 
-            + self.gpu_upload_ms 
+        self.input_ms
+            + self.style_ms
+            + self.layout_ms
+            + self.paint_ms
+            + self.gpu_upload_ms
             + self.present_ms
     }
 
@@ -59,7 +59,7 @@ impl FrameBudget {
             "paint" => self.paint_ms += duration_ms,
             "gpu_upload" => self.gpu_upload_ms += duration_ms,
             "present" => self.present_ms += duration_ms,
-            _ => {} 
+            _ => {}
         }
     }
 

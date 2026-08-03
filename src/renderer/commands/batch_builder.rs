@@ -30,16 +30,32 @@ impl BatchBuilder {
 
                 // 4 corners of the quad
                 let (x, y, w, h) = (rect[0], rect[1], rect[2], rect[3]);
-                
-                self.vertices.push(Vertex { position: [x, y], color: *rgba });
-                self.vertices.push(Vertex { position: [x + w, y], color: *rgba });
-                self.vertices.push(Vertex { position: [x + w, y + h], color: *rgba });
-                self.vertices.push(Vertex { position: [x, y + h], color: *rgba });
+
+                self.vertices.push(Vertex {
+                    position: [x, y],
+                    color: *rgba,
+                });
+                self.vertices.push(Vertex {
+                    position: [x + w, y],
+                    color: *rgba,
+                });
+                self.vertices.push(Vertex {
+                    position: [x + w, y + h],
+                    color: *rgba,
+                });
+                self.vertices.push(Vertex {
+                    position: [x, y + h],
+                    color: *rgba,
+                });
 
                 // 2 triangles per quad
                 self.indices.extend_from_slice(&[
-                    base_idx, base_idx + 1, base_idx + 2,
-                    base_idx, base_idx + 2, base_idx + 3,
+                    base_idx,
+                    base_idx + 1,
+                    base_idx + 2,
+                    base_idx,
+                    base_idx + 2,
+                    base_idx + 3,
                 ]);
             }
         }

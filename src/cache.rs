@@ -30,16 +30,18 @@ impl<K: Eq + Hash + Clone, V> LruCache<K, V> {
     /// Insert a value into the cache, evicting the least recently used item if full.
     pub fn insert(&mut self, key: K, value: V) {
         self.clock += 1;
-        
+
         if self.map.len() >= self.max_entries && !self.map.contains_key(&key) {
-            if let Some(lru_key) = self.map.iter()
+            if let Some(lru_key) = self
+                .map
+                .iter()
                 .min_by_key(|(_, (_, ts))| *ts)
-                .map(|(k, _)| k.clone()) 
+                .map(|(k, _)| k.clone())
             {
                 self.map.remove(&lru_key);
             }
         }
-        
+
         self.map.insert(key, (value, self.clock));
     }
 
@@ -52,7 +54,7 @@ impl<K: Eq + Hash + Clone, V> LruCache<K, V> {
     pub fn len(&self) -> usize {
         self.map.len()
     }
-    
+
     /// Is the cache empty?
     pub fn is_empty(&self) -> bool {
         self.map.is_empty()

@@ -112,8 +112,12 @@ fn main() {
 
     // ─── AOF Initialization ──────────────────────────────────────────
     asteria::devtools::config::AofConfig::full_inspection().apply();
-    asteria::devtools::inspector::AofInspector::init(asteria::devtools::config::AofConfig::full_inspection());
-    asteria::devtools::trace::record_event(asteria::devtools::trace::TraceEventKind::FrameBegin { frame_id: 1 });
+    asteria::devtools::inspector::AofInspector::init(
+        asteria::devtools::config::AofConfig::full_inspection(),
+    );
+    asteria::devtools::trace::record_event(asteria::devtools::trace::TraceEventKind::FrameBegin {
+        frame_id: 1,
+    });
     asteria::devtools::metrics::reset_frame_metrics();
 
     // ─── Phase 1: Parse into DOM ─────────────────────────────────
@@ -121,9 +125,9 @@ fn main() {
     asteria::devtools::trace::record_event(asteria::devtools::trace::TraceEventKind::ParseStart);
     let parser = Parser::new(&tokens, bytes);
     let dom = parser.parse();
-    asteria::devtools::trace::record_event(asteria::devtools::trace::TraceEventKind::ParseEnd { 
-        node_count: dom.nodes.len(), 
-        duration_ms: 0.0, 
+    asteria::devtools::trace::record_event(asteria::devtools::trace::TraceEventKind::ParseEnd {
+        node_count: dom.nodes.len(),
+        duration_ms: 0.0,
     });
 
     println!(
@@ -176,52 +180,70 @@ fn main() {
 
         // ─── Phase 3: Resolve Styles (with cascade + inheritance) ─
 
-        asteria::devtools::trace::record_event(asteria::devtools::trace::TraceEventKind::StyleStart);
+        asteria::devtools::trace::record_event(
+            asteria::devtools::trace::TraceEventKind::StyleStart,
+        );
         let styled = resolve_styles(&dom, &stylesheet, bytes);
-        asteria::devtools::trace::record_event(asteria::devtools::trace::TraceEventKind::StyleEnd {
-            styled_count: dom.nodes.len(),
-            duration_ms: 0.0,
-        });
+        asteria::devtools::trace::record_event(
+            asteria::devtools::trace::TraceEventKind::StyleEnd {
+                styled_count: dom.nodes.len(),
+                duration_ms: 0.0,
+            },
+        );
 
         println!("\n── Styled DOM Tree (typed ComputedStyle) ───\n");
         styled.print_tree(&dom, bytes);
 
         // ─── Phase 4: Layout Engine (Calculates 2D Geometry & Box Model) ─
 
-        asteria::devtools::trace::record_event(asteria::devtools::trace::TraceEventKind::LayoutStart);
+        asteria::devtools::trace::record_event(
+            asteria::devtools::trace::TraceEventKind::LayoutStart,
+        );
         if let Some(layout_tree) =
             asteria::layout::layout_document(&styled, &dom, bytes, 800.0, 600.0)
         {
-            asteria::devtools::trace::record_event(asteria::devtools::trace::TraceEventKind::LayoutEnd {
-                box_count: 0,
-                duration_ms: 0.0,
-            });
+            asteria::devtools::trace::record_event(
+                asteria::devtools::trace::TraceEventKind::LayoutEnd {
+                    box_count: 0,
+                    duration_ms: 0.0,
+                },
+            );
             println!("\n── Layout Tree (2D Bounding Boxes & Coordinates) ───\n");
             layout_tree.print_tree(&dom, bytes);
 
             // ─── Phase 5: Paint Engine (Generates Backend-Agnostic Display List) ─
-            
-            asteria::devtools::trace::record_event(asteria::devtools::trace::TraceEventKind::PaintStart);
+
+            asteria::devtools::trace::record_event(
+                asteria::devtools::trace::TraceEventKind::PaintStart,
+            );
             let display_list = asteria::paint::build_display_list(&layout_tree, &dom, bytes);
-            asteria::devtools::trace::record_event(asteria::devtools::trace::TraceEventKind::PaintEnd {
-                command_count: display_list.commands.len(),
-                duration_ms: 0.0,
-            });
+            asteria::devtools::trace::record_event(
+                asteria::devtools::trace::TraceEventKind::PaintEnd {
+                    command_count: display_list.commands.len(),
+                    duration_ms: 0.0,
+                },
+            );
             println!("\n── Display List (Visual Draw Commands) ───\n");
             asteria::paint::print_display_list(&display_list);
 
             // ─── Phase 6: Scene Graph & Segment Builder (GPU-First Architecture) ─
-            
-            asteria::devtools::trace::record_event(asteria::devtools::trace::TraceEventKind::SceneStart);
+
+            asteria::devtools::trace::record_event(
+                asteria::devtools::trace::TraceEventKind::SceneStart,
+            );
             let scene = asteria::scene::build_scene_graph(&display_list, 256.0);
-            asteria::devtools::trace::record_event(asteria::devtools::trace::TraceEventKind::SceneEnd {
-                node_count: scene.len(),
-                duration_ms: 0.0,
-            });
+            asteria::devtools::trace::record_event(
+                asteria::devtools::trace::TraceEventKind::SceneEnd {
+                    node_count: scene.len(),
+                    duration_ms: 0.0,
+                },
+            );
             println!("\n{}", scene);
 
             let mut segments = asteria::segment::SegmentBuilder::new(256.0);
-            segments.build_segments(800.0, 600.0).expect("Invalid viewport dimensions");
+            segments
+                .build_segments(800.0, 600.0)
+                .expect("Invalid viewport dimensions");
             println!("{}", segments);
 
             if args.contains(&"--window".to_string()) {
@@ -231,10 +253,12 @@ fn main() {
             }
 
             // ─── AOF Inspection ───────────────────────────────────────────────
-            asteria::devtools::trace::record_event(asteria::devtools::trace::TraceEventKind::FrameEnd { 
-                frame_id: 1, 
-                duration_ms: 0.0, 
-            });
+            asteria::devtools::trace::record_event(
+                asteria::devtools::trace::TraceEventKind::FrameEnd {
+                    frame_id: 1,
+                    duration_ms: 0.0,
+                },
+            );
 
             let snapshot = asteria::devtools::snapshot::EngineSnapshot::new()
                 .with_dom(&dom)
@@ -244,15 +268,13 @@ fn main() {
                 .with_segments(&segments);
 
             let mut energy = asteria::devtools::metrics::EnergyDiagnostics::new();
-            energy.allocations = asteria::devtools::metrics::MEMORY_ALLOCATED.load(std::sync::atomic::Ordering::Relaxed);
-            energy.gpu_uploads = asteria::devtools::metrics::GPU_VRAM_USED.load(std::sync::atomic::Ordering::Relaxed);
+            energy.allocations = asteria::devtools::metrics::MEMORY_ALLOCATED
+                .load(std::sync::atomic::Ordering::Relaxed);
+            energy.gpu_uploads = asteria::devtools::metrics::GPU_VRAM_USED
+                .load(std::sync::atomic::Ordering::Relaxed);
             energy.impact = energy.analyze_impact();
 
-            asteria::devtools::inspector::AofInspector::inspect(
-                snapshot, 
-                &energy, 
-                "trace.json"
-            );
+            asteria::devtools::inspector::AofInspector::inspect(snapshot, &energy, "trace.json");
         }
     } else {
         println!("\n── No stylesheets found ────────────────────");

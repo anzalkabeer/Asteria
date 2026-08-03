@@ -70,7 +70,11 @@ impl SegmentBuilder {
 
     /// Divide the viewport into horizontal segments.
     /// Called on window creation and on every resize event.
-    pub fn build_segments(&mut self, viewport_width: f32, viewport_height: f32) -> Result<(), String> {
+    pub fn build_segments(
+        &mut self,
+        viewport_width: f32,
+        viewport_height: f32,
+    ) -> Result<(), String> {
         if !viewport_width.is_finite() || !viewport_height.is_finite() {
             return Err("Invalid viewport dimensions".to_string());
         }
@@ -201,10 +205,7 @@ impl Default for SegmentBuilder {
 
 /// Check if two rectangles intersect (shared by segment and image modules)
 pub fn rects_intersect(a: &Rect, b: &Rect) -> bool {
-    a.x < b.x + b.width
-        && a.x + a.width > b.x
-        && a.y < b.y + b.height
-        && a.y + a.height > b.y
+    a.x < b.x + b.width && a.x + a.width > b.x && a.y < b.y + b.height && a.y + a.height > b.y
 }
 
 // ─── Display ─────────────────────────────────────────────────────

@@ -1,6 +1,6 @@
-use asteria::devtools::config::{AofConfig, AOF_ENABLED};
-use asteria::devtools::trace::{record_event, trace_recorder, TraceEventKind};
+use asteria::devtools::config::{AOF_ENABLED, AofConfig};
 use asteria::devtools::export::export_chrome_trace;
+use asteria::devtools::trace::{TraceEventKind, record_event, trace_recorder};
 use std::fs;
 use std::sync::atomic::Ordering;
 
@@ -28,8 +28,14 @@ fn test_observability_trace_recording_and_export() {
 
     record_event(TraceEventKind::FrameBegin { frame_id: 100 });
     record_event(TraceEventKind::LayoutStart);
-    record_event(TraceEventKind::LayoutEnd { box_count: 50, duration_ms: 2.5 });
-    record_event(TraceEventKind::FrameEnd { frame_id: 100, duration_ms: 3.0 });
+    record_event(TraceEventKind::LayoutEnd {
+        box_count: 50,
+        duration_ms: 2.5,
+    });
+    record_event(TraceEventKind::FrameEnd {
+        frame_id: 100,
+        duration_ms: 3.0,
+    });
 
     let recorder = trace_recorder().lock().unwrap();
     assert_eq!(recorder.events.len(), 4);
@@ -41,7 +47,7 @@ fn test_observability_trace_recording_and_export() {
     let json_content = fs::read_to_string(test_file).expect("Failed to read JSON");
     assert!(json_content.contains("\"name\": \"Frame\", \"cat\": \"engine\", \"ph\": \"B\""));
     assert!(json_content.contains("\"name\": \"Layout\", \"cat\": \"engine\", \"ph\": \"B\""));
-    
+
     // Cleanup
     let _ = fs::remove_file(test_file);
 }

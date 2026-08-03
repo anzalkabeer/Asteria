@@ -1,8 +1,16 @@
 use crate::scene::{SceneGraph, SceneNode};
 
 pub enum RenderCommand {
-    SolidRect { rect: [f32; 4], rgba: [f32; 4] },
-    Text { text: String, rect: [f32; 4], rgba: [f32; 4], font_size: f32 },
+    SolidRect {
+        rect: [f32; 4],
+        rgba: [f32; 4],
+    },
+    Text {
+        text: String,
+        rect: [f32; 4],
+        rgba: [f32; 4],
+        font_size: f32,
+    },
     // Image { rect: [f32; 4], image_id: String },
 }
 

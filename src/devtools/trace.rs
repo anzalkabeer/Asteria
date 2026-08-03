@@ -3,9 +3,9 @@
 // Records timeline events without any formatting.
 // Used to reconstruct the exact execution flow of the engine.
 
-use std::time::Instant;
-use std::sync::{Mutex, OnceLock};
 use crate::aof_guard;
+use std::sync::{Mutex, OnceLock};
+use std::time::Instant;
 
 /// Global trace recorder
 pub fn trace_recorder() -> &'static Mutex<TraceRecorder> {
@@ -15,21 +15,51 @@ pub fn trace_recorder() -> &'static Mutex<TraceRecorder> {
 
 #[derive(Debug, Clone)]
 pub enum TraceEventKind {
-    FrameBegin { frame_id: u64 },
-    FrameEnd { frame_id: u64, duration_ms: f64 },
+    FrameBegin {
+        frame_id: u64,
+    },
+    FrameEnd {
+        frame_id: u64,
+        duration_ms: f64,
+    },
     ParseStart,
-    ParseEnd { node_count: usize, duration_ms: f64 },
+    ParseEnd {
+        node_count: usize,
+        duration_ms: f64,
+    },
     StyleStart,
-    StyleEnd { styled_count: usize, duration_ms: f64 },
+    StyleEnd {
+        styled_count: usize,
+        duration_ms: f64,
+    },
     LayoutStart,
-    LayoutEnd { box_count: usize, duration_ms: f64 },
+    LayoutEnd {
+        box_count: usize,
+        duration_ms: f64,
+    },
     PaintStart,
-    PaintEnd { command_count: usize, duration_ms: f64 },
+    PaintEnd {
+        command_count: usize,
+        duration_ms: f64,
+    },
     SceneStart,
-    SceneEnd { node_count: usize, duration_ms: f64 },
-    SegmentInvalidated { segment_id: u16, reason: String },
-    ImageDecoded { image_id: String, duration_ms: f64, bytes: usize },
-    GpuUpload { bytes: usize, duration_ms: f64 },
+    SceneEnd {
+        node_count: usize,
+        duration_ms: f64,
+    },
+    SegmentInvalidated {
+        segment_id: u16,
+        reason: String,
+    },
+    ImageDecoded {
+        image_id: String,
+        duration_ms: f64,
+        bytes: usize,
+    },
+    GpuUpload {
+        bytes: usize,
+        duration_ms: f64,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -54,9 +84,9 @@ impl TraceRecorder {
 
     pub fn record(&mut self, kind: TraceEventKind) {
         aof_guard!();
-        
+
         // Simple thread ID mock for now, can be replaced with real thread ID if multithreading is added
-        let thread_id = 1; 
+        let thread_id = 1;
 
         self.events.push(TraceEvent {
             timestamp_us: self.session_start.elapsed().as_micros() as u64,

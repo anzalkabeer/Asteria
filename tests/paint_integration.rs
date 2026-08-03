@@ -8,7 +8,7 @@
 use asteria::css_parser::Stylesheet;
 use asteria::dom::Dom;
 use asteria::layout::layout_document;
-use asteria::paint::{build_display_list, DisplayCommand};
+use asteria::paint::{DisplayCommand, build_display_list};
 use asteria::parser::Parser;
 use asteria::style::resolve_styles;
 use asteria::tokenizer::Tokenizer;
@@ -44,7 +44,12 @@ fn test_paint_engine_display_list_generation() {
 
     // Verify border command for div#card
     let has_border = display_list.commands.iter().any(|cmd| {
-        if let DisplayCommand::Border { color, border_width, .. } = cmd {
+        if let DisplayCommand::Border {
+            color,
+            border_width,
+            ..
+        } = cmd
+        {
             *color == Color::rgb(255, 0, 0) && border_width.top == 2.0
         } else {
             false
@@ -54,7 +59,13 @@ fn test_paint_engine_display_list_generation() {
 
     // Verify text command for h1 Title
     let has_text = display_list.commands.iter().any(|cmd| {
-        if let DisplayCommand::Text { text, color, font_size, .. } = cmd {
+        if let DisplayCommand::Text {
+            text,
+            color,
+            font_size,
+            ..
+        } = cmd
+        {
             text == "Title" && *color == Color::rgb(0, 0, 255) && *font_size == 24.0
         } else {
             false

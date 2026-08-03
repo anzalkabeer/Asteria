@@ -1,15 +1,17 @@
 use asteria::devtools::config::AofConfig;
-use asteria::devtools::metrics::{EnergyDiagnostics, EnergyImpact, record_allocation, reset_frame_metrics, MEMORY_ALLOCATED};
+use asteria::devtools::metrics::{
+    EnergyDiagnostics, EnergyImpact, MEMORY_ALLOCATED, record_allocation, reset_frame_metrics,
+};
 use asteria::devtools::snapshot::EngineSnapshot;
 use std::sync::atomic::Ordering;
 
 #[test]
 fn test_energy_diagnostics_impact_levels() {
     let mut diag = EnergyDiagnostics::new();
-    
+
     // Low Impact
     assert_eq!(diag.analyze_impact(), EnergyImpact::Low);
-    
+
     // Medium Impact
     diag.allocations = 5;
     assert_eq!(diag.analyze_impact(), EnergyImpact::Medium);

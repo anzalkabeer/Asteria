@@ -111,12 +111,7 @@ impl SceneGraph {
     }
 
     /// Add a scene node and return its ID
-    pub fn push(
-        &mut self,
-        node: SceneNode,
-        color: [f32; 4],
-        text: Option<TextRun>,
-    ) -> SceneNodeId {
+    pub fn push(&mut self, node: SceneNode, color: [f32; 4], text: Option<TextRun>) -> SceneNodeId {
         let id = SceneNodeId(self.nodes.len() as u32);
         self.nodes.push(node);
         self.colors.push(color);
@@ -222,7 +217,12 @@ use crate::values::Color;
 /// Convert a Color to normalized GPU RGBA [0.0..1.0]
 fn color_to_rgba(color: &Color) -> [f32; 4] {
     let (r, g, b, a) = color.to_rgba();
-    [r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0, a as f32 / 255.0]
+    [
+        r as f32 / 255.0,
+        g as f32 / 255.0,
+        b as f32 / 255.0,
+        a as f32 / 255.0,
+    ]
 }
 
 /// Assign a segment ID based on y-position and segment height
@@ -237,10 +237,7 @@ fn assign_segment(y: f32, segment_height: f32) -> u16 {
 ///
 /// This is the core bridge between the Paint Engine output (logical commands)
 /// and the GPU Renderer input (flat, contiguous, segment-tagged scene nodes).
-pub fn build_scene_graph(
-    display_list: &DisplayList,
-    segment_height: f32,
-) -> SceneGraph {
+pub fn build_scene_graph(display_list: &DisplayList, segment_height: f32) -> SceneGraph {
     let mut scene = SceneGraph::with_capacity(display_list.commands.len());
     let mut z_order: u32 = 0;
 
@@ -262,12 +259,18 @@ pub fn build_scene_graph(
                 );
                 z_order += 1;
             }
-            DisplayCommand::Border { color, rect, border_width } => {
+            DisplayCommand::Border {
+                color,
+                rect,
+                border_width,
+            } => {
                 let seg = assign_segment(rect.y, segment_height);
                 scene.push(
                     SceneNode {
                         rect: *rect,
-                        kind: SceneNodeKind::Border { widths: *border_width },
+                        kind: SceneNodeKind::Border {
+                            widths: *border_width,
+                        },
                         parent: None,
                         z_order,
                         segment_id: seg,
@@ -278,7 +281,13 @@ pub fn build_scene_graph(
                 );
                 z_order += 1;
             }
-            DisplayCommand::Text { text, x, y, font_size, color } => {
+            DisplayCommand::Text {
+                text,
+                x,
+                y,
+                font_size,
+                color,
+            } => {
                 let text_width = text.chars().count() as f32 * font_size * 0.55;
                 let rect = Rect {
                     x: *x,
@@ -290,7 +299,9 @@ pub fn build_scene_graph(
                 scene.push(
                     SceneNode {
                         rect,
-                        kind: SceneNodeKind::Text { font_size: *font_size },
+                        kind: SceneNodeKind::Text {
+                            font_size: *font_size,
+                        },
                         parent: None,
                         z_order,
                         segment_id: seg,
@@ -304,7 +315,13 @@ pub fn build_scene_graph(
                 );
                 z_order += 1;
             }
-            DisplayCommand::Image { image_id, x, y, width, height } => {
+            DisplayCommand::Image {
+                image_id,
+                x,
+                y,
+                width,
+                height,
+            } => {
                 let rect = Rect {
                     x: *x,
                     y: *y,
@@ -341,16 +358,29 @@ use std::fmt;
 
 impl fmt::Display for SceneGraph {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        writeln!(f, "── Scene Graph ({} nodes) ─────────────────", self.nodes.len())?;
+        writeln!(
+            f,
+            "── Scene Graph ({} nodes) ─────────────────",
+            self.nodes.len()
+        )?;
         for (i, node) in self.nodes.iter().enumerate() {
             let color = self.colors[i];
             let dirty_marker = if node.dirty { " [DIRTY]" } else { "" };
             write!(
                 f,
                 "  [{:>3}] z={:<3} seg={:<2} {:?} rect=({:.1}, {:.1}, {:.1}, {:.1}) rgba=({:.2},{:.2},{:.2},{:.2}){}",
-                i, node.z_order, node.segment_id, node.kind,
-                node.rect.x, node.rect.y, node.rect.width, node.rect.height,
-                color[0], color[1], color[2], color[3],
+                i,
+                node.z_order,
+                node.segment_id,
+                node.kind,
+                node.rect.x,
+                node.rect.y,
+                node.rect.width,
+                node.rect.height,
+                color[0],
+                color[1],
+                color[2],
+                color[3],
                 dirty_marker,
             )?;
             if let Some(text_run) = &self.texts[i] {
