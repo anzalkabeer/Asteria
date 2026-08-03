@@ -18,6 +18,7 @@ pub mod renderer;
 pub mod scene;
 pub mod scheduler;
 pub mod segment;
+pub mod shell;
 pub mod style;
 pub mod tokenizer;
 pub mod tokens;
