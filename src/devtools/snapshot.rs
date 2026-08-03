@@ -18,6 +18,12 @@ pub struct EngineSnapshot<'a> {
     pub segments: Option<&'a SegmentBuilder>,
 }
 
+impl<'a> Default for EngineSnapshot<'a> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl<'a> EngineSnapshot<'a> {
     pub fn new() -> Self {
         EngineSnapshot {

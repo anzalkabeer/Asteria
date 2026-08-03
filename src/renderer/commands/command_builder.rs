@@ -18,6 +18,12 @@ pub struct CommandBuilder {
     pub commands: Vec<RenderCommand>,
 }
 
+impl Default for CommandBuilder {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl CommandBuilder {
     pub fn new() -> Self {
         Self {

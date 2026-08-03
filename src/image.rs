@@ -51,6 +51,12 @@ pub fn DetectImageFormat(data: &[u8]) -> Option<ImageFormat> {
 
 pub struct ImageDecoder;
 
+impl Default for ImageDecoder {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ImageDecoder {
     pub fn new() -> Self {
         Self
@@ -79,6 +85,12 @@ impl ImageDecoder {
 pub struct ImageCache {
     cache: HashMap<String, Rc<DecodeImage>>,
     decoder: ImageDecoder,
+}
+
+impl Default for ImageCache {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl ImageCache {

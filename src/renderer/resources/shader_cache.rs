@@ -4,6 +4,12 @@ pub struct ShaderCache {
     modules: HashMap<String, wgpu::ShaderModule>,
 }
 
+impl Default for ShaderCache {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ShaderCache {
     pub fn new() -> Self {
         Self {

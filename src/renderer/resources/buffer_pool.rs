@@ -6,6 +6,12 @@ pub struct BufferPool {
     free_index_buffers: VecDeque<wgpu::Buffer>,
 }
 
+impl Default for BufferPool {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl BufferPool {
     pub fn new() -> Self {
         Self {

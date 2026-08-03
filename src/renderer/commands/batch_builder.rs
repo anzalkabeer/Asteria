@@ -12,6 +12,12 @@ pub struct BatchBuilder {
     pub indices: Vec<u16>,
 }
 
+impl Default for BatchBuilder {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl BatchBuilder {
     pub fn new() -> Self {
         Self {

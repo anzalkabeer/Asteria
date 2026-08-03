@@ -46,7 +46,7 @@ pub fn run_window_loop(scene: SceneGraph) {
 
     let mut batch_builder = BatchBuilder::new();
     // Assuming rect batch is the first one
-    if let Some(rect_cmds) = planned_batches.get(0) {
+    if let Some(rect_cmds) = planned_batches.first() {
         let owned_cmds: Vec<_> = rect_cmds
             .iter()
             .map(|&c| match c {

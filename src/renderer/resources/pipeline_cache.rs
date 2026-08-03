@@ -4,6 +4,12 @@ pub struct PipelineCache {
     pipelines: HashMap<String, wgpu::RenderPipeline>,
 }
 
+impl Default for PipelineCache {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl PipelineCache {
     pub fn new() -> Self {
         Self {

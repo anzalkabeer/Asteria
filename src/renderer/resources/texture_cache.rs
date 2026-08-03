@@ -10,6 +10,12 @@ pub struct TextureCache {
     textures: HashMap<String, GpuTexture>,
 }
 
+impl Default for TextureCache {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl TextureCache {
     pub fn new() -> Self {
         Self {
