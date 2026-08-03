@@ -203,13 +203,15 @@ mod tests {
         profiler.start_pipeline();
 
         {
-            let _guard = profiler.time_stage(EngineStage::ParseHtml);
+            let guard = profiler.time_stage(EngineStage::ParseHtml);
             sleep(Duration::from_millis(5));
+            drop(guard);
         }
 
         {
-            let _guard = profiler.time_stage(EngineStage::Layout);
+            let guard = profiler.time_stage(EngineStage::Layout);
             sleep(Duration::from_millis(5));
+            drop(guard);
         }
 
         profiler.set_counts(10, 5, 3);

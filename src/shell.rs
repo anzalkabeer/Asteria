@@ -37,7 +37,7 @@ impl NavigationHistory {
 
     /// Can the user navigate forward in history?
     pub fn can_go_forward(&self) -> bool {
-        !self.stack.is_empty() && self.current_index + 1 < self.stack.len()
+        self.current_index + 1 < self.stack.len()
     }
 
     /// Navigate to a new URL, truncating any forward history.
@@ -428,7 +428,7 @@ mod tests {
     #[test]
     fn test_close_tab_before_active() {
         let mut manager = TabManager::new(); // tab 0: <sample>
-        let _id2 = manager.new_tab("<sample>"); // tab 1
+        manager.new_tab("<sample>"); // tab 1
         let id3 = manager.new_tab("<sample>"); // tab 2 (active)
 
         assert_eq!(manager.active_tab_index, 2);

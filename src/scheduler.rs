@@ -257,6 +257,12 @@ impl ThreadedScheduler {
     }
 }
 
+impl Default for ThreadedScheduler {
+    fn default() -> Self {
+        Self::new(4)
+    }
+}
+
 impl Drop for ThreadedScheduler {
     fn drop(&mut self) {
         self.shutdown();
