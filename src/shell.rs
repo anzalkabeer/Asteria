@@ -428,7 +428,7 @@ mod tests {
     #[test]
     fn test_close_tab_before_active() {
         let mut manager = TabManager::new(); // tab 0: <sample>
-        let id2 = manager.new_tab("<sample>"); // tab 1
+        let _id2 = manager.new_tab("<sample>"); // tab 1
         let id3 = manager.new_tab("<sample>"); // tab 2 (active)
 
         assert_eq!(manager.active_tab_index, 2);

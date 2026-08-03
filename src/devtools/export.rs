@@ -3,7 +3,7 @@
 // Exports AOF traces to Chrome Trace Event Format (JSON), which can be
 // loaded into `chrome://tracing` or `https://ui.perfetto.dev/`.
 
-use crate::devtools::trace::{TraceEvent, TraceEventKind, trace_recorder};
+use crate::devtools::trace::{TraceEventKind, trace_recorder};
 use std::fs::File;
 use std::io::Write;
 

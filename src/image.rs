@@ -87,12 +87,6 @@ pub struct ImageCache {
     decoder: ImageDecoder,
 }
 
-impl Default for ImageCache {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 impl ImageCache {
     pub fn new() -> Self {
         ImageCache {

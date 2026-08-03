@@ -1,4 +1,4 @@
-use crate::scene::{SceneGraph, SceneNode};
+use crate::scene::SceneGraph;
 
 pub enum RenderCommand {
     SolidRect {
