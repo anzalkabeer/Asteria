@@ -1,172 +1,128 @@
 use std::env;
 use std::process;
+use std::time::Instant;
 
 use asteria::css_parser::Stylesheet;
+use asteria::devtools::config::AofConfig;
+use asteria::devtools::inspector::AofInspector;
+use asteria::devtools::metrics::{GPU_VRAM_USED, MEMORY_ALLOCATED, reset_frame_metrics};
+use asteria::devtools::snapshot::EngineSnapshot;
+use asteria::devtools::trace::{TraceEventKind, record_event};
 use asteria::loader::ResourceLoader;
 use asteria::parser::Parser;
+use asteria::profiler::{EngineProfiler, EngineStage};
+use asteria::scheduler::{PipelineStage, TaskResult, ThreadedScheduler};
+use asteria::shell::{ShellEvent, TabManager};
 use asteria::style::resolve_styles;
 use asteria::tokenizer::Tokenizer;
 
 fn main() {
-    // ─── Read Input ──────────────────────────────────────────────
-    //
-    // Usage: cargo run -- <path-to-html-file>
-    //
-    // If no file is provided, use a built-in sample HTML string
-    // so you can always run `cargo run` and see output immediately.
-
     let args: Vec<String> = env::args().collect();
 
-    let mut loader = ResourceLoader::new();
+    // ─── Phase 0: Initialize Profiler, Devtools & Shell ────────────────
+    let mut profiler = EngineProfiler::new();
+    profiler.start_pipeline();
 
-    let resources = if args.len() > 1 && args[1] != "--window" {
-        // Load HTML from file path — the loader handles discovery of
-        // <style> blocks and <link rel="stylesheet"> references
-        let path = &args[1];
-        match loader.load_file(path) {
-            Ok(resources) => resources,
-            Err(err) => {
-                eprintln!("Error: {}", err);
-                process::exit(1);
-            }
-        }
+    AofConfig::full_inspection().apply();
+    AofInspector::init(AofConfig::full_inspection());
+    record_event(TraceEventKind::FrameBegin { frame_id: 1 });
+    reset_frame_metrics();
+
+    let mut tab_manager = TabManager::new();
+    let mut threaded_scheduler = ThreadedScheduler::new(4);
+
+    let target_url = if args.len() > 1 && args[1] != "--window" {
+        &args[1]
     } else {
-        // No file provided — use a built-in sample with embedded CSS
         println!("No file provided (or only --window passed). Using built-in sample HTML.\n");
         println!("Usage: cargo run -- <path-to-html-file> [--window]\n");
-        loader.load_html_string(
-            r#"<!DOCTYPE html>
-<html>
-<head>
-    <title>Asteria Sample</title>
-    <style>
-        h1 { color: red; font-size: 24px; }
-        .main { background-color: #f0f0f0; }
-        p { color: #333; margin: 10px; }
-        strong { font-weight: bold; }
-    </style>
-</head>
-<body>
-    <h1 class="main">Hello, Asteria!</h1>
-    <p>A <strong>simple</strong> test.</p>
-    <!-- A comment -->
-    <br/>
-</body>
-</html>"#,
-            "<sample>",
-        )
+        "<sample>"
     };
 
-    let bytes = &resources.html.bytes;
-
-    // ─── Phase 1: Tokenize HTML ──────────────────────────────────
-
-    println!("═══════════════════════════════════════════════");
-    println!("  ASTERIA HTML ENGINE — Full Pipeline Inspector");
-    println!("═══════════════════════════════════════════════\n");
-
-    let mut tokenizer = Tokenizer::new(bytes);
-    let tokens = tokenizer.tokenize();
-
-    // Print all tokens
-    println!(
-        "── HTML Tokens ({}) ─────────────────────────\n",
-        tokens.len()
-    );
-    for (i, token) in tokens.iter().enumerate() {
-        let slice = if (token.start as usize) < bytes.len() && (token.end as usize) <= bytes.len() {
-            std::str::from_utf8(&bytes[token.start as usize..token.end as usize]).unwrap_or("???")
-        } else {
-            ""
-        };
-
-        let kind_str = format!("{:?}", token.kind);
-
-        // Print token with its attributes if any
-        if token.attributes.is_empty() {
-            println!(
-                "  [{:>3}] {:<20} {:>4}..{:<4}  {:?}",
-                i, kind_str, token.start, token.end, slice
-            );
-        } else {
-            println!(
-                "  [{:>3}] {:<20} {:>4}..{:<4}  {:?}",
-                i, kind_str, token.start, token.end, slice
-            );
-            for attr in &token.attributes {
-                let name =
-                    std::str::from_utf8(&bytes[attr.name_start as usize..attr.name_end as usize])
-                        .unwrap_or("???");
-                if attr.value_start == 0 && attr.value_end == 0 {
-                    println!("        └─ attr: {}", name);
-                } else {
-                    let value = std::str::from_utf8(
-                        &bytes[attr.value_start as usize..attr.value_end as usize],
-                    )
-                    .unwrap_or("???");
-                    println!("        └─ attr: {}=\"{}\"", name, value);
-                }
-            }
+    if target_url != "<sample>" {
+        if let Err(e) = tab_manager.handle_event(ShellEvent::NavigateTo(target_url.to_string())) {
+            eprintln!("Error loading {}: {}", target_url, e);
+            process::exit(1);
         }
     }
 
-    // ─── AOF Initialization ──────────────────────────────────────────
-    asteria::devtools::config::AofConfig::full_inspection().apply();
-    asteria::devtools::inspector::AofInspector::init(
-        asteria::devtools::config::AofConfig::full_inspection(),
-    );
-    asteria::devtools::trace::record_event(asteria::devtools::trace::TraceEventKind::FrameBegin {
-        frame_id: 1,
-    });
-    asteria::devtools::metrics::reset_frame_metrics();
+    let active_tab = tab_manager.active_tab();
+    println!("═══════════════════════════════════════════════");
+    println!("  ASTERIA ENGINE — Full Pipeline & Shell Inspector");
+    println!("═══════════════════════════════════════════════\n");
+    println!("Active Tab : {}", active_tab.title);
+    println!("Active URL : {}\n", active_tab.url);
 
-    // ─── Phase 1: Parse into DOM ─────────────────────────────────
+    // ─── Async Scheduler Pipeline Stage Dispatch ──────────────────────
+    let sample_html_bytes =
+        b"<!DOCTYPE html><html><body><h1>Asteria Shell</h1><p>Sample Tab</p></body></html>";
 
-    asteria::devtools::trace::record_event(asteria::devtools::trace::TraceEventKind::ParseStart);
+    let bytes = active_tab
+        .page_resources
+        .as_ref()
+        .map(|r| r.html.bytes.as_slice())
+        .unwrap_or(sample_html_bytes);
+
+    let async_parse_id = threaded_scheduler
+        .schedule(PipelineStage::ParseHtml {
+            url: active_tab.url.clone(),
+            bytes: bytes.to_vec(),
+        })
+        .ok();
+
+    // ─── Phase 1: Tokenize & Parse HTML ────────────────────────────────
+    let parse_start = Instant::now();
+    record_event(TraceEventKind::ParseStart);
+
+    let mut tokenizer = Tokenizer::new(bytes);
+    let tokens = tokenizer.tokenize();
     let parser = Parser::new(&tokens, bytes);
     let dom = parser.parse();
-    asteria::devtools::trace::record_event(asteria::devtools::trace::TraceEventKind::ParseEnd {
+
+    let parse_duration = parse_start.elapsed();
+    profiler.record_stage_duration(EngineStage::ParseHtml, parse_duration);
+    record_event(TraceEventKind::ParseEnd {
         node_count: dom.nodes.len(),
-        duration_ms: 0.0,
+        duration_ms: parse_duration.as_secs_f64() * 1000.0,
     });
 
     println!(
-        "\n── DOM Tree ({} nodes) ─────────────────────\n",
+        "── HTML Tokens ({}) & DOM Tree ({} nodes) ─────\n",
+        tokens.len(),
         dom.nodes.len()
     );
     dom.print_tree(bytes);
 
-    // ─── Phase 2: Merge all CSS from discovered stylesheets ──────
-
-    println!("\n── Resources Discovered ─────────────────────\n");
-    println!("  HTML: {}", resources.html.url);
-    println!("  Stylesheets: {}", resources.stylesheets.len());
-    for (i, sheet) in resources.stylesheets.iter().enumerate() {
-        println!("    [{}] {} ({} bytes)", i, sheet.url, sheet.bytes.len());
+    // Verify async worker completed concurrently
+    if let Some(expected_id) = async_parse_id {
+        if let Some(msg) = threaded_scheduler.poll_completed() {
+            if msg.task_id == expected_id {
+                println!(
+                    "\n[Async Scheduler] Task #{} completed concurrently on background thread",
+                    msg.task_id
+                );
+            }
+        }
     }
-    println!("  Cache entries: {}", loader.cache.len());
 
-    // Concatenate all stylesheet content into one CSS source
+    // ─── Phase 2: Parse CSS Stylesheets ────────────────────────────────
+    let css_start = Instant::now();
     let mut css_source = String::new();
-    for sheet in &resources.stylesheets {
-        let text = std::str::from_utf8(&sheet.bytes).unwrap_or("");
-        css_source.push_str(text);
-        css_source.push('\n');
+    if let Some(ref resources) = active_tab.page_resources {
+        for sheet in &resources.stylesheets {
+            let text = std::str::from_utf8(&sheet.bytes).unwrap_or("");
+            css_source.push_str(text);
+            css_source.push('\n');
+        }
     }
 
-    if !css_source.is_empty() {
+    let stylesheet = Stylesheet::parse(css_source.as_bytes());
+    let css_duration = css_start.elapsed();
+    profiler.record_stage_duration(EngineStage::ParseCss, css_duration);
+
+    if !stylesheet.rules.is_empty() {
         println!(
-            "\n── Combined CSS ({} bytes) ─────────────────\n",
-            css_source.len()
-        );
-        println!("{}", css_source);
-
-        // ─── Phase 2: Parse CSS ──────────────────────────────────
-
-        let stylesheet = Stylesheet::parse(css_source.as_bytes());
-
-        println!(
-            "── CSS Rules ({}) ──────────────────────────\n",
+            "\n── CSS Rules ({}) ──────────────────────────\n",
             stylesheet.rules.len()
         );
         for (i, rule) in stylesheet.rules.iter().enumerate() {
@@ -178,73 +134,74 @@ fn main() {
             println!("      }}");
         }
 
-        // ─── Phase 3: Resolve Styles (with cascade + inheritance) ─
+        // ─── Phase 3: Resolve Styles (Cascade & Inheritance) ───────────
+        let style_start = Instant::now();
+        record_event(TraceEventKind::StyleStart);
 
-        asteria::devtools::trace::record_event(
-            asteria::devtools::trace::TraceEventKind::StyleStart,
-        );
         let styled = resolve_styles(&dom, &stylesheet, bytes);
-        asteria::devtools::trace::record_event(
-            asteria::devtools::trace::TraceEventKind::StyleEnd {
-                styled_count: dom.nodes.len(),
-                duration_ms: 0.0,
-            },
-        );
+
+        let style_duration = style_start.elapsed();
+        profiler.record_stage_duration(EngineStage::ResolveStyles, style_duration);
+        record_event(TraceEventKind::StyleEnd {
+            styled_count: dom.nodes.len(),
+            duration_ms: style_duration.as_secs_f64() * 1000.0,
+        });
 
         println!("\n── Styled DOM Tree (typed ComputedStyle) ───\n");
         styled.print_tree(&dom, bytes);
 
-        // ─── Phase 4: Layout Engine (Calculates 2D Geometry & Box Model) ─
+        // ─── Phase 4: 2D Layout Engine ─────────────────────────────────
+        let layout_start = Instant::now();
+        record_event(TraceEventKind::LayoutStart);
 
-        asteria::devtools::trace::record_event(
-            asteria::devtools::trace::TraceEventKind::LayoutStart,
-        );
-        if let Some(layout_tree) =
-            asteria::layout::layout_document(&styled, &dom, bytes, 800.0, 600.0)
-        {
-            asteria::devtools::trace::record_event(
-                asteria::devtools::trace::TraceEventKind::LayoutEnd {
-                    box_count: 0,
-                    duration_ms: 0.0,
-                },
-            );
+        let maybe_layout_tree =
+            asteria::layout::layout_document(&styled, &dom, bytes, 800.0, 600.0);
+        let layout_duration = layout_start.elapsed();
+        profiler.record_stage_duration(EngineStage::Layout, layout_duration);
+
+        let box_count = maybe_layout_tree
+            .as_ref()
+            .map(|tree| tree.box_count())
+            .unwrap_or(0);
+        record_event(TraceEventKind::LayoutEnd {
+            box_count,
+            duration_ms: layout_duration.as_secs_f64() * 1000.0,
+        });
+
+        if let Some(layout_tree) = maybe_layout_tree {
             println!("\n── Layout Tree (2D Bounding Boxes & Coordinates) ───\n");
             layout_tree.print_tree(&dom, bytes);
 
-            // ─── Phase 5: Paint Engine (Generates Backend-Agnostic Display List) ─
+            // ─── Phase 5: Display List Paint Engine ────────────────────
+            let paint_start = Instant::now();
+            record_event(TraceEventKind::PaintStart);
 
-            asteria::devtools::trace::record_event(
-                asteria::devtools::trace::TraceEventKind::PaintStart,
-            );
             let display_list = asteria::paint::build_display_list(&layout_tree, &dom, bytes);
-            asteria::devtools::trace::record_event(
-                asteria::devtools::trace::TraceEventKind::PaintEnd {
-                    command_count: display_list.commands.len(),
-                    duration_ms: 0.0,
-                },
-            );
+
+            let paint_duration = paint_start.elapsed();
+            profiler.record_stage_duration(EngineStage::Paint, paint_duration);
+            record_event(TraceEventKind::PaintEnd {
+                command_count: display_list.commands.len(),
+                duration_ms: paint_duration.as_secs_f64() * 1000.0,
+            });
+
             println!("\n── Display List (Visual Draw Commands) ───\n");
             asteria::paint::print_display_list(&display_list);
 
-            // ─── Phase 6: Scene Graph & Segment Builder (GPU-First Architecture) ─
+            // ─── Phase 6: Scene Graph & Segments ───────────────────────
+            let scene_start = Instant::now();
+            record_event(TraceEventKind::SceneStart);
 
-            asteria::devtools::trace::record_event(
-                asteria::devtools::trace::TraceEventKind::SceneStart,
-            );
             let scene = asteria::scene::build_scene_graph(&display_list, 256.0);
-            asteria::devtools::trace::record_event(
-                asteria::devtools::trace::TraceEventKind::SceneEnd {
-                    node_count: scene.len(),
-                    duration_ms: 0.0,
-                },
-            );
-            println!("\n{}", scene);
+            let scene_duration = scene_start.elapsed();
+            profiler.record_stage_duration(EngineStage::Render, scene_duration);
+            record_event(TraceEventKind::SceneEnd {
+                node_count: scene.len(),
+                duration_ms: scene_duration.as_secs_f64() * 1000.0,
+            });
 
             let mut segments = asteria::segment::SegmentBuilder::new(256.0);
-            segments
-                .build_segments(800.0, 600.0)
-                .expect("Invalid viewport dimensions");
-            println!("{}", segments);
+            let _ = segments.build_segments(800.0, 600.0);
 
             if args.contains(&"--window".to_string()) {
                 println!("\n── Launching Hardware Renderer (wgpu) ─────────");
@@ -252,15 +209,18 @@ fn main() {
                 return;
             }
 
-            // ─── AOF Inspection ───────────────────────────────────────────────
-            asteria::devtools::trace::record_event(
-                asteria::devtools::trace::TraceEventKind::FrameEnd {
-                    frame_id: 1,
-                    duration_ms: 0.0,
-                },
-            );
+            // ─── Performance Profiler & AOF Inspection ─────────────────
+            profiler.set_counts(dom.nodes.len(), box_count, display_list.commands.len());
+            let report = profiler.finish_pipeline();
 
-            let snapshot = asteria::devtools::snapshot::EngineSnapshot::new()
+            println!("\n{}", report.format_summary());
+
+            record_event(TraceEventKind::FrameEnd {
+                frame_id: 1,
+                duration_ms: report.total_duration.as_secs_f64() * 1000.0,
+            });
+
+            let snapshot = EngineSnapshot::new()
                 .with_dom(&dom)
                 .with_style(&styled)
                 .with_layout(&layout_tree)
@@ -268,34 +228,26 @@ fn main() {
                 .with_segments(&segments);
 
             let mut energy = asteria::devtools::metrics::EnergyDiagnostics::new();
-            energy.allocations = asteria::devtools::metrics::MEMORY_ALLOCATED
-                .load(std::sync::atomic::Ordering::Relaxed);
-            energy.gpu_uploads = asteria::devtools::metrics::GPU_VRAM_USED
-                .load(std::sync::atomic::Ordering::Relaxed);
+            energy.allocations = MEMORY_ALLOCATED.load(std::sync::atomic::Ordering::Relaxed);
+            energy.gpu_uploads = GPU_VRAM_USED.load(std::sync::atomic::Ordering::Relaxed);
             energy.impact = energy.analyze_impact();
 
-            asteria::devtools::inspector::AofInspector::inspect(snapshot, &energy, "trace.json");
+            AofInspector::inspect(snapshot, &energy, "trace.json");
+        } else {
+            profiler.set_counts(dom.nodes.len(), 0, 0);
+            let report = profiler.finish_pipeline();
+            println!("\n{}", report.format_summary());
         }
     } else {
-        println!("\n── No stylesheets found ────────────────────");
-        println!("  (Add a <style> block or <link rel=\"stylesheet\"> to see CSS in action)\n");
+        println!("\n── No CSS rules to apply ───────────────────\n");
+        let report = profiler.finish_pipeline();
+        println!("\n{}", report.format_summary());
     }
 
     println!("\n═══════════════════════════════════════════════");
-    println!(
-        "  Done. {} tokens → {} DOM nodes",
-        tokens.len(),
-        dom.nodes.len()
-    );
-    if !css_source.is_empty() {
-        println!(
-            "  Full pipeline: Load → HTML → CSS → Style → Layout → Paint → Scene Graph → Segments"
-        );
-    }
+    println!("  Pipeline Run Complete.");
     println!("═══════════════════════════════════════════════");
 }
-
-// ─── Helpers ─────────────────────────────────────────────────────
 
 /// Format a Selector for display.
 fn format_selector(selector: &asteria::css_parser::Selector) -> String {

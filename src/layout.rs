@@ -104,6 +104,11 @@ impl<'a> LayoutBox<'a> {
         }
     }
 
+    /// Calculate total number of layout boxes in this subtree.
+    pub fn box_count(&self) -> usize {
+        1 + self.children.iter().map(|c| c.box_count()).sum::<usize>()
+    }
+
     /// Recursively compute geometry and position for this box and its subtree.
     pub fn layout(&mut self, containing_block: Dimensions, dom: &Dom, source: &[u8]) {
         match self.box_type {
