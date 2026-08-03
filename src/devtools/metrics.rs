@@ -6,17 +6,12 @@
 use crate::aof_guard;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum EnergyImpact {
+    #[default]
     Low,
     Medium,
     High,
-}
-
-impl Default for EnergyImpact {
-    fn default() -> Self {
-        Self::Low
-    }
 }
 
 #[derive(Debug, Clone, Default)]

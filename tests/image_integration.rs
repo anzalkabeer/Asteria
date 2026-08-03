@@ -4,20 +4,20 @@
 // and DecodedImageToDisplayCommand integration.
 
 use asteria::image::{
-    DecodeImage, DecodedImageToDisplayCommand, DetectImageFormat, ImageCache, ImageFormat,
+    DecodeImage, ImageCache, ImageFormat, decoded_image_to_display_command, detect_image_format,
 };
 use asteria::paint::DisplayCommand;
 
 #[test]
 fn test_detect_image_format() {
     let png_bytes = [0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A, 0, 0, 0, 0];
-    assert_eq!(DetectImageFormat(&png_bytes), Some(ImageFormat::Png));
+    assert_eq!(detect_image_format(&png_bytes), Some(ImageFormat::Png));
 
     let jpeg_bytes = [0xFF, 0xD8, 0xFF, 0xE0];
-    assert_eq!(DetectImageFormat(&jpeg_bytes), Some(ImageFormat::Jpeg));
+    assert_eq!(detect_image_format(&jpeg_bytes), Some(ImageFormat::Jpeg));
 
     let bmp_bytes = [b'B', b'M', 0, 0];
-    assert_eq!(DetectImageFormat(&bmp_bytes), Some(ImageFormat::Bmp));
+    assert_eq!(detect_image_format(&bmp_bytes), Some(ImageFormat::Bmp));
 }
 
 #[test]
@@ -51,7 +51,7 @@ fn test_decoded_image_to_display_command() {
         data: vec![],
     };
 
-    let cmd = DecodedImageToDisplayCommand(&img, 10.0, 20.0);
+    let cmd = decoded_image_to_display_command(&img, 10.0, 20.0);
     if let DisplayCommand::Image {
         image_id,
         x,

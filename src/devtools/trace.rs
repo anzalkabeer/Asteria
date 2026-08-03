@@ -74,6 +74,12 @@ pub struct TraceRecorder {
     pub session_start: Instant,
 }
 
+impl Default for TraceRecorder {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl TraceRecorder {
     pub fn new() -> Self {
         TraceRecorder {

@@ -103,6 +103,7 @@ impl RenderPass for RectPass {
         // Buffers are updated explicitly via `update_buffers` from the scheduler before prepare is called in this simplified version.
     }
 
+    #[allow(clippy::collapsible_if)]
     fn render<'a>(&'a self, pass: &mut wgpu::RenderPass<'a>) {
         if self.num_indices > 0 {
             if let (Some(vb), Some(ib)) = (&self.vertex_buffer, &self.index_buffer) {

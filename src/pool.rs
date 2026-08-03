@@ -17,7 +17,7 @@ impl<T: Default> Pool<T> {
 
     /// Acquire an item from the pool. Creates a new item if the pool is empty.
     pub fn acquire(&mut self) -> T {
-        self.free_list.pop().unwrap_or_else(T::default)
+        self.free_list.pop().unwrap_or_default()
     }
 
     /// Release an item back to the pool to be recycled.

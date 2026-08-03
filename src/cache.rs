@@ -28,6 +28,7 @@ impl<K: Eq + Hash + Clone, V> LruCache<K, V> {
     }
 
     /// Insert a value into the cache, evicting the least recently used item if full.
+    #[allow(clippy::collapsible_if)]
     pub fn insert(&mut self, key: K, value: V) {
         self.clock += 1;
 

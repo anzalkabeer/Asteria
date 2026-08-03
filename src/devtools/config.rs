@@ -10,7 +10,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 /// If this is false, NO events, metrics, or snapshots are collected.
 pub static AOF_ENABLED: AtomicBool = AtomicBool::new(false);
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct AofConfig {
     /// Master switch for all observability
     pub enabled: bool,
@@ -22,18 +22,6 @@ pub struct AofConfig {
     pub enable_metrics: bool,
     /// Export traces to JSON
     pub enable_export: bool,
-}
-
-impl Default for AofConfig {
-    fn default() -> Self {
-        AofConfig {
-            enabled: false,
-            enable_tracing: false,
-            enable_snapshots: false,
-            enable_metrics: false,
-            enable_export: false,
-        }
-    }
 }
 
 impl AofConfig {

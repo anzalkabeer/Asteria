@@ -2,6 +2,12 @@ use crate::renderer::graph::render_pass::RenderPass;
 
 pub struct ImagePass;
 
+impl Default for ImagePass {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ImagePass {
     pub fn new() -> Self {
         Self
