@@ -4,8 +4,18 @@
 // Used to reconstruct the exact execution flow of the engine.
 
 use crate::aof_guard;
+use crate::devtools::config::TRACE_ENABLED;
+use std::cell::Cell;
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Mutex, OnceLock};
+use std::thread;
 use std::time::Instant;
+
+thread_local! {
+    static THREAD_ID: Cell<u32> = const { Cell::new(0) };
+}
+
+static NEXT_THREAD_ID: AtomicU32 = AtomicU32::new(1);
 
 /// Global trace recorder
 pub fn trace_recorder() -> &'static Mutex<TraceRecorder> {
@@ -72,6 +82,8 @@ pub struct TraceEvent {
 pub struct TraceRecorder {
     pub events: Vec<TraceEvent>,
     pub session_start: Instant,
+    pub max_events: usize,
+    pub dropped_events: usize,
 }
 
 impl Default for TraceRecorder {
@@ -85,14 +97,31 @@ impl TraceRecorder {
         TraceRecorder {
             events: Vec::with_capacity(1000),
             session_start: Instant::now(),
+            max_events: 2048,
+            dropped_events: 0,
         }
     }
 
     pub fn record(&mut self, kind: TraceEventKind) {
-        aof_guard!();
+        if !TRACE_ENABLED.load(Ordering::Relaxed) {
+            return;
+        }
 
-        // Simple thread ID mock for now, can be replaced with real thread ID if multithreading is added
-        let thread_id = 1;
+        let thread_id = THREAD_ID.with(|cell| {
+            let current = cell.get();
+            if current == 0 {
+                let assigned = NEXT_THREAD_ID.fetch_add(1, Ordering::Relaxed);
+                cell.set(assigned);
+                assigned
+            } else {
+                current
+            }
+        });
+
+        if self.events.len() >= self.max_events {
+            self.events.remove(0);
+            self.dropped_events += 1;
+        }
 
         self.events.push(TraceEvent {
             timestamp_us: self.session_start.elapsed().as_micros() as u64,
@@ -103,6 +132,7 @@ impl TraceRecorder {
 
     pub fn clear(&mut self) {
         self.events.clear();
+        self.dropped_events = 0;
         self.session_start = Instant::now();
     }
 }

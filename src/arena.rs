@@ -17,11 +17,12 @@ impl FrameArena {
 
     /// Bump-allocate a byte slice from the arena. Returns None if full.
     pub fn alloc(&mut self, size: usize) -> Option<&mut [u8]> {
-        if self.offset + size > self.capacity {
+        let end = self.offset.checked_add(size)?;
+        if end > self.capacity {
             return None;
         }
         let start = self.offset;
-        self.offset += size;
+        self.offset = end;
         Some(&mut self.buffer[start..self.offset])
     }
 

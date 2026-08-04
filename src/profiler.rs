@@ -18,6 +18,7 @@ pub enum EngineStage {
     ResolveStyles,
     Layout,
     Paint,
+    SceneBuild,
     Render,
 }
 
@@ -29,6 +30,7 @@ impl fmt::Display for EngineStage {
             EngineStage::ResolveStyles => write!(f, "Style Resolution"),
             EngineStage::Layout => write!(f, "2D Layout Engine"),
             EngineStage::Paint => write!(f, "Display List Paint"),
+            EngineStage::SceneBuild => write!(f, "Scene Graph Build"),
             EngineStage::Render => write!(f, "GPU Render Pass"),
         }
     }
@@ -79,6 +81,7 @@ impl ProfileReport {
             EngineStage::ResolveStyles,
             EngineStage::Layout,
             EngineStage::Paint,
+            EngineStage::SceneBuild,
             EngineStage::Render,
         ];
 
@@ -124,6 +127,7 @@ impl<'a> Drop for StageGuard<'a> {
 pub struct EngineProfiler {
     durations: HashMap<EngineStage, Duration>,
     total_start: Option<Instant>,
+    finalized_total_duration: Option<Duration>,
     dom_nodes_count: usize,
     layout_boxes_count: usize,
     display_commands_count: usize,
@@ -135,6 +139,7 @@ impl EngineProfiler {
         EngineProfiler {
             durations: HashMap::new(),
             total_start: None,
+            finalized_total_duration: None,
             dom_nodes_count: 0,
             layout_boxes_count: 0,
             display_commands_count: 0,
@@ -147,6 +152,7 @@ impl EngineProfiler {
         self.dom_nodes_count = 0;
         self.layout_boxes_count = 0;
         self.display_commands_count = 0;
+        self.finalized_total_duration = None;
         self.total_start = Some(Instant::now());
     }
 
@@ -174,11 +180,18 @@ impl EngineProfiler {
 
     /// Finish the pipeline measurement and generate a `ProfileReport`.
     pub fn finish_pipeline(&mut self) -> ProfileReport {
-        let total_duration = self
-            .total_start
-            .take()
-            .map(|start| start.elapsed())
-            .unwrap_or_else(|| self.durations.values().sum());
+        let total_duration = match self.finalized_total_duration {
+            Some(duration) => duration,
+            None => {
+                let duration = self
+                    .total_start
+                    .take()
+                    .map(|start| start.elapsed())
+                    .unwrap_or_else(|| self.durations.values().sum());
+                self.finalized_total_duration = Some(duration);
+                duration
+            }
+        };
 
         ProfileReport {
             stage_durations: self.durations.clone(),
@@ -252,8 +265,7 @@ mod tests {
         let report1 = profiler.finish_pipeline();
         assert!(report1.total_duration >= Duration::from_millis(15));
 
-        // Second call without start_pipeline consumes total_start and sums stage durations
         let report2 = profiler.finish_pipeline();
-        assert_eq!(report2.total_duration, Duration::from_millis(15));
+        assert_eq!(report2.total_duration, report1.total_duration);
     }
 }

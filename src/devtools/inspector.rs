@@ -4,7 +4,7 @@
 // Collects traces, snapshots, and metrics, then outputs them
 // via the requested exporters and formatters.
 
-use crate::devtools::config::{AOF_ENABLED, AofConfig};
+use crate::devtools::config::{AOF_ENABLED, EXPORT_ENABLED, AofConfig};
 use crate::devtools::export::export_chrome_trace;
 use crate::devtools::formatter::{
     format_energy_diagnostics, format_memory_inspector, format_segment_inspector,
@@ -51,20 +51,20 @@ impl AofInspector {
         println!("\n{}", format_energy_diagnostics(energy_diag));
         println!("\n{}", format_segment_inspector(&snapshot));
 
-        // Export Chrome Trace if requested
-        // Config check happens implicitly because events aren't recorded if tracing is off,
-        // but we still call export which checks if events are empty.
-        match export_chrome_trace(trace_filename) {
-            Ok(_) => {
-                let recorder = crate::devtools::trace::trace_recorder().lock().unwrap();
-                if !recorder.events.is_empty() {
-                    println!("\n[AOF] Chrome Trace exported to '{}'.", trace_filename);
-                    println!(
-                        "      Drag and drop into chrome://tracing or https://ui.perfetto.dev/ to view."
-                    );
+        // Export Chrome Trace only when export is enabled.
+        if EXPORT_ENABLED.load(Ordering::Relaxed) {
+            match export_chrome_trace(trace_filename) {
+                Ok(_) => {
+                    let recorder = crate::devtools::trace::trace_recorder().lock().unwrap();
+                    if !recorder.events.is_empty() {
+                        println!("\n[AOF] Chrome Trace exported to '{}'.", trace_filename);
+                        println!(
+                            "      Drag and drop into chrome://tracing or https://ui.perfetto.dev/ to view."
+                        );
+                    }
                 }
+                Err(e) => println!("[AOF] Failed to export trace: {}", e),
             }
-            Err(e) => println!("[AOF] Failed to export trace: {}", e),
         }
     }
 }

@@ -333,7 +333,7 @@ fn test_lazy_decode_skips_offscreen_images() {
     };
     let result =
         cache.get_or_decode_if_visible("offscreen.png", &fake_png, &offscreen_rect, &viewport);
-    assert!(result.is_none());
+    assert!(result.unwrap().is_none());
     assert_eq!(cache.len(), 0); // Nothing cached
 
     // Image inside viewport — SHOULD decode
@@ -345,6 +345,6 @@ fn test_lazy_decode_skips_offscreen_images() {
     };
     let result =
         cache.get_or_decode_if_visible("onscreen.png", &fake_png, &onscreen_rect, &viewport);
-    assert!(result.is_some());
+    assert!(result.unwrap().is_some());
     assert_eq!(cache.len(), 1);
 }

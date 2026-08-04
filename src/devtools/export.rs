@@ -16,6 +16,15 @@ pub fn export_chrome_trace(filename: &str) -> std::io::Result<()> {
     let mut file = File::create(filename)?;
     writeln!(file, "[")?;
 
+    if recorder.dropped_events > 0 {
+        let retained = format!(
+            r#"  {{"name": "TraceRetention", "cat": "engine", "ph": "i", "ts": {}, "pid": 1, "tid": 0, "args": {{"dropped_events": {}}}}}"#,
+            recorder.session_start.elapsed().as_micros(),
+            recorder.dropped_events
+        );
+        writeln!(file, "{},", retained)?;
+    }
+
     for (i, event) in recorder.events.iter().enumerate() {
         let (name, ph) = match &event.kind {
             TraceEventKind::FrameBegin { .. } => ("Frame", "B"),

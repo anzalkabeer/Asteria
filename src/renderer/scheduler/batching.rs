@@ -4,17 +4,21 @@ pub struct BatchPlanner;
 
 impl BatchPlanner {
     pub fn plan(commands: &[RenderCommand]) -> Vec<Vec<&RenderCommand>> {
-        // Group commands by type to minimize pipeline state changes
-        let mut rect_batch = Vec::new();
-        let mut text_batch = Vec::new();
+        let mut batches: Vec<Vec<&RenderCommand>> = Vec::new();
+        let mut last_is_text: Option<bool> = None;
 
         for cmd in commands {
-            match cmd {
-                RenderCommand::SolidRect { .. } => rect_batch.push(cmd),
-                RenderCommand::Text { .. } => text_batch.push(cmd),
+            let is_text = matches!(cmd, RenderCommand::Text { .. });
+            if last_is_text != Some(is_text) {
+                batches.push(Vec::new());
+                last_is_text = Some(is_text);
             }
+            batches
+                .last_mut()
+                .expect("a batch was created above")
+                .push(cmd);
         }
 
-        vec![rect_batch, text_batch]
+        batches
     }
 }

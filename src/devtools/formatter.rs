@@ -24,7 +24,7 @@ pub fn format_memory_inspector() -> String {
 }
 
 pub fn format_energy_diagnostics(diagnostics: &EnergyDiagnostics) -> String {
-    let impact_str = match diagnostics.impact {
+    let impact_str = match diagnostics.analyze_impact() {
         EnergyImpact::Low => "Low (Battery Friendly)",
         EnergyImpact::Medium => "Medium",
         EnergyImpact::High => "High (Battery Drain Risk)",

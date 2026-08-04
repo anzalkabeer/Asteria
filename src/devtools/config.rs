@@ -9,6 +9,10 @@ use std::sync::atomic::{AtomicBool, Ordering};
 /// Global flag for the ASTERIA Observability Framework.
 /// If this is false, NO events, metrics, or snapshots are collected.
 pub static AOF_ENABLED: AtomicBool = AtomicBool::new(false);
+pub static TRACE_ENABLED: AtomicBool = AtomicBool::new(false);
+pub static SNAPSHOT_ENABLED: AtomicBool = AtomicBool::new(false);
+pub static METRICS_ENABLED: AtomicBool = AtomicBool::new(false);
+pub static EXPORT_ENABLED: AtomicBool = AtomicBool::new(false);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct AofConfig {
@@ -39,6 +43,10 @@ impl AofConfig {
     /// Apply the configuration to the global state
     pub fn apply(&self) {
         AOF_ENABLED.store(self.enabled, Ordering::SeqCst);
+        TRACE_ENABLED.store(self.enabled && self.enable_tracing, Ordering::SeqCst);
+        SNAPSHOT_ENABLED.store(self.enabled && self.enable_snapshots, Ordering::SeqCst);
+        METRICS_ENABLED.store(self.enabled && self.enable_metrics, Ordering::SeqCst);
+        EXPORT_ENABLED.store(self.enabled && self.enable_export, Ordering::SeqCst);
     }
 }
 
