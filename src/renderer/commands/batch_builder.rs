@@ -32,38 +32,33 @@ impl BatchBuilder {
         self.indices.clear();
 
         for cmd in commands {
-            if let RenderCommand::SolidRect { rect, rgba } = cmd {
-                let base_idx = self.vertices.len() as u16;
+            match cmd {
+                RenderCommand::SolidRect { rect, rgba } => {
+                    self.add_quad(rect[0], rect[1], rect[2], rect[3], *rgba);
+                }
+                RenderCommand::Text {
+                    text,
+                    rect,
+                    rgba,
+                    font_size,
+                } => {
+                    let char_w = font_size * 0.55;
+                    let char_h = font_size * 0.85;
+                    let text_color = if rgba[3] > 0.0 {
+                        *rgba
+                    } else {
+                        [0.0, 0.0, 0.0, 1.0]
+                    };
 
-                // 4 corners of the quad
-                let (x, y, w, h) = (rect[0], rect[1], rect[2], rect[3]);
-
-                self.vertices.push(Vertex {
-                    position: [x, y],
-                    color: *rgba,
-                });
-                self.vertices.push(Vertex {
-                    position: [x + w, y],
-                    color: *rgba,
-                });
-                self.vertices.push(Vertex {
-                    position: [x + w, y + h],
-                    color: *rgba,
-                });
-                self.vertices.push(Vertex {
-                    position: [x, y + h],
-                    color: *rgba,
-                });
-
-                // 2 triangles per quad
-                self.indices.extend_from_slice(&[
-                    base_idx,
-                    base_idx + 1,
-                    base_idx + 2,
-                    base_idx,
-                    base_idx + 2,
-                    base_idx + 3,
-                ]);
+                    for (idx, ch) in text.chars().enumerate() {
+                        if ch.is_whitespace() {
+                            continue;
+                        }
+                        let cx = rect[0] + (idx as f32) * char_w;
+                        let cy = rect[1] + font_size * 0.1;
+                        self.add_quad(cx, cy, char_w * 0.8, char_h, text_color);
+                    }
+                }
             }
         }
     }
@@ -75,6 +70,36 @@ impl BatchBuilder {
         if dirty_segs.is_empty() {
             return;
         }
-        self.build_batches(commands);
+        self.build_batches(commands, 800.0);
+    }
+
+    fn add_quad(&mut self, x: f32, y: f32, w: f32, h: f32, rgba: [f32; 4]) {
+        let base_idx = self.vertices.len() as u16;
+
+        self.vertices.push(Vertex {
+            position: [x, y],
+            color: rgba,
+        });
+        self.vertices.push(Vertex {
+            position: [x + w, y],
+            color: rgba,
+        });
+        self.vertices.push(Vertex {
+            position: [x + w, y + h],
+            color: rgba,
+        });
+        self.vertices.push(Vertex {
+            position: [x, y + h],
+            color: rgba,
+        });
+
+        self.indices.extend_from_slice(&[
+            base_idx,
+            base_idx + 1,
+            base_idx + 2,
+            base_idx,
+            base_idx + 2,
+            base_idx + 3,
+        ]);
     }
 }

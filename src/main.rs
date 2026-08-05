@@ -113,6 +113,12 @@ fn main() {
         }
     }
 
+    if css_source.is_empty() {
+        css_source = std::str::from_utf8(sample_css_bytes)
+            .unwrap_or("")
+            .to_string();
+    }
+
     let stylesheet = Stylesheet::parse(css_source.as_bytes());
     let css_duration = css_start.elapsed();
     profiler.record_stage_duration(EngineStage::ParseCss, css_duration);
