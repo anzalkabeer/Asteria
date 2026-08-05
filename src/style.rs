@@ -193,7 +193,7 @@ fn build_styled_node(
             }
 
             // Test every rule against this node
-            for (rule_index, rule) in all_rules.iter().enumerate() {
+            for rule in &all_rules {
                 // Find the highest-specificity selector that matches
                 let mut best_specificity: Option<Specificity> = None;
 
@@ -214,7 +214,7 @@ fn build_styled_node(
                             property: decl.property.clone(),
                             value: decl.value.clone(),
                             specificity,
-                            source_order: rule_index,
+                            source_order: rule.position,
                             origin: Origin::Author,
                         });
                     }
@@ -347,81 +347,111 @@ fn build_styled_node(
                             root_font_size,
                         );
                     }
-                } else {
-                    // Property not specified — apply defaulting
-                    if properties::is_inherited(prop_id) {
-                        copy_property(&mut computed, parent_style, prop_id);
+                } else if properties::is_inherited(prop_id) {
+                    copy_property(&mut computed, parent_style, prop_id);
+                }
+            }
+
+            // User-Agent default stylesheet: apply tag-specific defaults for un-specified properties
+            if let NodeKind::Element { tag_start, tag_end } = &node.kind {
+                let tag_name =
+                    std::str::from_utf8(&source[*tag_start as usize..*tag_end as usize])
+                        .unwrap_or("")
+                        .to_ascii_lowercase();
+
+                if !specified.contains_key("display") {
+                    match tag_name.as_str() {
+                        "head" | "title" | "meta" | "script" | "style" | "link" => {
+                            computed.display = Display::None;
+                        }
+                        "img" => {
+                            computed.display = Display::InlineBlock;
+                        }
+                        _ if is_default_block_tag(&tag_name) => {
+                            computed.display = Display::Block;
+                        }
+                        _ => {}
                     }
-                    // Non-inherited: keep initial value from Default impl
-                    // User-Agent default stylesheet: block tags default to Display::Block & base colors
-                    if let NodeKind::Element { tag_start, tag_end } = &node.kind {
-                        let tag_name =
-                            std::str::from_utf8(&source[*tag_start as usize..*tag_end as usize])
-                                .unwrap_or("")
-                                .to_ascii_lowercase();
+                }
 
-                        if prop_id == PropertyId::Display {
-                            match tag_name.as_str() {
-                                "head" | "title" | "meta" | "script" | "style" | "link" => {
-                                    computed.display = Display::None;
-                                }
-                                "img" => {
-                                    computed.display = Display::InlineBlock;
-                                    if computed.width.is_none() {
-                                        computed.width = Some(160.0);
-                                    }
-                                    if computed.height.is_none() {
-                                        computed.height = Some(100.0);
-                                    }
-                                }
-                                _ if is_default_block_tag(&tag_name) => {
-                                    computed.display = Display::Block;
-                                }
-                                _ => {}
-                            }
-                        }
+                if tag_name == "img" {
+                    if computed.width.is_none() {
+                        computed.width = Some(160.0);
+                    }
+                    if computed.height.is_none() {
+                        computed.height = Some(100.0);
+                    }
+                }
 
-                        if !specified.contains_key("background-color") {
-                            match tag_name.as_str() {
-                                "body" => {
-                                    computed.background_color = values::Color::rgb(248, 250, 252);
-                                    if !specified.contains_key("margin-top") {
-                                        computed.margin = values::Edges::uniform(8.0);
-                                    }
-                                }
-                                "h1" => {
-                                    computed.background_color = values::Color::rgb(240, 249, 255);
-                                    computed.border_color = values::Color::rgb(2, 132, 199);
-                                    computed.border_width.left = 4.0;
-                                }
-                                "div" => {
-                                    computed.background_color = values::Color::rgb(248, 250, 252);
-                                    computed.border_color = values::Color::rgb(203, 213, 225);
-                                    computed.border_width = values::Edges::uniform(1.0);
-                                }
-                                "img" => {
-                                    computed.background_color = values::Color::rgb(226, 232, 240);
-                                    computed.border_color = values::Color::rgb(203, 213, 225);
-                                    computed.border_width = values::Edges::uniform(1.0);
-                                }
-                                _ => {}
-                            }
+                if !specified.contains_key("background-color") {
+                    match tag_name.as_str() {
+                        "body" => {
+                            computed.background_color = values::Color::rgb(248, 250, 252);
                         }
+                        "h1" => {
+                            computed.background_color = values::Color::rgb(240, 249, 255);
+                        }
+                        "div" => {
+                            computed.background_color = values::Color::rgb(248, 250, 252);
+                        }
+                        "img" => {
+                            computed.background_color = values::Color::rgb(226, 232, 240);
+                        }
+                        _ => {}
+                    }
+                }
 
-                        if !specified.contains_key("color") {
-                            match tag_name.as_str() {
-                                "h1" => {
-                                    computed.color = values::Color::rgb(3, 105, 161);
-                                }
-                                _ => {}
-                            }
-                        }
+                if !specified.contains_key("color") && computed.color == values::Color::BLACK {
+                    if tag_name == "h1" {
+                        computed.color = values::Color::rgb(3, 105, 161);
+                    }
+                }
 
-                        if !specified.contains_key("padding-top") {
-                            if tag_name == "h1" || tag_name == "div" {
-                                computed.padding = values::Edges::uniform(12.0);
-                            }
+                if !specified.contains_key("border")
+                    && !specified.contains_key("border-color")
+                {
+                    match tag_name.as_str() {
+                        "h1" => {
+                            computed.border_color = values::Color::rgb(2, 132, 199);
                         }
+                        "div" | "img" => {
+                            computed.border_color = values::Color::rgb(203, 213, 225);
+                        }
+                        _ => {}
+                    }
+                }
+
+                if !specified.contains_key("border")
+                    && !specified.contains_key("border-width")
+                    && !specified.contains_key("border-left-width")
+                    && !specified.contains_key("border-top-width")
+                    && !specified.contains_key("border-right-width")
+                    && !specified.contains_key("border-bottom-width")
+                {
+                    match tag_name.as_str() {
+                        "h1" => {
+                            computed.border_width.left = 4.0;
+                        }
+                        "div" | "img" => {
+                            computed.border_width = values::Edges::uniform(1.0);
+                        }
+                        _ => {}
+                    }
+                }
+
+                if !specified.contains_key("margin")
+                    && !specified.contains_key("margin-top")
+                {
+                    if tag_name == "body" {
+                        computed.margin = values::Edges::uniform(8.0);
+                    }
+                }
+
+                if !specified.contains_key("padding")
+                    && !specified.contains_key("padding-top")
+                {
+                    if tag_name == "h1" || tag_name == "div" {
+                        computed.padding = values::Edges::uniform(12.0);
                     }
                 }
             }
@@ -590,6 +620,64 @@ fn selector_matches(selector: &Selector, node_id: NodeId, dom: &Dom, source: &[u
     }
 }
 
+fn match_selector_from_step(
+    steps: &[crate::css_parser::SelectorStep],
+    step_idx: usize,
+    current_node: NodeId,
+    dom: &Dom,
+    source: &[u8],
+) -> bool {
+    let current_step = &steps[step_idx];
+
+    if !compound_matches(&current_step.compound, current_node, dom, source) {
+        return false;
+    }
+
+    if step_idx == 0 {
+        return true;
+    }
+
+    let combinator = current_step.combinator;
+    let prev_step_idx = step_idx - 1;
+
+    match combinator {
+        crate::css_parser::Combinator::Child => {
+            if let Some(parent_id) = dom.get(current_node).parent {
+                match_selector_from_step(steps, prev_step_idx, parent_id, dom, source)
+            } else {
+                false
+            }
+        }
+        crate::css_parser::Combinator::Descendant => {
+            let mut parent_opt = dom.get(current_node).parent;
+            while let Some(parent_id) = parent_opt {
+                if match_selector_from_step(steps, prev_step_idx, parent_id, dom, source) {
+                    return true;
+                }
+                parent_opt = dom.get(parent_id).parent;
+            }
+            false
+        }
+        crate::css_parser::Combinator::NextSibling => {
+            if let Some(sibling_id) = get_previous_element_sibling(current_node, dom) {
+                match_selector_from_step(steps, prev_step_idx, sibling_id, dom, source)
+            } else {
+                false
+            }
+        }
+        crate::css_parser::Combinator::SubsequentSibling => {
+            let mut sibling_opt = get_previous_element_sibling(current_node, dom);
+            while let Some(sibling_id) = sibling_opt {
+                if match_selector_from_step(steps, prev_step_idx, sibling_id, dom, source) {
+                    return true;
+                }
+                sibling_opt = get_previous_element_sibling(sibling_id, dom);
+            }
+            false
+        }
+    }
+}
+
 fn selector_steps_match(
     steps: &[crate::css_parser::SelectorStep],
     node_id: NodeId,
@@ -599,80 +687,7 @@ fn selector_steps_match(
     if steps.is_empty() {
         return false;
     }
-
-    let last_step = &steps[steps.len() - 1];
-    if !compound_matches(&last_step.compound, node_id, dom, source) {
-        return false;
-    }
-
-    if steps.len() == 1 {
-        return true;
-    }
-
-    let mut current_node = node_id;
-    let mut step_idx = steps.len() - 1;
-
-    while step_idx > 0 {
-        let combinator = steps[step_idx].combinator;
-        let target_step = &steps[step_idx - 1];
-
-        match combinator {
-            crate::css_parser::Combinator::Child => {
-                let parent_id = match dom.get(current_node).parent {
-                    Some(pid) => pid,
-                    None => return false,
-                };
-                if !compound_matches(&target_step.compound, parent_id, dom, source) {
-                    return false;
-                }
-                current_node = parent_id;
-            }
-            crate::css_parser::Combinator::Descendant => {
-                let mut parent_opt = dom.get(current_node).parent;
-                let mut matched = false;
-                while let Some(parent_id) = parent_opt {
-                    if compound_matches(&target_step.compound, parent_id, dom, source) {
-                        current_node = parent_id;
-                        matched = true;
-                        break;
-                    }
-                    parent_opt = dom.get(parent_id).parent;
-                }
-                if !matched {
-                    return false;
-                }
-            }
-            crate::css_parser::Combinator::NextSibling => {
-                let sibling_id = match get_previous_element_sibling(current_node, dom) {
-                    Some(sid) => sid,
-                    None => return false,
-                };
-                if !compound_matches(&target_step.compound, sibling_id, dom, source) {
-                    return false;
-                }
-                current_node = sibling_id;
-            }
-            crate::css_parser::Combinator::SubsequentSibling => {
-                let mut sibling_opt = get_previous_element_sibling(current_node, dom);
-                let mut matched = false;
-                while let Some(sibling_id) = sibling_opt {
-                    if compound_matches(&target_step.compound, sibling_id, dom, source) {
-                        current_node = sibling_id;
-                        matched = true;
-                        break;
-                    }
-                    sibling_opt = get_previous_element_sibling(sibling_id, dom);
-                }
-                if !matched {
-                    return false;
-                }
-            }
-        }
-
-        step_idx -= 1;
-    }
-
-    true
+    match_selector_from_step(steps, steps.len() - 1, node_id, dom, source)
 }
 
 fn get_previous_element_sibling(node_id: NodeId, dom: &Dom) -> Option<NodeId> {

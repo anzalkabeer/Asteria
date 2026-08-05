@@ -90,6 +90,7 @@ impl Selector {
 pub struct StyleRule {
     pub selectors: Vec<Selector>,
     pub declarations: Vec<Declaration>,
+    pub position: usize,
 }
 
 /// A `@media` rule containing nested style rules.
@@ -123,6 +124,7 @@ pub struct CssParser<'a> {
     tokens: &'a [CssToken],
     source: &'a [u8],
     pos: usize,
+    next_position: usize,
 }
 
 impl<'a> CssParser<'a> {
@@ -131,6 +133,7 @@ impl<'a> CssParser<'a> {
             tokens,
             source,
             pos: 0,
+            next_position: 0,
         }
     }
 
@@ -149,8 +152,8 @@ impl<'a> CssParser<'a> {
                 if self.current_slice().eq_ignore_ascii_case("@media") {
                     if let Some(media_rule) = self.parse_media_rule() {
                         media_rules.push(media_rule);
-                        continue;
                     }
+                    continue;
                 }
                 self.skip_at_rule();
                 continue;
@@ -176,6 +179,15 @@ impl<'a> CssParser<'a> {
             header_text.push_str(self.current_slice());
             self.advance();
         }
+
+        let header_lower = header_text.trim().to_ascii_lowercase();
+        let unsupported_media = header_lower.contains("print")
+            || header_lower.contains("speech")
+            || header_lower.contains("handheld")
+            || header_lower.contains("projection")
+            || header_lower.contains("tv")
+            || header_lower.contains("not screen")
+            || header_lower.contains("not all");
 
         // Parse min-width / max-width from header string
         if let Some(pos) = header_text.find("min-width") {
@@ -226,11 +238,15 @@ impl<'a> CssParser<'a> {
                 self.advance(); // skip '}'
             }
 
-            Some(MediaRule {
-                min_width,
-                max_width,
-                rules,
-            })
+            if unsupported_media {
+                None
+            } else {
+                Some(MediaRule {
+                    min_width,
+                    max_width,
+                    rules,
+                })
+            }
         } else {
             None
         }
@@ -262,9 +278,13 @@ impl<'a> CssParser<'a> {
             self.advance(); // skip '}'
         }
 
+        let position = self.next_position;
+        self.next_position += 1;
+
         Some(StyleRule {
             selectors,
             declarations,
+            position,
         })
     }
 

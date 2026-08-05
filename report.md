@@ -18,24 +18,23 @@ Everything in the engine pipeline—from HTML parsing and CSS specificity cascad
 
 ### 1. HTML `<img>` Tag & Display Command Pipeline
 
-- **Display Command**: Extended `DisplayCommand::Image` in [`src/paint.rs`](<file:///z:/Documents/Codes%20written%20by%20me%20(New)/Asteria/Asteria/src/paint.rs>) to extract `src` and `alt` attributes from DOM element nodes.
-- **Scene Node Graph**: Added `SceneNodeKind::Image` handling in [`src/scene.rs`](<file:///z:/Documents/Codes%20written%20by%20me%20(New)/Asteria/Asteria/src/scene.rs>).
-- **GPU Batch Builder**: Updated [`src/renderer/commands/command_builder.rs`](<file:///z:/Documents/Codes%20written%20by%20me%20(New)/Asteria/Asteria/src/renderer/commands/command_builder.rs>) to render images as solid background frames (`#e2e8f0`), 1px outline borders (`#cbd5e1`), and fitted image text labels.
+- **Display Command**: Extended `DisplayCommand::Image` in `src/paint.rs` to extract `src` and `alt` attributes from DOM element nodes.
+- **Scene Node Graph**: Added `SceneNodeKind::Image` handling in `src/scene.rs`.
+- **GPU Batch Builder**: Updated `src/renderer/commands/command_builder.rs` to render images as solid background frames (`#e2e8f0`), 1px outline borders (`#cbd5e1`), and fitted image text labels.
 
 ### 2. CSS `display: flex` Layout Engine
 
-- **Values & Styling**: Added `Display::Flex` enum variant and property parsing in [`src/values.rs`](<file:///z:/Documents/Codes%20written%20by%20me%20(New)/Asteria/Asteria/src/values.rs>) & [`src/style.rs`](<file:///z:/Documents/Codes%20written%20by%20me%20(New)/Asteria/Asteria/src/style.rs>).
-- **Flex Layout Solver**: Implemented `layout_flex` in [`src/layout.rs`](<file:///z:/Documents/Codes%20written%20by%20me%20(New)/Asteria/Asteria/src/layout.rs>) for horizontal row positioning of child layout boxes with row wrapping when container bounds are reached.
+- **Values & Styling**: Added `Display::Flex` enum variant and property parsing in `src/values.rs` & `src/style.rs`.
+- **Flex Layout Solver**: Implemented `layout_flex` in `src/layout.rs` for horizontal row positioning of child layout boxes with row wrapping when container bounds are reached.
 
-### 3. W3C Content-Box Sizing Formula
-
-- Updated `calculate_block_width` in [`src/layout.rs`](<file:///z:/Documents/Codes%20written%20by%20me%20(New)/Asteria/Asteria/src/layout.rs>):
-  $$\text{content\_width} = (\text{specified\_width} - \text{padding\_left} - \text{padding\_right} - \text{border\_left} - \text{border\_right}).\max(0.0)$$
-- This ensures elements with specified width (e.g. `.card { width: 200px; padding: 16px; border: 1px; }`) calculate exact $166\text{px}$ content boxes.
+### 3. W3C Default Content-Box Sizing
+- Updated `calculate_block_width` in `src/layout.rs`:
+  $$\text{content\_width} = \text{specified\_width}$$
+- Follows standard CSS `content-box` semantics: specified `width: 200px` sets the content box width to 200px, with padding (16px) and borders (1px) added around the content box to yield a 234px total border-box width.
 
 ### 4. CSS `border` Shorthand Expansion
 
-- Added `parse_border_shorthand` in [`src/values.rs`](<file:///z:/Documents/Codes%20written%20by%20me%20(New)/Asteria/Asteria/src/values.rs>) and expanded `border: 1px solid #bae6fd` into longhand properties (`border-top-width`, `border-color`, `border-style`) in [`src/style.rs`](<file:///z:/Documents/Codes%20written%20by%20me%20(New)/Asteria/Asteria/src/style.rs>).
+- Added `parse_border_shorthand` in `src/values.rs` and expanded `border: 1px solid #bae6fd` into longhand properties (`border-top-width`, `border-color`, `border-style`) in `src/style.rs`.
 - All cards and flex containers now render crisp, visible borders.
 
 ---
@@ -44,8 +43,8 @@ Everything in the engine pipeline—from HTML parsing and CSS specificity cascad
 
 | #     | Issue / Symptom                           | Root Cause                                                                                                                                                                                                                    | Solution Implemented                                                                                                                                                                                                               |
 | ----- | ----------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **1** | **Flex Container Layout Breakage**        | HTML whitespace text nodes between `<div>` tags were being turned into `AnonymousBlock` boxes, pushing flex items into vertical stack flow.                                                                                   | Filtered whitespace-only `InlineNode` text children inside `BoxType::FlexNode` containers in `build_layout_tree` ([`src/layout.rs`](<file:///z:/Documents/Codes%20written%20by%20me%20(New)/Asteria/Asteria/src/layout.rs#L495>)). |
-| **2** | **Paragraph Text Bleeding Outside Cards** | Inline text nodes were setting their `content.width` to their unconstrained single-line intrinsic length (~400px), causing `paint.rs` and `batch_builder.rs` to wrap text at 400px instead of the card's 168px content width. | Clamped text node `content.width` to `container_max_w` in `layout_block_children` ([`src/layout.rs`](<file:///z:/Documents/Codes%20written%20by%20me%20(New)/Asteria/Asteria/src/layout.rs#L307>)).                                |
+| **1** | **Flex Container Layout Breakage**        | HTML whitespace text nodes between `<div>` tags were being turned into `AnonymousBlock` boxes, pushing flex items into vertical stack flow.                                                                                   | Filtered whitespace-only `InlineNode` text children inside `BoxType::FlexNode` containers in `build_layout_tree` (`src/layout.rs`). |
+| **2** | **Paragraph Text Bleeding Outside Cards** | Inline text nodes were setting their `content.width` to their unconstrained single-line intrinsic length (~400px), causing `paint.rs` and `batch_builder.rs` to wrap text at 400px instead of the card's 168px content width. | Clamped text node `content.width` to `container_max_w` in `layout_block_children` (`src/layout.rs`).                                |
 | **3** | **Missing Card & Container Borders**      | The CSS engine supported longhand border properties (`border-top-width`), but `border: 1px solid #bae6fd` shorthand was ignored by the parser.                                                                                | Added `is_shorthand("border")` and `parse_border_shorthand` to expand `border` into all 4 edge widths, border color, and border style.                                                                                             |
 
 ---

@@ -32,12 +32,17 @@ impl BatchBuilder {
         self.indices.clear();
     }
 
-    pub fn build_batches(&mut self, commands: &[RenderCommand]) {
+    pub fn build_batches(&mut self, commands: &[RenderCommand], viewport_width: f32) {
         self.clear();
-        self.append_batches(commands);
+        self.append_batches(commands, viewport_width);
     }
 
-    pub fn append_batches(&mut self, commands: &[RenderCommand]) {
+    pub fn append_batches(&mut self, commands: &[RenderCommand], viewport_width: f32) {
+        let vp_w = if viewport_width > 50.0 {
+            viewport_width
+        } else {
+            800.0
+        };
         for cmd in commands {
             match cmd {
                 RenderCommand::SolidRect { rect, rgba } => {
@@ -59,8 +64,8 @@ impl BatchBuilder {
                     let px = (char_w / 6.5).clamp(1.0, 2.4);
 
                     let start_x = rect[0];
-                    let available_width = if rect[2] > 10.0 { rect[2] } else { 700.0 };
-                    let max_x = (start_x + available_width).min(750.0);
+                    let available_width = if rect[2] > 10.0 { rect[2] } else { vp_w - 50.0 };
+                    let max_x = (start_x + available_width).min(vp_w);
 
                     let line_height = (font_size * 1.35).max(18.0);
                     let mut cur_x = start_x;

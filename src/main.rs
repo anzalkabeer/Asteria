@@ -34,7 +34,7 @@ fn main() {
         &args[1]
     } else {
         println!("No file provided (or only --window passed). Using built-in sample HTML.\n");
-        println!("Usage: cargo run -- <path-to-html-file> [--window]\n");
+        println!("Usage: cargo run -- <path-to-html-file> [--window] [--cli]\n");
         "<sample>"
     };
 
@@ -208,8 +208,12 @@ fn main() {
         let mut segments = asteria::segment::SegmentBuilder::new(256.0);
         let _ = segments.build_segments(800.0, 600.0);
 
+<<<<<<< HEAD
 
 
+=======
+        // ─── Performance Profiler & AOF Inspection ─────────────────
+>>>>>>> 39d3626 (Final push)
         profiler.set_counts(dom.nodes.len(), box_count, display_list.commands.len());
         let report = profiler.finish_pipeline();
 
@@ -236,7 +240,11 @@ fn main() {
 
         if !args.contains(&"--cli".to_string()) {
             println!("\n── Launching Hardware Renderer (wgpu) & OS Window Loop ─────────");
+<<<<<<< HEAD
             asteria::renderer::window::window::run_window_loop(scene, tab_manager);
+=======
+            asteria::renderer::window::window::run_window_loop(tab_manager, scene);
+>>>>>>> 39d3626 (Final push)
             return;
         }
     } else {

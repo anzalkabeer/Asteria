@@ -251,3 +251,34 @@ fn test_styled_tree_output_contains_typed_values() {
         output
     );
 }
+
+#[test]
+fn test_unsupported_media_queries_filtered() {
+    let stylesheet = Stylesheet::parse(
+        b"@media print { body { color: red; } }\n@media not screen { div { color: blue; } }",
+    );
+    assert_eq!(stylesheet.media_rules.len(), 0);
+}
+
+#[test]
+fn test_descendant_selector_backtracking() {
+    let (styled, _, _) = styled_tree(
+        "<div class='outer'><div><div class='inner'><p>Test</p></div></div></div>",
+        ".outer p { color: blue; }",
+    );
+
+    let p_node = &styled.children[0].children[0].children[0].children[0];
+    assert_eq!(p_node.styles.color, asteria::values::Color::rgb(0, 0, 255));
+}
+
+#[test]
+fn test_document_position_cascade_order() {
+    let (styled, _, _) = styled_tree(
+        "<div>Text</div>",
+        "@media (min-width: 100px) { div { color: red; } }\ndiv { color: blue; }",
+    );
+
+    let div = &styled.children[0];
+    // Later top-level rule overrides earlier media rule at equal specificity
+    assert_eq!(div.styles.color, asteria::values::Color::rgb(0, 0, 255));
+}

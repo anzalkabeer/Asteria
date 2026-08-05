@@ -115,7 +115,7 @@ Test live hardware rendering (`wgpu`), window reflow, image frames, and flexbox 
 # Test Image Frames, CSS Flexbox Row Layout & Card Wrapping
 cargo run -- tests/fixtures/gallery.html
 
-# Test Multi-Column Article Layouts, Headers & Stylesheets
+# Test Article Layouts, Headers, Callouts & Stylesheets
 cargo run -- tests/fixtures/blog.html
 ```
 

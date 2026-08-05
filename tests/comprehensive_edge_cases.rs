@@ -272,7 +272,7 @@ fn test_layout_margin_auto_horizontal_centering() {
     let mut styled_store = None;
 
     let html = r#"<html><body><div id="centered"></div></body></html>"#;
-    let css = r#"#centered { width: 400px; margin-left: auto; margin-right: auto; }"#;
+    let css = r#"body { margin: 0; } #centered { width: 400px; margin-left: auto; margin-right: auto; padding: 0; border: 0px; }"#;
 
     let layout = parse_and_layout_full(
         html,
@@ -305,8 +305,8 @@ fn test_layout_nested_coordinate_accumulation() {
     let html = r#"<html><body><div id="parent"><div id="child"></div></div></body></html>"#;
     let css = r#"
         body { margin: 0; padding: 0; }
-        #parent { margin-left: 50px; margin-top: 30px; padding-left: 20px; padding-top: 10px; border-left-width: 5px; border-top-width: 5px; }
-        #child { margin-left: 15px; margin-top: 15px; width: 100px; height: 50px; }
+        #parent { margin-left: 50px; margin-top: 30px; padding-left: 20px; padding-top: 10px; border-left-width: 5px; border-top-width: 5px; border-right-width: 0px; border-bottom-width: 0px; }
+        #child { margin-left: 15px; margin-top: 15px; width: 100px; height: 50px; border-left-width: 0px; border-top-width: 0px; border-right-width: 0px; border-bottom-width: 0px; padding: 0px; }
     "#;
 
     let layout = parse_and_layout_full(

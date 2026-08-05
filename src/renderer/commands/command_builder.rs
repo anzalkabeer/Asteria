@@ -114,10 +114,12 @@ impl CommandBuilder {
 
                     if let Some(text_run) = &scene.texts[i] {
                         let raw = &text_run.text;
+                        let char_count = raw.chars().count();
                         let label = if raw.is_empty() {
                             "[IMG]".to_string()
-                        } else if raw.len() > 14 {
-                            format!("[IMG: {}..]", &raw[..12.min(raw.len())])
+                        } else if char_count > 14 {
+                            let truncated: String = raw.chars().take(12).collect();
+                            format!("[IMG: {}..]", truncated)
                         } else {
                             raw.clone()
                         };

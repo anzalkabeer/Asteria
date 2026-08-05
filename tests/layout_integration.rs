@@ -53,7 +53,7 @@ fn test_block_layout_width_expansion() {
     let mut styled_store = None;
 
     let html = r#"<html><body><div id="container"></div></body></html>"#;
-    let css = r#"#container { margin: 10px; padding: 20px; }"#;
+    let css = r#"#container { margin: 10px; padding: 20px; border: 0px; }"#;
 
     let layout = parse_and_layout(
         html,
@@ -71,11 +71,11 @@ fn test_block_layout_width_expansion() {
     let container_box = &body_box.children[0];
 
     assert_eq!(container_box.box_type, BoxType::BlockNode);
-    // Viewport: 800px. div#container margin=10px, padding=20px, border=0px.
-    // Content width = 800 - (10+10) - (20+20) = 740px
-    assert_eq!(container_box.dimensions.content.width, 740.0);
-    // X position = 0 (body) + 10 (margin) + 20 (padding) = 30px
-    assert_eq!(container_box.dimensions.content.x, 30.0);
+    // Viewport: 800px. body margin=8px (avail=784px). div#container margin=10px, padding=20px, border=0px.
+    // Content width = 784 - (10+10) - (20+20) = 724px
+    assert_eq!(container_box.dimensions.content.width, 724.0);
+    // X position = 8 (body margin) + 10 (margin) + 20 (padding) = 38px
+    assert_eq!(container_box.dimensions.content.x, 38.0);
 }
 
 #[test]
@@ -185,4 +185,31 @@ fn test_layout_inline_side_by_side_flow() {
         span2.dimensions.content.x,
         p_box.dimensions.content.x + 44.0
     );
+}
+
+#[test]
+fn test_content_box_sizing_specified_width() {
+    let mut dom_store = None;
+    let mut bytes_store = Vec::new();
+    let mut styled_store = None;
+
+    let html = r#"<html><body><div class="box">Content</div></body></html>"#;
+    let css = r#".box { width: 200px; padding: 16px; border: 1px solid black; }"#;
+
+    let layout = parse_and_layout(
+        html,
+        css,
+        800.0,
+        600.0,
+        &mut dom_store,
+        &mut bytes_store,
+        &mut styled_store,
+    );
+
+    let box_node = &layout.children[0].children[0].children[0];
+    // Under CSS content-box semantics, specified width (200px) is assigned to content width
+    assert_eq!(box_node.dimensions.content.width, 200.0);
+    assert_eq!(box_node.dimensions.padding.left, 16.0);
+    assert_eq!(box_node.dimensions.border.left, 1.0);
+    assert_eq!(box_node.dimensions.border_box().width, 234.0);
 }

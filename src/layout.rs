@@ -151,7 +151,7 @@ impl<'a> LayoutBox<'a> {
         let auto_width = style.map(|s| s.width.is_none()).unwrap_or(true);
         let mut width = style.and_then(|s| s.width).unwrap_or(0.0);
 
-        let margin_left = style.map(|s| s.margin.left).unwrap_or(0.0);
+        let mut margin_left = style.map(|s| s.margin.left).unwrap_or(0.0);
         let mut margin_right = style.map(|s| s.margin.right).unwrap_or(0.0);
         let margin_top = style.map(|s| s.margin.top).unwrap_or(0.0);
         let margin_bottom = style.map(|s| s.margin.bottom).unwrap_or(0.0);
@@ -174,14 +174,15 @@ impl<'a> LayoutBox<'a> {
             let available_width = (containing_block.content.width - total_non_width).max(0.0);
             width = available_width;
         } else {
-            // Specified width: subtract padding & border to compute content-box width per CSS spec
-            let padding_border_sum = padding_left + padding_right + border_left + border_right;
-            let content_w = (width - padding_border_sum).max(0.0);
-            width = content_w;
-
+            // Specified width under CSS content-box semantics: assigned width is content width
             let underflow = containing_block.content.width - (width + total_non_width);
             if underflow > 0.0 {
-                margin_right += underflow;
+                if margin_left == 0.0 && margin_right == 0.0 {
+                    margin_left = underflow / 2.0;
+                    margin_right = underflow / 2.0;
+                } else {
+                    margin_right += underflow;
+                }
             }
         }
 
@@ -385,13 +386,16 @@ impl<'a> LayoutBox<'a> {
                 .and_then(|n| n.styles.width)
                 .unwrap_or(200.0);
 
+            let margin_w = child
+                .styled_node
+                .map_or(0.0, |n| n.styles.margin.left + n.styles.margin.right);
             let padding_w = child
                 .styled_node
                 .map_or(0.0, |n| n.styles.padding.left + n.styles.padding.right);
             let border_w = child.styled_node.map_or(0.0, |n| {
                 n.styles.border_width.left + n.styles.border_width.right
             });
-            let outer_item_w = child_w + padding_w + border_w;
+            let outer_item_w = child_w + margin_w + padding_w + border_w;
 
             // Flex Row Line Wrap Check: if adding child exceeds container max width, wrap to next flex row!
             if cursor_x > start_x && (cursor_x + outer_item_w > container_max_x) {
@@ -515,9 +519,11 @@ pub fn build_layout_tree<'a>(
             .collect();
     } else {
         // Process children to wrap inline nodes in anonymous block boxes if mixed
-        let contains_blocks = child_boxes
-            .iter()
-            .any(|b| b.box_type == BoxType::BlockNode || b.box_type == BoxType::AnonymousBlock);
+        let contains_blocks = child_boxes.iter().any(|b| {
+            b.box_type == BoxType::BlockNode
+                || b.box_type == BoxType::AnonymousBlock
+                || b.box_type == BoxType::FlexNode
+        });
 
         if contains_blocks {
             let mut final_children = Vec::new();

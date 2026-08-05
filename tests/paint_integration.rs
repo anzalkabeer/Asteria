@@ -6,7 +6,6 @@
 //   - CSS paint order (Background -> Border -> Text -> Children) is preserved
 
 use asteria::css_parser::Stylesheet;
-
 use asteria::layout::layout_document;
 use asteria::paint::{DisplayCommand, build_display_list};
 use asteria::parser::Parser;
@@ -16,7 +15,7 @@ use asteria::values::Color;
 
 #[test]
 fn test_paint_engine_display_list_generation() {
-    let html = r#"<html><body><div id="card" style="background-color: #f0f0f0; border-color: red; border-top-width: 2px;"><h1>Title</h1></div></body></html>"#;
+    let html = r#"<html><body><div id="card" style="background-color: #f0f0f0; border-color: red; border-style: solid; border-top-width: 2px;"><h1>Title</h1></div></body></html>"#;
     let css = r#"h1 { color: blue; font-size: 24px; }"#;
 
     let bytes = html.as_bytes();
