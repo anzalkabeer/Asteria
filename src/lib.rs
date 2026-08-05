@@ -10,6 +10,7 @@ pub mod image;
 pub mod interner;
 pub mod layout;
 pub mod loader;
+pub mod net;
 pub mod paint;
 pub mod parser;
 pub mod pool;

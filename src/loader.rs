@@ -3,6 +3,7 @@ use std::fs;
 use std::path::Path;
 
 use crate::dom::{Dom, NodeId, NodeKind};
+use crate::net::http::HttpClient;
 
 // ─── Resource Loader & Cache ─────────────────────────────────────
 //
@@ -164,6 +165,66 @@ impl ResourceLoader {
         let stylesheets = self.discover_stylesheets(&dom, &html.bytes, base_dir.as_deref())?;
 
         Ok(PageResources { html, stylesheets })
+    }
+
+    /// Load a page from an HTTP URL.
+    ///
+    /// This is the network entry point:
+    /// 1. Fetch the HTML over HTTP (DNS → TCP → HTTP GET)
+    /// 2. Parse the HTML into a DOM for resource discovery
+    /// 3. Discover `<style>` blocks (external CSS fetching over HTTP deferred)
+    /// 4. Return a `PageResources` bundle
+    ///
+    /// External `<link rel="stylesheet">` referenced by relative paths cannot be
+    /// fetched over the network yet — only inline `<style>` blocks are collected.
+    /// Full sub-resource fetching will be added as the network layer matures.
+    pub fn load_url(&mut self, url: &str) -> Result<PageResources, LoadError> {
+        let mut http_client = HttpClient::new();
+
+        let response = http_client.get(url).map_err(|e| LoadError::NetworkError {
+            url: url.to_string(),
+            message: format!("{}", e),
+        })?;
+
+        if !response.is_success() {
+            return Err(LoadError::NetworkError {
+                url: url.to_string(),
+                message: format!("HTTP {} {}", response.status_code, response.status_text),
+            });
+        }
+
+        let html = Resource {
+            url: url.to_string(),
+            resource_type: ResourceType::Html,
+            bytes: response.body,
+        };
+
+        self.cache.insert(html.clone());
+
+        // Parse for resource discovery
+        let mut tokenizer = crate::tokenizer::Tokenizer::new(&html.bytes);
+        let tokens = tokenizer.tokenize();
+        let parser = crate::parser::Parser::new(&tokens, &html.bytes);
+        let dom = parser.parse();
+
+        // Discover inline stylesheets only (no base_dir for network resources)
+        let stylesheets = self
+            .discover_stylesheets(&dom, &html.bytes, None)
+            .unwrap_or_default();
+
+        Ok(PageResources { html, stylesheets })
+    }
+
+    /// Unified resource loading: auto-detects URLs vs file paths.
+    ///
+    /// If the input starts with `http://`, routes through `load_url()`.
+    /// Otherwise, treats it as a local file path via `load_file()`.
+    pub fn load_resource(&mut self, target: &str) -> Result<PageResources, LoadError> {
+        if target.starts_with("http://") {
+            self.load_url(target)
+        } else {
+            self.load_file(target)
+        }
     }
 
     /// Load from an in-memory HTML string (for testing or built-in samples).
@@ -418,6 +479,8 @@ fn normalize_path_string(path: &str) -> String {
 pub enum LoadError {
     /// Failed to read a file from disk
     IoError { path: String, message: String },
+    /// Failed to fetch a resource over the network
+    NetworkError { url: String, message: String },
 }
 
 impl std::fmt::Display for LoadError {
@@ -425,6 +488,9 @@ impl std::fmt::Display for LoadError {
         match self {
             LoadError::IoError { path, message } => {
                 write!(f, "Failed to read '{}': {}", path, message)
+            }
+            LoadError::NetworkError { url, message } => {
+                write!(f, "Failed to fetch '{}': {}", url, message)
             }
         }
     }

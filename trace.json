@@ -1,14 +1,14 @@
 [
-  {"name": "Frame", "cat": "engine", "ph": "B", "ts": 9, "pid": 1, "tid": 1},
-  {"name": "Parse", "cat": "engine", "ph": "B", "ts": 1594, "pid": 1, "tid": 1},
-  {"name": "Parse", "cat": "engine", "ph": "E", "ts": 1695, "pid": 1, "tid": 1},
-  {"name": "Style", "cat": "engine", "ph": "B", "ts": 3644, "pid": 1, "tid": 1},
-  {"name": "Style", "cat": "engine", "ph": "E", "ts": 3830, "pid": 1, "tid": 1},
-  {"name": "Layout", "cat": "engine", "ph": "B", "ts": 4100, "pid": 1, "tid": 1},
-  {"name": "Layout", "cat": "engine", "ph": "E", "ts": 4150, "pid": 1, "tid": 1},
-  {"name": "Paint", "cat": "engine", "ph": "B", "ts": 4671, "pid": 1, "tid": 1},
-  {"name": "Paint", "cat": "engine", "ph": "E", "ts": 4689, "pid": 1, "tid": 1},
-  {"name": "SceneGraph", "cat": "engine", "ph": "B", "ts": 5489, "pid": 1, "tid": 1},
-  {"name": "SceneGraph", "cat": "engine", "ph": "E", "ts": 5506, "pid": 1, "tid": 1},
-  {"name": "Frame", "cat": "engine", "ph": "E", "ts": 5814, "pid": 1, "tid": 1}
+  {"name": "Frame", "cat": "engine", "ph": "B", "ts": 87, "pid": 1, "tid": 1},
+  {"name": "Parse", "cat": "engine", "ph": "B", "ts": 1742, "pid": 1, "tid": 1},
+  {"name": "Parse", "cat": "engine", "ph": "E", "ts": 1845, "pid": 1, "tid": 1},
+  {"name": "Style", "cat": "engine", "ph": "B", "ts": 2516, "pid": 1, "tid": 1},
+  {"name": "Style", "cat": "engine", "ph": "E", "ts": 2836, "pid": 1, "tid": 1},
+  {"name": "Layout", "cat": "engine", "ph": "B", "ts": 2939, "pid": 1, "tid": 1},
+  {"name": "Layout", "cat": "engine", "ph": "E", "ts": 2957, "pid": 1, "tid": 1},
+  {"name": "Paint", "cat": "engine", "ph": "B", "ts": 3006, "pid": 1, "tid": 1},
+  {"name": "Paint", "cat": "engine", "ph": "E", "ts": 3013, "pid": 1, "tid": 1},
+  {"name": "SceneGraph", "cat": "engine", "ph": "B", "ts": 3051, "pid": 1, "tid": 1},
+  {"name": "SceneGraph", "cat": "engine", "ph": "E", "ts": 3069, "pid": 1, "tid": 1},
+  {"name": "Frame", "cat": "engine", "ph": "E", "ts": 3121, "pid": 1, "tid": 1}
 ]
