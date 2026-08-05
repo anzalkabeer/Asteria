@@ -137,6 +137,15 @@ fn is_default_block_tag(tag: &str) -> bool {
 }
 
 pub fn resolve_styles(dom: &Dom, stylesheet: &Stylesheet, source: &[u8]) -> StyledNode {
+    resolve_styles_with_viewport(dom, stylesheet, source, 800.0)
+}
+
+pub fn resolve_styles_with_viewport(
+    dom: &Dom,
+    stylesheet: &Stylesheet,
+    source: &[u8],
+    viewport_width: f32,
+) -> StyledNode {
     let root_style = ComputedStyle::default();
     build_styled_node(
         dom,
@@ -145,6 +154,7 @@ pub fn resolve_styles(dom: &Dom, stylesheet: &Stylesheet, source: &[u8]) -> Styl
         source,
         &root_style,
         ROOT_FONT_SIZE,
+        viewport_width,
     )
 }
 
@@ -160,6 +170,7 @@ fn build_styled_node(
     source: &[u8],
     parent_style: &ComputedStyle,
     root_font_size: f32,
+    viewport_width: f32,
 ) -> StyledNode {
     let node = dom.get(node_id);
 
@@ -169,8 +180,20 @@ fn build_styled_node(
             // ── Step 1: Collect all matching declarations ──────────
             let mut declarations = Vec::new();
 
+            // Collect top-level rules and applicable @media rules
+            let mut all_rules: Vec<&crate::css_parser::StyleRule> =
+                stylesheet.rules.iter().collect();
+
+            for media in &stylesheet.media_rules {
+                let matches_min = media.min_width.map_or(true, |mw| viewport_width >= mw);
+                let matches_max = media.max_width.map_or(true, |mw| viewport_width <= mw);
+                if matches_min && matches_max {
+                    all_rules.extend(media.rules.iter());
+                }
+            }
+
             // Test every rule against this node
-            for (rule_index, rule) in stylesheet.rules.iter().enumerate() {
+            for (rule_index, rule) in all_rules.iter().enumerate() {
                 // Find the highest-specificity selector that matches
                 let mut best_specificity: Option<Specificity> = None;
 
@@ -343,7 +366,15 @@ fn build_styled_node(
         .children
         .iter()
         .map(|&child_id| {
-            build_styled_node(dom, child_id, stylesheet, source, &styles, root_font_size)
+            build_styled_node(
+                dom,
+                child_id,
+                stylesheet,
+                source,
+                &styles,
+                root_font_size,
+                viewport_width,
+            )
         })
         .collect();
 
@@ -440,28 +471,24 @@ fn parse_inline_style(style_bytes: &[u8]) -> Vec<(String, String)> {
 // ─── Selector Matching ───────────────────────────────────────────
 
 /// Check if a selector matches a DOM node.
-///
-/// A selector has `parts` — a list of compound selector groups connected
-/// by descendant combinators. The LAST part must match the target node,
-/// and each earlier part must match some ancestor of the target.
 fn selector_matches(selector: &Selector, node_id: NodeId, dom: &Dom, source: &[u8]) -> bool {
+    if !selector.steps.is_empty() {
+        return selector_steps_match(&selector.steps, node_id, dom, source);
+    }
+
     if selector.parts.is_empty() {
         return false;
     }
 
-    // The last compound selector must match the target node
     let last = &selector.parts[selector.parts.len() - 1];
     if !compound_matches(last, node_id, dom, source) {
         return false;
     }
 
-    // If there's only one part, we're done
     if selector.parts.len() == 1 {
         return true;
     }
 
-    // For descendant combinator: each preceding compound selector must match
-    // some ancestor, walking up the tree from the target's parent.
     let mut current = dom.get(node_id).parent;
     let mut part_idx = selector.parts.len() - 2;
 
@@ -478,6 +505,132 @@ fn selector_matches(selector: &Selector, node_id: NodeId, dom: &Dom, source: &[u
                 current = dom.get(ancestor_id).parent;
             }
         }
+    }
+}
+
+fn selector_steps_match(
+    steps: &[crate::css_parser::SelectorStep],
+    node_id: NodeId,
+    dom: &Dom,
+    source: &[u8],
+) -> bool {
+    if steps.is_empty() {
+        return false;
+    }
+
+    let last_step = &steps[steps.len() - 1];
+    if !compound_matches(&last_step.compound, node_id, dom, source) {
+        return false;
+    }
+
+    if steps.len() == 1 {
+        return true;
+    }
+
+    let mut current_node = node_id;
+    let mut step_idx = steps.len() - 1;
+
+    while step_idx > 0 {
+        let combinator = steps[step_idx].combinator;
+        let target_step = &steps[step_idx - 1];
+
+        match combinator {
+            crate::css_parser::Combinator::Child => {
+                let parent_id = match dom.get(current_node).parent {
+                    Some(pid) => pid,
+                    None => return false,
+                };
+                if !compound_matches(&target_step.compound, parent_id, dom, source) {
+                    return false;
+                }
+                current_node = parent_id;
+            }
+            crate::css_parser::Combinator::Descendant => {
+                let mut parent_opt = dom.get(current_node).parent;
+                let mut matched = false;
+                while let Some(parent_id) = parent_opt {
+                    if compound_matches(&target_step.compound, parent_id, dom, source) {
+                        current_node = parent_id;
+                        matched = true;
+                        break;
+                    }
+                    parent_opt = dom.get(parent_id).parent;
+                }
+                if !matched {
+                    return false;
+                }
+            }
+            crate::css_parser::Combinator::NextSibling => {
+                let sibling_id = match get_previous_element_sibling(current_node, dom) {
+                    Some(sid) => sid,
+                    None => return false,
+                };
+                if !compound_matches(&target_step.compound, sibling_id, dom, source) {
+                    return false;
+                }
+                current_node = sibling_id;
+            }
+            crate::css_parser::Combinator::SubsequentSibling => {
+                let mut sibling_opt = get_previous_element_sibling(current_node, dom);
+                let mut matched = false;
+                while let Some(sibling_id) = sibling_opt {
+                    if compound_matches(&target_step.compound, sibling_id, dom, source) {
+                        current_node = sibling_id;
+                        matched = true;
+                        break;
+                    }
+                    sibling_opt = get_previous_element_sibling(sibling_id, dom);
+                }
+                if !matched {
+                    return false;
+                }
+            }
+        }
+
+        step_idx -= 1;
+    }
+
+    true
+}
+
+fn get_previous_element_sibling(node_id: NodeId, dom: &Dom) -> Option<NodeId> {
+    let node = dom.get(node_id);
+    let parent_id = node.parent?;
+    let parent = dom.get(parent_id);
+    let idx = parent.children.iter().position(|&child| child == node_id)?;
+    parent.children[..idx]
+        .iter()
+        .rev()
+        .copied()
+        .find(|&child_id| matches!(dom.get(child_id).kind, NodeKind::Element { .. }))
+}
+
+fn is_first_child(node_id: NodeId, dom: &Dom) -> bool {
+    let node = dom.get(node_id);
+    if let Some(parent_id) = node.parent {
+        let parent = dom.get(parent_id);
+        let first_elem = parent
+            .children
+            .iter()
+            .find(|&&child_id| matches!(dom.get(child_id).kind, NodeKind::Element { .. }));
+        first_elem == Some(&node_id)
+    } else {
+        false
+    }
+}
+
+fn is_last_child(node_id: NodeId, dom: &Dom) -> bool {
+    let node = dom.get(node_id);
+    if let Some(parent_id) = node.parent {
+        let parent = dom.get(parent_id);
+        let last_elem = parent
+            .children
+            .iter()
+            .rev()
+            .find(|&&child_id| matches!(dom.get(child_id).kind, NodeKind::Element { .. }));
+        last_elem == Some(&node_id)
+    } else {
+        false
     }
 }
 
@@ -506,6 +659,12 @@ fn compound_matches(
             SimpleSelector::Class(class_name) => node_has_class(node, class_name, source),
             SimpleSelector::Id(id_name) => node_has_id(node, id_name, source),
             SimpleSelector::Universal => true,
+            SimpleSelector::PseudoClass(pseudo) => match pseudo.as_str() {
+                "first-child" => is_first_child(node_id, dom),
+                "last-child" => is_last_child(node_id, dom),
+                "hover" => false,
+                _ => false,
+            },
         };
 
         if !matches {
@@ -1024,5 +1183,67 @@ mod tests {
         let p = &div.children[0];
         assert_eq!(div.styles.text_align, TextAlign::Center);
         assert_eq!(p.styles.text_align, TextAlign::Center);
+    }
+
+    #[test]
+    fn test_child_combinator_matching() {
+        let (styled, _, _) = styled_tree(
+            "<div><p>Direct</p><span><p>Nested</p></span></div>",
+            "div > p { color: red; }",
+        );
+        let div = &styled.children[0];
+        let p_direct = &div.children[0];
+        assert_eq!(p_direct.styles.color, Color::rgb(255, 0, 0));
+
+        let span = &div.children[1];
+        let p_nested = &span.children[0];
+        assert_eq!(p_nested.styles.color, Color::BLACK);
+    }
+
+    #[test]
+    fn test_sibling_combinator_matching() {
+        let (styled, _, _) = styled_tree(
+            "<div><h1>Title</h1><p>Next</p><p>Subsequent</p></div>",
+            "h1 + p { color: green; } h1 ~ p { font-weight: bold; }",
+        );
+        let div = &styled.children[0];
+        let p1 = &div.children[1];
+        assert_eq!(p1.styles.color, Color::rgb(0, 128, 0));
+        assert_eq!(p1.styles.font_weight, 700.0);
+
+        let p2 = &div.children[2];
+        assert_eq!(p2.styles.color, Color::BLACK);
+        assert_eq!(p2.styles.font_weight, 700.0);
+    }
+
+    #[test]
+    fn test_first_and_last_child_pseudo_classes() {
+        let (styled, _, _) = styled_tree(
+            "<div><p>First</p><p>Middle</p><p>Last</p></div>",
+            "p:first-child { color: red; } p:last-child { color: blue; }",
+        );
+        let div = &styled.children[0];
+        let first = &div.children[0];
+        assert_eq!(first.styles.color, Color::rgb(255, 0, 0));
+
+        let last = &div.children[2];
+        assert_eq!(last.styles.color, Color::rgb(0, 0, 255));
+    }
+
+    #[test]
+    fn test_media_query_viewport_matching() {
+        let source = b"<div>Content</div>";
+        let mut tokenizer = crate::css_tokenizer::CssTokenizer::new(source);
+        let tokens = tokenizer.tokenize();
+        let dom = crate::parser::Parser::new(&tokens, source).parse();
+        let stylesheet = crate::css_parser::Stylesheet::parse(
+            b"@media (min-width: 600px) { div { color: red; } }",
+        );
+
+        let narrow = resolve_styles_with_viewport(&dom, &stylesheet, source, 500.0);
+        assert_eq!(narrow.children[0].styles.color, Color::BLACK);
+
+        let wide = resolve_styles_with_viewport(&dom, &stylesheet, source, 800.0);
+        assert_eq!(wide.children[0].styles.color, Color::rgb(255, 0, 0));
     }
 }

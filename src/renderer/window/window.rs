@@ -107,8 +107,13 @@ impl AsteriaWindow {
             let tokens = tokenizer.tokenize();
             let dom = Parser::new(&tokens, html_source).parse();
 
-            let stylesheet = Stylesheet::parse(css_source);
-            let styled = resolve_styles(&dom, &stylesheet, html_source);
+            let stylesheet = Stylesheet::parse(css_source.as_bytes());
+            let styled = crate::style::resolve_styles_with_viewport(
+                &dom,
+                &stylesheet,
+                html_source,
+                viewport_w,
+            );
 
             if let Ok(layout) = crate::layout::layout_document(&styled, &dom, html_source, viewport_w, viewport_h) {
                 let display_list = crate::paint::build_display_list(&layout, &dom, html_source);

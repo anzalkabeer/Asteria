@@ -25,6 +25,19 @@ use crate::css_tokens::{CssToken, CssTokenKind};
 
 // ─── Data Structures ─────────────────────────────────────────────
 
+/// Combinators connecting steps in a selector.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Combinator {
+    /// Whitespace (descendant)
+    Descendant,
+    /// `>` (child)
+    Child,
+    /// `+` (next sibling)
+    NextSibling,
+    /// `~` (subsequent sibling)
+    SubsequentSibling,
+}
+
 /// A single CSS declaration: a property-value pair.
 /// e.g. "color: red" → Declaration { property: "color", value: "red" }
 #[derive(Debug, Clone, PartialEq)]
@@ -46,22 +59,29 @@ pub enum SimpleSelector {
     Id(String),
     /// Matches any element: *
     Universal,
+    /// Matches element state or structural position, e.g. ":hover", ":first-child"
+    PseudoClass(String),
 }
 
-/// A selector is a list of compound selector groups separated by
-/// descendant combinators (whitespace).
-///
-/// Each inner `Vec<SimpleSelector>` is a "compound selector" — multiple
-/// simple selectors that all must match the SAME element.
-///
-/// e.g. "div.main p.content" →
-///   parts: [
-///     [Tag("div"), Class("main")],     ← must all match an ancestor
-///     [Tag("p"), Class("content")]      ← must all match the target element
-///   ]
+/// A single step in a complex selector: a combinator and a compound selector.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SelectorStep {
+    pub combinator: Combinator,
+    pub compound: Vec<SimpleSelector>,
+}
+
+/// A selector is a chain of compound selector steps connected by combinators.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Selector {
+    pub steps: Vec<SelectorStep>,
     pub parts: Vec<Vec<SimpleSelector>>,
+}
+
+impl Selector {
+    pub fn from_steps(steps: Vec<SelectorStep>) -> Self {
+        let parts = steps.iter().map(|s| s.compound.clone()).collect();
+        Selector { steps, parts }
+    }
 }
 
 /// A CSS rule: one or more selectors sharing a declaration block.
@@ -72,10 +92,19 @@ pub struct StyleRule {
     pub declarations: Vec<Declaration>,
 }
 
-/// A stylesheet: a list of style rules parsed from CSS source.
-#[derive(Debug)]
+/// A `@media` rule containing nested style rules.
+#[derive(Debug, Clone)]
+pub struct MediaRule {
+    pub min_width: Option<f32>,
+    pub max_width: Option<f32>,
+    pub rules: Vec<StyleRule>,
+}
+
+/// A stylesheet: a list of style rules and media rules parsed from CSS source.
+#[derive(Debug, Clone, Default)]
 pub struct Stylesheet {
     pub rules: Vec<StyleRule>,
+    pub media_rules: Vec<MediaRule>,
 }
 
 impl Stylesheet {
@@ -107,6 +136,7 @@ impl<'a> CssParser<'a> {
 
     pub fn parse(&mut self) -> Stylesheet {
         let mut rules = Vec::new();
+        let mut media_rules = Vec::new();
 
         while !self.at_end() {
             self.skip_whitespace();
@@ -115,8 +145,13 @@ impl<'a> CssParser<'a> {
                 break;
             }
 
-            // Skip @-rules by consuming everything until the closing '}'
             if self.current_kind() == CssTokenKind::AtKeyword {
+                if self.current_slice().eq_ignore_ascii_case("@media") {
+                    if let Some(media_rule) = self.parse_media_rule() {
+                        media_rules.push(media_rule);
+                        continue;
+                    }
+                }
                 self.skip_at_rule();
                 continue;
             }
@@ -127,7 +162,76 @@ impl<'a> CssParser<'a> {
             }
         }
 
-        Stylesheet { rules }
+        Stylesheet { rules, media_rules }
+    }
+
+    /// Parse a @media rule block: @media (min-width: 600px) { ... }
+    fn parse_media_rule(&mut self) -> Option<MediaRule> {
+        self.advance(); // skip @media
+        let mut min_width = None;
+        let mut max_width = None;
+
+        let mut header_text = String::new();
+        while !self.at_end() && self.current_kind() != CssTokenKind::OpenBrace {
+            header_text.push_str(self.current_slice());
+            self.advance();
+        }
+
+        // Parse min-width / max-width from header string
+        if let Some(pos) = header_text.find("min-width") {
+            let rest = &header_text[pos..];
+            if let Some(val_start) = rest.find(':') {
+                let num_str: String = rest[val_start + 1..]
+                    .chars()
+                    .take_while(|c| c.is_ascii_digit() || *c == '.')
+                    .collect();
+                if let Ok(v) = num_str.parse::<f32>() {
+                    min_width = Some(v);
+                }
+            }
+        }
+
+        if let Some(pos) = header_text.find("max-width") {
+            let rest = &header_text[pos..];
+            if let Some(val_start) = rest.find(':') {
+                let num_str: String = rest[val_start + 1..]
+                    .chars()
+                    .take_while(|c| c.is_ascii_digit() || *c == '.')
+                    .collect();
+                if let Ok(v) = num_str.parse::<f32>() {
+                    max_width = Some(v);
+                }
+            }
+        }
+
+        if self.current_kind() == CssTokenKind::OpenBrace {
+            self.advance(); // skip '{'
+            let mut rules = Vec::new();
+
+            while !self.at_end() && self.current_kind() != CssTokenKind::CloseBrace {
+                self.skip_whitespace();
+                if self.current_kind() == CssTokenKind::CloseBrace {
+                    break;
+                }
+                if let Some(rule) = self.parse_rule() {
+                    rules.push(rule);
+                } else {
+                    self.advance();
+                }
+            }
+
+            if self.current_kind() == CssTokenKind::CloseBrace {
+                self.advance(); // skip '}'
+            }
+
+            Some(MediaRule {
+                min_width,
+                max_width,
+                rules,
+            })
+        } else {
+            None
+        }
     }
 
     // ─── Rule Parsing ────────────────────────────────────────────
@@ -194,56 +298,66 @@ impl<'a> CssParser<'a> {
         selectors
     }
 
-    /// Parse a single selector, which may be a chain of compound selectors
-    /// separated by whitespace (descendant combinator).
-    /// e.g. "div.main p" → Selector { parts: [[Tag("div"), Class("main")], [Tag("p")]] }
+    /// Parse a single selector, supporting descendant, child (>), and sibling (+, ~) combinators.
     fn parse_selector(&mut self) -> Option<Selector> {
-        let mut parts = Vec::new();
+        let mut steps = Vec::new();
 
-        // Parse the first compound selector
-        let compound = self.parse_compound_selector();
-        if compound.is_empty() {
+        let initial_compound = self.parse_compound_selector();
+        if initial_compound.is_empty() {
             return None;
         }
-        parts.push(compound);
 
-        // Check for descendant combinator (whitespace between compound selectors)
+        steps.push(SelectorStep {
+            combinator: Combinator::Descendant,
+            compound: initial_compound,
+        });
+
         loop {
-            // Peek: is there whitespace followed by another selector part?
-            if self.current_kind() != CssTokenKind::Whitespace {
-                break;
-            }
-
-            // Save position in case the next thing is '{' or ',' (not a selector)
-            let saved_pos = self.pos;
             self.skip_whitespace();
 
-            // If we hit '{', ',', '}', or EOF, the selector is done
-            match self.current_kind() {
+            let combinator = match self.current_kind() {
+                CssTokenKind::Delim => match self.current_slice() {
+                    ">" => {
+                        self.advance();
+                        self.skip_whitespace();
+                        Combinator::Child
+                    }
+                    "+" => {
+                        self.advance();
+                        self.skip_whitespace();
+                        Combinator::NextSibling
+                    }
+                    "~" => {
+                        self.advance();
+                        self.skip_whitespace();
+                        Combinator::SubsequentSibling
+                    }
+                    _ => Combinator::Descendant,
+                },
                 CssTokenKind::OpenBrace
                 | CssTokenKind::Comma
                 | CssTokenKind::CloseBrace
-                | CssTokenKind::Eof => {
-                    break;
-                }
-                _ => {}
-            }
+                | CssTokenKind::Eof => break,
+                _ => Combinator::Descendant,
+            };
 
             let compound = self.parse_compound_selector();
             if compound.is_empty() {
-                // Not a valid selector continuation — restore position
-                self.pos = saved_pos;
                 break;
             }
-            parts.push(compound);
+
+            steps.push(SelectorStep {
+                combinator,
+                compound,
+            });
         }
 
-        Some(Selector { parts })
+        Some(Selector::from_steps(steps))
     }
 
     /// Parse a compound selector — one or more simple selectors that all
     /// apply to the same element, with no whitespace between them.
-    /// e.g. "div.main#hero" → [Tag("div"), Class("main"), Id("hero")]
+    /// e.g. "div.main#hero:first-child" → [Tag("div"), Class("main"), Id("hero"), PseudoClass("first-child")]
     fn parse_compound_selector(&mut self) -> Vec<SimpleSelector> {
         let mut parts = Vec::new();
 
@@ -279,6 +393,16 @@ impl<'a> CssParser<'a> {
                 CssTokenKind::Delim if self.current_slice() == "*" => {
                     parts.push(SimpleSelector::Universal);
                     self.advance();
+                }
+
+                // Pseudo-class selector: ':' followed by identifier
+                CssTokenKind::Colon => {
+                    self.advance(); // skip ':'
+                    if self.current_kind() == CssTokenKind::Ident {
+                        let name = self.current_slice().to_ascii_lowercase();
+                        parts.push(SimpleSelector::PseudoClass(name));
+                        self.advance();
+                    }
                 }
 
                 _ => break,
@@ -607,24 +731,38 @@ mod tests {
     }
 
     #[test]
-    fn test_complex_descendant() {
-        let stylesheet = Stylesheet::parse(b"div.sidebar p.highlight { font-weight: bold; }");
-
+    fn test_child_and_sibling_combinators() {
+        let stylesheet = Stylesheet::parse(b"div > p + span ~ a { color: red; }");
         let sel = &stylesheet.rules[0].selectors[0];
-        assert_eq!(sel.parts.len(), 2);
+        assert_eq!(sel.steps.len(), 4);
+        assert_eq!(sel.steps[0].combinator, Combinator::Descendant);
+        assert_eq!(sel.steps[1].combinator, Combinator::Child);
+        assert_eq!(sel.steps[2].combinator, Combinator::NextSibling);
+        assert_eq!(sel.steps[3].combinator, Combinator::SubsequentSibling);
+    }
+
+    #[test]
+    fn test_pseudo_classes() {
+        let stylesheet = Stylesheet::parse(b"p:first-child:hover { color: green; }");
+        let sel = &stylesheet.rules[0].selectors[0];
         assert_eq!(
             sel.parts[0],
             vec![
-                SimpleSelector::Tag("div".to_string()),
-                SimpleSelector::Class("sidebar".to_string()),
-            ]
-        );
-        assert_eq!(
-            sel.parts[1],
-            vec![
                 SimpleSelector::Tag("p".to_string()),
-                SimpleSelector::Class("highlight".to_string()),
+                SimpleSelector::PseudoClass("first-child".to_string()),
+                SimpleSelector::PseudoClass("hover".to_string()),
             ]
         );
+    }
+
+    #[test]
+    fn test_media_rule_parsing() {
+        let stylesheet = Stylesheet::parse(
+            b"@media (min-width: 600px) and (max-width: 1200px) { h1 { color: purple; } }",
+        );
+        assert_eq!(stylesheet.media_rules.len(), 1);
+        assert_eq!(stylesheet.media_rules[0].min_width, Some(600.0));
+        assert_eq!(stylesheet.media_rules[0].max_width, Some(1200.0));
+        assert_eq!(stylesheet.media_rules[0].rules.len(), 1);
     }
 }
