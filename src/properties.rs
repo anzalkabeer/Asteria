@@ -161,7 +161,7 @@ pub fn property_from_name(name: &str) -> Option<PropertyId> {
 
 /// Returns true if the given property name is a shorthand that needs expansion.
 pub fn is_shorthand(name: &str) -> bool {
-    matches!(name, "margin" | "padding")
+    matches!(name, "margin" | "padding" | "border")
 }
 
 /// Expand a shorthand property into its constituent longhand PropertyIds.

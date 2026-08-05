@@ -1,41 +1,46 @@
-// hehe paint engin e here i am coding manually i will debug with ai though.
-// ─── Asteria Paint Engine & Display List Generator ──────────────────
+// ─── Phase 5: Display List Paint Engine ───────────────────────────
 //
-// Consumes a positioned LayoutBox tree and generates a backend-agnostic
-// DisplayList containing visual 2D drawing primitives (SolidColor, Border, Text).
+// Milestone 10: HTML <a> link URL extraction and propagation to DisplayCommands.
+//
+// Converts a 2D LayoutBox tree into a flat, ordered DisplayList containing
+// visual draw commands: SolidColor, Border, Text, and Image.
+//
+// CSS Paint Order per box:
+//   1. Background (SolidColor)
+//   2. Borders (Border)
+//   3. Text content (Text)
+//   4. Child layout boxes (recursive)
 
 use std::fmt;
 
-use crate::dom::{Dom, NodeKind};
-use crate::layout::{EdgeSizes, LayoutBox, Rect};
-use crate::values::Color;
+use crate::dom::{Dom, NodeId, NodeKind};
+use crate::layout::{LayoutBox, Rect};
+use crate::values::{BorderStyleValue, Color, Edges};
 
-//a single visual drawing command in the display list .
+// ─── Display Commands ─────────────────────────────────────────────
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 pub enum DisplayCommand {
-    /// here i have to write the solidcolor enum variant for the display command
     SolidColor {
         color: Color,
         rect: Rect,
         link_url: Option<String>,
     },
-    /// drawing the ofour edges
     Border {
         color: Color,
         rect: Rect,
-        border_width: EdgeSizes,
+        border_width: Edges,
         link_url: Option<String>,
     },
     Text {
         text: String,
         x: f32,
         y: f32,
+        target_width: f32,
         font_size: f32,
         color: Color,
         link_url: Option<String>,
     },
-    /// Image rendering command
     Image {
         image_id: String,
         x: f32,
@@ -46,7 +51,19 @@ pub enum DisplayCommand {
     },
 }
 
-/// Ordered collection of drawing commands representing the visual page.
+impl DisplayCommand {
+    pub fn link_url(&self) -> Option<&str> {
+        match self {
+            DisplayCommand::SolidColor { link_url, .. } => link_url.as_deref(),
+            DisplayCommand::Border { link_url, .. } => link_url.as_deref(),
+            DisplayCommand::Text { link_url, .. } => link_url.as_deref(),
+            DisplayCommand::Image { link_url, .. } => link_url.as_deref(),
+        }
+    }
+}
+
+// ─── Display List ─────────────────────────────────────────────────
+
 #[derive(Debug, Clone, Default)]
 pub struct DisplayList {
     pub commands: Vec<DisplayCommand>,
@@ -54,7 +71,7 @@ pub struct DisplayList {
 
 impl DisplayList {
     pub fn new() -> Self {
-        DisplayList {
+        Self {
             commands: Vec::new(),
         }
     }
@@ -64,50 +81,15 @@ impl DisplayList {
     }
 }
 
-// ─── Paint Engine Logic & Traversal ───────────────────────────────
+// ─── Paint List Builder ───────────────────────────────────────────
 
-/// Find if a node is inside an `<a>` tag and extract its `href` attribute.
-fn find_link_url(
-    dom: &Dom,
-    source: &[u8],
-    mut current_node: Option<crate::dom::NodeId>,
-) -> Option<String> {
-    while let Some(id) = current_node {
-        let node = dom.get(id);
-        if let NodeKind::Element { tag_start, tag_end } = node.kind {
-            let tag_name =
-                std::str::from_utf8(&source[tag_start as usize..tag_end as usize]).unwrap_or("");
-            if tag_name.eq_ignore_ascii_case("a") {
-                for &(ns, ne, vs, ve) in &node.attributes {
-                    let attr_name =
-                        std::str::from_utf8(&source[ns as usize..ne as usize]).unwrap_or("");
-                    if attr_name.eq_ignore_ascii_case("href") {
-                        return Some(
-                            std::str::from_utf8(&source[vs as usize..ve as usize])
-                                .unwrap_or("")
-                                .to_string(),
-                        );
-                    }
-                }
-            }
-        }
-        current_node = node.parent;
-    }
-    None
+pub fn build_display_list(layout_root: &LayoutBox, dom: &Dom, source: &[u8]) -> DisplayList {
+    let mut list = DisplayList::new();
+    render_layout_box(layout_root, dom, source, &mut list);
+    list
 }
 
-/// Generate a complete DisplayList for a layout tree in CSS paint order.
-pub fn build_display_list<'a>(
-    layout_root: &'a LayoutBox<'a>,
-    dom: &Dom,
-    source: &[u8],
-) -> DisplayList {
-    let mut display_list = DisplayList::new();
-    render_children(layout_root, dom, source, &mut display_list);
-    display_list
-}
-
-fn render_children(
+fn render_layout_box(
     layout_box: &LayoutBox,
     dom: &Dom,
     source: &[u8],
@@ -126,8 +108,34 @@ fn render_children(
     }
 
     for child in &layout_box.children {
-        render_children(child, dom, source, display_list);
+        render_layout_box(child, dom, source, display_list);
     }
+}
+
+fn find_link_url(dom: &Dom, source: &[u8], node_id: Option<NodeId>) -> Option<String> {
+    let mut curr = node_id;
+    while let Some(id) = curr {
+        let node = dom.get(id);
+        if let NodeKind::Element { tag_start, tag_end } = node.kind {
+            let tag_name =
+                std::str::from_utf8(&source[tag_start as usize..tag_end as usize]).unwrap_or("");
+            if tag_name.eq_ignore_ascii_case("a") {
+                for &(ns, ne, vs, ve) in &node.attributes {
+                    let attr_name =
+                        std::str::from_utf8(&source[ns as usize..ne as usize]).unwrap_or("");
+                    if attr_name.eq_ignore_ascii_case("href") {
+                        return Some(
+                            std::str::from_utf8(&source[vs as usize..ve as usize])
+                                .unwrap_or("")
+                                .to_string(),
+                        );
+                    }
+                }
+            }
+        }
+        curr = node.parent;
+    }
+    None
 }
 
 fn render_background(
@@ -136,14 +144,16 @@ fn render_background(
     dom: &Dom,
     source: &[u8],
 ) {
-    let Some(styled) = layout_box.styled_node else {
-        return;
-    };
-    let bg_color = styled.styles.background_color;
+    let style = layout_box.styled_node.map(|n| &n.styles);
+    let bg_color = style.map_or(Color::TRANSPARENT, |s| s.background_color);
 
     if bg_color != Color::TRANSPARENT {
-        let rect = layout_box.dimensions.padding_box();
-        let link_url = find_link_url(dom, source, Some(styled.node_id));
+        let rect = layout_box.dimensions.border_box();
+        let link_url = find_link_url(
+            dom,
+            source,
+            layout_box.styled_node.map(|s| s.node_id),
+        );
         display_list.push(DisplayCommand::SolidColor {
             color: bg_color,
             rect,
@@ -158,10 +168,8 @@ fn render_borders(
     dom: &Dom,
     source: &[u8],
 ) {
-    let Some(styled) = layout_box.styled_node else {
-        return;
-    };
-    let border_color = styled.styles.border_color;
+    let style = layout_box.styled_node.map(|n| &n.styles);
+    let border_color = style.map_or(Color::TRANSPARENT, |s| s.border_color);
     let border_width = layout_box.dimensions.border;
 
     let has_border = border_width.top > 0.0
@@ -171,7 +179,11 @@ fn render_borders(
 
     if border_color != Color::TRANSPARENT && has_border {
         let rect = layout_box.dimensions.border_box();
-        let link_url = find_link_url(dom, source, Some(styled.node_id));
+        let link_url = find_link_url(
+            dom,
+            source,
+            layout_box.styled_node.map(|s| s.node_id),
+        );
         display_list.push(DisplayCommand::Border {
             color: border_color,
             rect,
@@ -188,23 +200,18 @@ fn render_text(layout_box: &LayoutBox, dom: &Dom, source: &[u8], display_list: &
 
     let node = dom.get(styled.node_id);
     if let NodeKind::Text { start, end } = node.kind {
-        let text = std::str::from_utf8(&source[start as usize..end as usize])
-            .unwrap_or("")
-            .trim()
-            .to_string();
-
-        if !text.is_empty() {
-            let text_color = styled.styles.color;
-            let font_size = styled.styles.font_size;
+        let text = std::str::from_utf8(&source[start as usize..end as usize]).unwrap_or("");
+        let trimmed_text = text.trim();
+        if !trimmed_text.is_empty() {
             let rect = layout_box.dimensions.content;
             let link_url = find_link_url(dom, source, Some(styled.node_id));
-
             display_list.push(DisplayCommand::Text {
-                text,
+                text: text.to_string(),
                 x: rect.x,
                 y: rect.y,
-                font_size,
-                color: text_color,
+                target_width: rect.width,
+                font_size: styled.styles.font_size,
+                color: styled.styles.color,
                 link_url,
             });
         }
@@ -215,6 +222,7 @@ fn render_image(layout_box: &LayoutBox, dom: &Dom, source: &[u8], display_list: 
     let Some(styled) = layout_box.styled_node else {
         return;
     };
+
     let node = dom.get(styled.node_id);
     if let NodeKind::Element { tag_start, tag_end } = node.kind {
         let tag_name =
@@ -246,7 +254,7 @@ fn render_image(layout_box: &LayoutBox, dom: &Dom, source: &[u8], display_list: 
     }
 }
 
-// ─── Display Formatting & Inspection ─────────────────────────────
+// ─── Display List Pretty Printing ─────────────────────────────────
 
 impl fmt::Display for DisplayCommand {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -258,8 +266,8 @@ impl fmt::Display for DisplayCommand {
             } => {
                 write!(
                     f,
-                    "SolidColor rect=(x: {:.1}, y: {:.1}, w: {:.1}, h: {:.1}) color={} link={:?}",
-                    rect.x, rect.y, rect.width, rect.height, color, link_url
+                    "SolidColor {} at (x: {:.1}, y: {:.1}, w: {:.1}, h: {:.1}) link={:?}",
+                    color, rect.x, rect.y, rect.width, rect.height, link_url
                 )
             }
             DisplayCommand::Border {
@@ -270,7 +278,7 @@ impl fmt::Display for DisplayCommand {
             } => {
                 write!(
                     f,
-                    "Border rect=(x: {:.1}, y: {:.1}, w: {:.1}, h: {:.1}) widths=(L{:.1} R{:.1} T{:.1} B{:.1}) color={} link={:?}",
+                    "Border (x: {:.1}, y: {:.1}, w: {:.1}, h: {:.1}) widths=[L:{:.1}, R:{:.1}, T:{:.1}, B:{:.1}] color={} link={:?}",
                     rect.x,
                     rect.y,
                     rect.width,
@@ -290,6 +298,7 @@ impl fmt::Display for DisplayCommand {
                 font_size,
                 color,
                 link_url,
+                ..
             } => {
                 write!(
                     f,

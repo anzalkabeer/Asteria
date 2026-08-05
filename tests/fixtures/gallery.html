@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Asteria Engine Image & Flex Gallery</title>
+    <style>
+        body {
+            background-color: #f8fafc;
+            margin: 16px;
+            color: #1e293b;
+        }
+        .header {
+            background-color: #0f172a;
+            padding: 16px;
+            margin-bottom: 20px;
+        }
+        h1 {
+            color: #38bdf8;
+            font-size: 22px;
+        }
+        .flex-container {
+            display: flex;
+            background-color: #ffffff;
+            padding: 20px;
+            border: 1px solid #cbd5e1;
+            margin-bottom: 20px;
+        }
+        .card {
+            background-color: #f0f9ff;
+            padding: 16px;
+            border: 1px solid #bae6fd;
+            width: 200px;
+        }
+        h2 {
+            color: #0369a1;
+            font-size: 18px;
+            margin-bottom: 8px;
+        }
+        p {
+            color: #334155;
+            font-size: 14px;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>Asteria Engine Image & Flex Layout Gallery</h1>
+    </div>
+
+    <div class="flex-container">
+        <div class="card">
+            <h2>Architecture</h2>
+            <img src="arch.png" alt="DOM Architecture Chart" width="160" height="90" />
+            <p>Data-oriented arena DOM with flat memory layout.</p>
+        </div>
+        <div class="card">
+            <h2>GPU Pipeline</h2>
+            <img src="gpu.png" alt="wgpu Hardware Batching" width="160" height="90" />
+            <p>wgpu hardware quad batching at 200+ FPS.</p>
+        </div>
+        <div class="card">
+            <h2>CSS Engine</h2>
+            <img src="css.png" alt="CSS Selector Engine" width="160" height="90" />
+            <p>Full CSS3 specificity scoring and rule cascade.</p>
+        </div>
+    </div>
+</body>
+</html>

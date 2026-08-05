@@ -261,7 +261,31 @@ fn build_styled_node(
             let mut expanded: HashMap<String, String> = HashMap::new();
             for (prop, value) in &specified {
                 if properties::is_shorthand(prop) {
-                    if let Some(longhand_ids) = properties::expand_shorthand(prop) {
+                    if prop == "border" {
+                        let (w, s, c) = values::parse_border_shorthand(value);
+                        if let Some(w_val) = w {
+                            for edge_name in &[
+                                "border-top-width",
+                                "border-right-width",
+                                "border-bottom-width",
+                                "border-left-width",
+                            ] {
+                                if !specified.contains_key(*edge_name) {
+                                    expanded.insert(edge_name.to_string(), w_val.clone());
+                                }
+                            }
+                        }
+                        if let Some(s_val) = s {
+                            if !specified.contains_key("border-style") {
+                                expanded.insert("border-style".to_string(), s_val);
+                            }
+                        }
+                        if let Some(c_val) = c {
+                            if !specified.contains_key("border-color") {
+                                expanded.insert("border-color".to_string(), c_val);
+                            }
+                        }
+                    } else if let Some(longhand_ids) = properties::expand_shorthand(prop) {
                         let edges =
                             values::parse_edges(value, parent_style.font_size, root_font_size);
                         let edge_values = [edges.top, edges.right, edges.bottom, edges.left];
@@ -336,32 +360,66 @@ fn build_styled_node(
                                 .unwrap_or("")
                                 .to_ascii_lowercase();
 
-                        if prop_id == PropertyId::Display && is_default_block_tag(&tag_name) {
-                            computed.display = Display::Block;
+                        if prop_id == PropertyId::Display {
+                            match tag_name.as_str() {
+                                "head" | "title" | "meta" | "script" | "style" | "link" => {
+                                    computed.display = Display::None;
+                                }
+                                "img" => {
+                                    computed.display = Display::InlineBlock;
+                                    if computed.width.is_none() {
+                                        computed.width = Some(160.0);
+                                    }
+                                    if computed.height.is_none() {
+                                        computed.height = Some(100.0);
+                                    }
+                                }
+                                _ if is_default_block_tag(&tag_name) => {
+                                    computed.display = Display::Block;
+                                }
+                                _ => {}
+                            }
                         }
 
                         if !specified.contains_key("background-color") {
                             match tag_name.as_str() {
                                 "body" => {
                                     computed.background_color = values::Color::rgb(248, 250, 252);
+                                    if !specified.contains_key("margin-top") {
+                                        computed.margin = values::Edges::uniform(8.0);
+                                    }
                                 }
                                 "h1" => {
-                                    computed.background_color = values::Color::rgb(235, 248, 255);
+                                    computed.background_color = values::Color::rgb(240, 249, 255);
+                                    computed.border_color = values::Color::rgb(2, 132, 199);
+                                    computed.border_width.left = 4.0;
                                 }
                                 "div" => {
-                                    computed.background_color = values::Color::rgb(237, 242, 247);
+                                    computed.background_color = values::Color::rgb(248, 250, 252);
+                                    computed.border_color = values::Color::rgb(203, 213, 225);
+                                    computed.border_width = values::Edges::uniform(1.0);
+                                }
+                                "img" => {
+                                    computed.background_color = values::Color::rgb(226, 232, 240);
+                                    computed.border_color = values::Color::rgb(203, 213, 225);
+                                    computed.border_width = values::Edges::uniform(1.0);
                                 }
                                 _ => {}
                             }
                         }
 
-                        if !specified.contains_key("color") && tag_name == "h1" {
-                            computed.color = values::Color::rgb(43, 108, 176);
+                        if !specified.contains_key("color") {
+                            match tag_name.as_str() {
+                                "h1" => {
+                                    computed.color = values::Color::rgb(3, 105, 161);
+                                }
+                                _ => {}
+                            }
                         }
 
                         if !specified.contains_key("padding-top") {
                             if tag_name == "h1" || tag_name == "div" {
-                                computed.padding = values::Edges::uniform(10.0);
+                                computed.padding = values::Edges::uniform(12.0);
                             }
                         }
                     }
@@ -895,16 +953,19 @@ mod tests {
 
         let sel = Selector {
             parts: vec![vec![SimpleSelector::Tag("div".into())]],
+            steps: Vec::new(),
         };
         assert_eq!(compute_specificity(&sel), (0, 0, 1));
 
         let sel = Selector {
             parts: vec![vec![SimpleSelector::Class("main".into())]],
+            steps: Vec::new(),
         };
         assert_eq!(compute_specificity(&sel), (0, 1, 0));
 
         let sel = Selector {
             parts: vec![vec![SimpleSelector::Id("header".into())]],
+            steps: Vec::new(),
         };
         assert_eq!(compute_specificity(&sel), (1, 0, 0));
 
@@ -914,6 +975,7 @@ mod tests {
                 SimpleSelector::Class("main".into()),
                 SimpleSelector::Id("hero".into()),
             ]],
+            steps: Vec::new(),
         };
         assert_eq!(compute_specificity(&sel), (1, 1, 1));
 
@@ -922,6 +984,7 @@ mod tests {
                 vec![SimpleSelector::Tag("div".into())],
                 vec![SimpleSelector::Tag("p".into())],
             ],
+            steps: Vec::new(),
         };
         assert_eq!(compute_specificity(&sel), (0, 0, 2));
     }
@@ -1257,9 +1320,8 @@ mod tests {
     #[test]
     fn test_media_query_viewport_matching() {
         let source = b"<div>Content</div>";
-        let mut tokenizer = crate::css_tokenizer::CssTokenizer::new(source);
-        let tokens = tokenizer.tokenize();
-        let dom = crate::parser::Parser::new(&tokens, source).parse();
+        let html_tokens = crate::tokenizer::Tokenizer::new(source).tokenize();
+        let dom = crate::parser::Parser::new(&html_tokens, source).parse();
         let stylesheet = crate::css_parser::Stylesheet::parse(
             b"@media (min-width: 600px) { div { color: red; } }",
         );

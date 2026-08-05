@@ -110,7 +110,7 @@ impl RenderPass for RectPass {
             if let (Some(vb), Some(ib)) = (&self.vertex_buffer, &self.index_buffer) {
                 pass.set_pipeline(&self.pipeline);
                 pass.set_vertex_buffer(0, vb.slice(..));
-                pass.set_index_buffer(ib.slice(..), wgpu::IndexFormat::Uint16);
+                pass.set_index_buffer(ib.slice(..), wgpu::IndexFormat::Uint32);
                 pass.draw_indexed(0..self.num_indices, 0, 0..1);
             }
         }

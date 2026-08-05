@@ -54,7 +54,7 @@ pub enum NodeState {
 ///
 /// Layout:  [0][1][2][3][4][5]...
 /// All nodes live in one contiguous memory block for maximum cache locality.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct SceneNode {
     /// Bounding box in document coordinates (x, y, width, height)
     pub rect: Rect,
@@ -78,7 +78,7 @@ pub struct SceneNode {
 // ─── Text Run Data ───────────────────────────────────────────────
 
 /// Text content associated with a Text scene node
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct TextRun {
     pub text: String,
     pub font_size: f32,
@@ -92,6 +92,7 @@ pub struct TextRun {
 ///   - Iterate only `nodes` when doing spatial queries (no color/text cache pollution)
 ///   - Iterate only `colors` when uploading color buffers to GPU
 ///   - Iterate only `texts` when doing text shaping
+#[derive(Debug, Clone, PartialEq)]
 pub struct SceneGraph {
     /// Contiguous node storage — cache-friendly sequential access
     pub nodes: Vec<SceneNode>,
@@ -363,15 +364,15 @@ pub fn build_scene_graph(display_list: &DisplayList, segment_height: f32) -> Sce
                 text,
                 x,
                 y,
+                target_width,
                 font_size,
                 color,
                 link_url,
             } => {
-                let text_width = text.chars().count() as f32 * font_size * 0.55;
                 let rect = Rect {
                     x: *x,
                     y: *y,
-                    width: text_width,
+                    width: *target_width,
                     height: *font_size * 1.2,
                 };
                 let seg = assign_segment(*y, segment_height);

@@ -69,6 +69,7 @@ pub enum Display {
     Block,
     Inline,
     InlineBlock,
+    Flex,
     None,
 }
 
@@ -78,6 +79,7 @@ impl std::fmt::Display for Display {
             Display::Block => write!(f, "block"),
             Display::Inline => write!(f, "inline"),
             Display::InlineBlock => write!(f, "inline-block"),
+            Display::Flex => write!(f, "flex"),
             Display::None => write!(f, "none"),
         }
     }
@@ -500,6 +502,7 @@ pub fn parse_display(value: &str) -> Display {
         "block" => Display::Block,
         "inline" => Display::Inline,
         "inline-block" => Display::InlineBlock,
+        "flex" => Display::Flex,
         "none" => Display::None,
         _ => Display::Inline,
     }
@@ -564,6 +567,29 @@ pub fn parse_line_height(value: &str, font_size: f32, rem_base: f32) -> f32 {
     s.parse::<f32>()
         .map(|v| v * font_size)
         .unwrap_or(font_size * 1.2)
+}
+
+/// Parse a CSS border shorthand value (e.g. "1px solid #bae6fd") into (width, style, color) parts.
+pub fn parse_border_shorthand(value: &str) -> (Option<String>, Option<String>, Option<String>) {
+    let mut width = None;
+    let mut style = None;
+    let mut color = None;
+
+    for part in value.split_whitespace() {
+        let p_lower = part.to_ascii_lowercase();
+        if p_lower.ends_with("px")
+            || p_lower.ends_with("em")
+            || p_lower.ends_with("rem")
+            || p_lower.chars().all(|c| c.is_ascii_digit() || c == '.')
+        {
+            width = Some(part.to_string());
+        } else if matches!(p_lower.as_str(), "none" | "solid" | "dashed" | "dotted") {
+            style = Some(part.to_string());
+        } else {
+            color = Some(part.to_string());
+        }
+    }
+    (width, style, color)
 }
 
 /// Parse a shorthand margin/padding value into 4 edge values.

@@ -196,6 +196,7 @@ pub fn run_window_loop(initial_scene: SceneGraph, tab_manager: TabManager) {
         initial_scene
     };
 
+<<<<<<< HEAD
     let mut cursor_pos: (f32, f32) = (0.0, 0.0);
     let mut current_scroll_y: f32 = 0.0;
     let mut target_scroll_y: f32 = 0.0;
@@ -237,6 +238,176 @@ pub fn run_window_loop(initial_scene: SceneGraph, tab_manager: TabManager) {
                         }
 
                         needs_redraw = true;
+=======
+    let calc_max_scroll = |sc: &SceneGraph| -> f32 {
+        let max_y = sc
+            .nodes
+            .iter()
+            .map(|n| n.rect.y + n.rect.height)
+            .fold(0.0, f32::max);
+        (max_y - 600.0 + 20.0).max(0.0)
+    };
+
+    let mut scroll_y: f32 = 0.0;
+
+    // Helper closure to rebuild render_graph from scene with scroll offset
+    let rebuild_render_pass =
+        |scene: &SceneGraph, backend: &WgpuBackend, scroll_offset: f32| -> RenderGraph {
+            let mut cmd_builder = CommandBuilder::new();
+            cmd_builder.build_from_scene(scene);
+
+            // Apply vertical scroll offset to all rendering commands
+            if scroll_offset > 0.0 {
+                for cmd in &mut cmd_builder.commands {
+                    match cmd {
+                        RenderCommand::SolidRect { rect, .. } => {
+                            rect[1] -= scroll_offset;
+                        }
+                        RenderCommand::Text { rect, .. } => {
+                            rect[1] -= scroll_offset;
+                        }
+                    }
+                }
+            }
+
+            let planned_batches = BatchPlanner::plan(&cmd_builder.commands);
+            let mut batch_builder = BatchBuilder::new();
+
+            for batch_group in &planned_batches {
+                let owned_cmds: Vec<RenderCommand> =
+                    batch_group.iter().map(|&c| c.clone()).collect();
+                batch_builder.append_batches(&owned_cmds);
+            }
+
+            let mut render_graph = RenderGraph::new();
+            let mut rect_pass = RectPass::new(&backend.device, backend.config.format);
+            rect_pass.update_buffers(&backend.device, &batch_builder);
+            render_graph.add_pass(Box::new(rect_pass));
+
+            render_graph
+        };
+
+    let mut render_graph = rebuild_render_pass(&scene, &backend, scroll_y);
+
+    event_loop.set_control_flow(ControlFlow::Wait);
+
+    let _ = event_loop.run(move |event, elwt| match event {
+        Event::WindowEvent { event, window_id } if window_id == asteria_window.window.id() => {
+            match event {
+                WindowEvent::CloseRequested => elwt.exit(),
+                WindowEvent::Resized(physical_size) => {
+                    backend.resize(physical_size);
+                    let active_scene = if scene.nodes.is_empty() {
+                        asteria_window.build_active_scene()
+                    } else {
+                        scene.clone()
+                    };
+                    render_graph = rebuild_render_pass(&active_scene, &backend, scroll_y);
+                    asteria_window.window.request_redraw();
+                }
+                WindowEvent::MouseWheel { delta, .. } => {
+                    let active_scene = if scene.nodes.is_empty() {
+                        asteria_window.build_active_scene()
+                    } else {
+                        scene.clone()
+                    };
+                    let max_scroll = calc_max_scroll(&active_scene);
+                    let dy = match delta {
+                        winit::event::MouseScrollDelta::LineDelta(_, y) => y * 40.0,
+                        winit::event::MouseScrollDelta::PixelDelta(pos) => pos.y as f32,
+                    };
+                    scroll_y = (scroll_y - dy).clamp(0.0, max_scroll);
+                    render_graph = rebuild_render_pass(&active_scene, &backend, scroll_y);
+                    asteria_window.window.request_redraw();
+                }
+                WindowEvent::ModifiersChanged(modifiers) => {
+                    asteria_window.modifiers = modifiers.state();
+                }
+                WindowEvent::KeyboardInput {
+                    event:
+                        KeyEvent {
+                            logical_key,
+                            state: ElementState::Pressed,
+                            ..
+                        },
+                    ..
+                } => {
+                    let ctrl = asteria_window.modifiers.control_key();
+                    let alt = asteria_window.modifiers.alt_key();
+
+                    let active_scene = if scene.nodes.is_empty() {
+                        asteria_window.build_active_scene()
+                    } else {
+                        scene.clone()
+                    };
+                    let max_scroll = calc_max_scroll(&active_scene);
+
+                    let mut handled = false;
+                    match (ctrl, alt, &logical_key) {
+                        // Vertical Navigation Scrolling
+                        (false, false, Key::Named(NamedKey::ArrowDown)) => {
+                            scroll_y = (scroll_y + 40.0).clamp(0.0, max_scroll);
+                            handled = true;
+                        }
+                        (false, false, Key::Named(NamedKey::ArrowUp)) => {
+                            scroll_y = (scroll_y - 40.0).clamp(0.0, max_scroll);
+                            handled = true;
+                        }
+                        (false, false, Key::Named(NamedKey::PageDown)) => {
+                            scroll_y = (scroll_y + 300.0).clamp(0.0, max_scroll);
+                            handled = true;
+                        }
+                        (false, false, Key::Named(NamedKey::PageUp)) => {
+                            scroll_y = (scroll_y - 300.0).clamp(0.0, max_scroll);
+                            handled = true;
+                        }
+                        // Ctrl + T: New Tab
+                        (true, false, Key::Character(c)) if c.eq_ignore_ascii_case("t") => {
+                            let _ = asteria_window
+                                .tab_manager
+                                .handle_event(ShellEvent::NewTab("<sample>".to_string()));
+                            handled = true;
+                        }
+                        // Ctrl + W: Close Active Tab
+                        (true, false, Key::Character(c)) if c.eq_ignore_ascii_case("w") => {
+                            let idx = asteria_window.tab_manager.active_tab_index;
+                            let _ = asteria_window
+                                .tab_manager
+                                .handle_event(ShellEvent::CloseTab(idx));
+                            handled = true;
+                        }
+                        // Alt + LeftArrow: Go Back
+                        (false, true, Key::Named(NamedKey::ArrowLeft)) => {
+                            let _ = asteria_window.tab_manager.handle_event(ShellEvent::GoBack);
+                            handled = true;
+                        }
+                        // Alt + RightArrow: Go Forward
+                        (false, true, Key::Named(NamedKey::ArrowRight)) => {
+                            let _ = asteria_window
+                                .tab_manager
+                                .handle_event(ShellEvent::GoForward);
+                            handled = true;
+                        }
+                        // Ctrl + R or F5: Reload
+                        (true, false, Key::Character(c)) if c.eq_ignore_ascii_case("r") => {
+                            let _ = asteria_window.tab_manager.handle_event(ShellEvent::Reload);
+                            handled = true;
+                        }
+                        (false, false, Key::Named(NamedKey::F5)) => {
+                            let _ = asteria_window.tab_manager.handle_event(ShellEvent::Reload);
+                            handled = true;
+                        }
+                        _ => {}
+                    }
+
+                    if handled {
+                        let active_scene = if scene.nodes.is_empty() {
+                            asteria_window.build_active_scene()
+                        } else {
+                            scene.clone()
+                        };
+                        render_graph = rebuild_render_pass(&active_scene, &backend, scroll_y);
+>>>>>>> aa22c33 (Docs updated + Report)
                         asteria_window.window.request_redraw();
                     }
 

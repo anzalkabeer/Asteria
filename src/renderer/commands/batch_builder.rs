@@ -10,7 +10,7 @@ pub struct Vertex {
 
 pub struct BatchBuilder {
     pub vertices: Vec<Vertex>,
-    pub indices: Vec<u16>,
+    pub indices: Vec<u32>,
 }
 
 impl Default for BatchBuilder {
@@ -27,10 +27,17 @@ impl BatchBuilder {
         }
     }
 
-    pub fn build_batches(&mut self, commands: &[RenderCommand]) {
+    pub fn clear(&mut self) {
         self.vertices.clear();
         self.indices.clear();
+    }
 
+    pub fn build_batches(&mut self, commands: &[RenderCommand]) {
+        self.clear();
+        self.append_batches(commands);
+    }
+
+    pub fn append_batches(&mut self, commands: &[RenderCommand]) {
         for cmd in commands {
             match cmd {
                 RenderCommand::SolidRect { rect, rgba } => {
@@ -48,27 +55,50 @@ impl BatchBuilder {
                         [0.1, 0.1, 0.1, 1.0]
                     };
 
-                    let scale = (font_size / 9.0).max(1.0);
-                    let px = (scale * 0.9).max(1.0);
-                    let char_spacing = 6.0 * scale;
+                    let char_w = (font_size * 0.55).clamp(7.0, 16.0);
+                    let px = (char_w / 6.5).clamp(1.0, 2.4);
 
-                    for (idx, ch) in text.chars().enumerate() {
-                        if ch == ' ' {
+                    let start_x = rect[0];
+                    let available_width = if rect[2] > 10.0 { rect[2] } else { 700.0 };
+                    let max_x = (start_x + available_width).min(750.0);
+
+                    let line_height = (font_size * 1.35).max(18.0);
+                    let mut cur_x = start_x;
+                    let mut cur_y = rect[1];
+
+                    for word in text.split(' ') {
+                        let word_len = word.chars().count();
+                        if word_len == 0 {
+                            cur_x += char_w;
                             continue;
                         }
-                        let cx = rect[0] + (idx as f32) * char_spacing;
-                        let cy = rect[1];
 
-                        let font_cols = get_char_5x7(ch);
-                        for (col_idx, &col_bits) in font_cols.iter().enumerate() {
-                            for row_idx in 0..7 {
-                                if (col_bits >> row_idx) & 1 == 1 {
-                                    let pixel_x = cx + (col_idx as f32) * px;
-                                    let pixel_y = cy + (row_idx as f32) * px;
-                                    self.add_quad(pixel_x, pixel_y, px, px, text_color);
+                        let word_width = (word_len as f32) * char_w;
+
+                        // Line Wrap: if word exceeds right boundary, wrap to next line!
+                        if cur_x > start_x && (cur_x + word_width > max_x) {
+                            cur_x = start_x;
+                            cur_y += line_height;
+                        }
+
+                        for (idx, ch) in word.chars().enumerate() {
+                            let cx = cur_x + (idx as f32) * char_w;
+                            let cy = cur_y;
+
+                            let font_cols = get_char_5x7(ch);
+                            for (col_idx, &col_bits) in font_cols.iter().enumerate() {
+                                for row_idx in 0..7 {
+                                    if (col_bits >> row_idx) & 1 == 1 {
+                                        let pixel_x = cx + (col_idx as f32) * px;
+                                        let pixel_y = cy + (row_idx as f32) * px;
+                                        self.add_quad(pixel_x, pixel_y, px, px, text_color);
+                                    }
                                 }
                             }
                         }
+
+                        // Advance cursor by word width plus space gap
+                        cur_x += word_width + char_w;
                     }
                 }
             }
@@ -86,7 +116,7 @@ impl BatchBuilder {
     }
 
     fn add_quad(&mut self, x: f32, y: f32, w: f32, h: f32, rgba: [f32; 4]) {
-        let base_idx = self.vertices.len() as u16;
+        let base_idx = self.vertices.len() as u32;
 
         self.vertices.push(Vertex {
             position: [x, y],
@@ -157,6 +187,7 @@ fn get_char_5x7(c: char) -> [u8; 5] {
         '9' => [0x06, 0x49, 0x49, 0x29, 0x1e],
         ',' => [0x00, 0x50, 0x30, 0x00, 0x00],
         '.' => [0x00, 0x60, 0x60, 0x00, 0x00],
+        '&' => [0x36, 0x49, 0x35, 0x22, 0x50],
         '!' => [0x00, 0x00, 0x5f, 0x00, 0x00],
         '?' => [0x02, 0x01, 0x51, 0x09, 0x06],
         ':' => [0x00, 0x36, 0x36, 0x00, 0x00],

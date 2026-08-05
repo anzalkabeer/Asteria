@@ -89,6 +89,38 @@ cargo run -- path/to/index.html
 
 ---
 
+## 🧪 Testing Process & Visual Fixtures
+
+Asteria includes both automated unit/integration tests and visual HTML/CSS test fixtures to verify layout, styling, and rendering fidelity:
+
+### 1. Automated Test Suite
+
+Run the full Rust test suite covering DOM parsing, CSS cascade, layout box calculation, and image decoding:
+
+```bash
+# Run all unit and integration tests
+cargo test
+
+# Run specific test suites
+cargo test --test style_integration
+cargo test --test layout_integration
+cargo test --test image_integration
+```
+
+### 2. Visual HTML/CSS Test Fixtures
+
+Test live hardware rendering (`wgpu`), window reflow, image frames, and flexbox card grid layouts using built-in test fixtures:
+
+```bash
+# Test Image Frames, CSS Flexbox Row Layout & Card Wrapping
+cargo run -- tests/fixtures/gallery.html
+
+# Test Multi-Column Article Layouts, Headers & Stylesheets
+cargo run -- tests/fixtures/blog.html
+```
+
+---
+
 ## 📄 License
 
 This project is open-source under the MIT License.

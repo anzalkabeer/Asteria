@@ -182,6 +182,7 @@ impl<'a> CssParser<'a> {
             let rest = &header_text[pos..];
             if let Some(val_start) = rest.find(':') {
                 let num_str: String = rest[val_start + 1..]
+                    .trim_start()
                     .chars()
                     .take_while(|c| c.is_ascii_digit() || *c == '.')
                     .collect();
@@ -195,6 +196,7 @@ impl<'a> CssParser<'a> {
             let rest = &header_text[pos..];
             if let Some(val_start) = rest.find(':') {
                 let num_str: String = rest[val_start + 1..]
+                    .trim_start()
                     .chars()
                     .take_while(|c| c.is_ascii_digit() || *c == '.')
                     .collect();
