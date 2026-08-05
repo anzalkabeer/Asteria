@@ -19,11 +19,14 @@
 
 use std::sync::Arc;
 use winit::{
-    event::{ElementState, Event, MouseButton, MouseScrollDelta, WindowEvent},
+    event::{ElementState, Event, KeyEvent, MouseButton, MouseScrollDelta, WindowEvent},
     event_loop::{ControlFlow, EventLoop},
+    keyboard::{Key, ModifiersState, NamedKey},
     window::{Window, WindowBuilder},
 };
 
+use crate::css_parser::Stylesheet;
+use crate::parser::Parser;
 use crate::renderer::backend::wgpu_backend::WgpuBackend;
 use crate::renderer::commands::batch_builder::BatchBuilder;
 use crate::renderer::commands::command_builder::{CommandBuilder, RenderCommand};
@@ -32,7 +35,11 @@ use crate::renderer::passes::image_pass::ImagePass;
 use crate::renderer::passes::rect_pass::RectPass;
 use crate::renderer::passes::text_pass::TextPass;
 use crate::renderer::scheduler::batching::BatchPlanner;
-use crate::scene::{NodeState, SceneGraph, SceneNodeId};
+use crate::scene::{NodeState, SceneGraph, SceneNodeId, build_scene_graph};
+use crate::scheduler::ThreadedScheduler;
+use crate::shell::{ShellEvent, TabManager};
+use crate::style::resolve_styles;
+use crate::tokenizer::Tokenizer;
 
 // ─── Pass indices in the RenderGraph ──────────────────────────────
 // These constants define the Z-order of GPU passes:
@@ -42,37 +49,90 @@ const TEXT_PASS_INDEX: usize = 1;
 
 pub struct AsteriaWindow {
     pub window: Arc<Window>,
+    pub tab_manager: TabManager,
+    pub scheduler: ThreadedScheduler,
+    pub modifiers: ModifiersState,
 }
 
 impl AsteriaWindow {
     pub fn new(event_loop: &EventLoop<()>, width: u32, height: u32) -> Self {
-        let window = WindowBuilder::new()
-            .with_title("Asteria Engine")
-            .with_inner_size(winit::dpi::PhysicalSize::new(width, height))
-            .build(event_loop)
-            .expect("Failed to create winit window");
+        let window = Arc::new(
+            WindowBuilder::new()
+                .with_title("Asteria Engine")
+                .with_inner_size(winit::dpi::LogicalSize::new(width, height))
+                .build(event_loop)
+                .expect("Failed to create Window"),
+        );
 
         Self {
-            window: Arc::new(window),
+            window,
+            tab_manager: TabManager::new(),
+            scheduler: ThreadedScheduler::new(4),
+            modifiers: ModifiersState::default(),
         }
+    }
+
+    pub fn with_tab_manager(
+        event_loop: &EventLoop<()>,
+        width: u32,
+        height: u32,
+        tab_manager: TabManager,
+    ) -> Self {
+        let window = Arc::new(
+            WindowBuilder::new()
+                .with_title("Asteria Engine")
+                .with_inner_size(winit::dpi::LogicalSize::new(width, height))
+                .build(event_loop)
+                .expect("Failed to create Window"),
+        );
+
+        Self {
+            window,
+            tab_manager,
+            scheduler: ThreadedScheduler::new(4),
+            modifiers: ModifiersState::default(),
+        }
+    }
+
+    pub fn build_active_scene(&mut self) -> SceneGraph {
+        let size = self.window.inner_size();
+        let viewport_w = size.width as f32;
+        let viewport_h = size.height as f32;
+
+        if let Some(active_tab) = self.tab_manager.active_tab() {
+            let html_source = active_tab.content.as_bytes();
+            let css_source = active_tab.stylesheet_content.as_bytes();
+
+            let mut tokenizer = Tokenizer::new(html_source);
+            let tokens = tokenizer.tokenize();
+            let dom = Parser::new(&tokens, html_source).parse();
+
+            let stylesheet = Stylesheet::parse(css_source);
+            let styled = resolve_styles(&dom, &stylesheet, html_source);
+
+            if let Ok(layout) = crate::layout::layout_document(&styled, &dom, html_source, viewport_w, viewport_h) {
+                let display_list = crate::paint::build_display_list(&layout, &dom, html_source);
+                return build_scene_graph(&display_list, 256.0);
+            }
+        }
+
+        SceneGraph::new()
     }
 }
 
 // ─── Batch Builder Helper ─────────────────────────────────────────
 
 fn build_rect_batch(scene: &SceneGraph, scroll_y: f32) -> BatchBuilder {
-    // Build commands from scene, applying scroll offset on Y axis
     let mut cmd_builder = CommandBuilder::new();
     cmd_builder.build_from_scene(scene);
 
-    // Apply scroll offset to all commands
     let scrolled: Vec<_> = cmd_builder
         .commands
         .iter()
         .map(|c| match c {
             RenderCommand::SolidRect { rect, rgba } => {
                 let mut r = *rect;
-                r[1] -= scroll_y; // Apply scroll offset on Y
+                r[1] -= scroll_y;
                 RenderCommand::SolidRect {
                     rect: r,
                     rgba: *rgba,
@@ -122,9 +182,6 @@ fn populate_text_pass(text_pass: &mut TextPass, scene: &SceneGraph, scroll_y: f3
 
 // ─── Max Scroll Calculation ───────────────────────────────────────
 
-/// Calculate the maximum scroll offset based on the tallest node
-/// in the scene, minus the viewport height. Prevents scrolling
-/// past content into empty white space.
 fn max_scroll_for_scene(scene: &SceneGraph, viewport_height: f32) -> f32 {
     let max_y = scene
         .nodes
@@ -136,22 +193,24 @@ fn max_scroll_for_scene(scene: &SceneGraph, viewport_height: f32) -> f32 {
 
 // ─── Main Window Loop ─────────────────────────────────────────────
 
-pub fn run_window_loop(mut scene: SceneGraph, mut tab_manager: crate::shell::TabManager) {
+pub fn run_window_loop(initial_scene: SceneGraph, tab_manager: TabManager) {
     let event_loop = EventLoop::new().expect("Failed to create EventLoop");
-    let asteria_window = AsteriaWindow::new(&event_loop, 800, 600);
+    let mut asteria_window = AsteriaWindow::with_tab_manager(&event_loop, 800, 600, tab_manager);
 
-    // Initialize WgpuBackend (Device, Queue, Surface)
     let mut backend = pollster::block_on(WgpuBackend::new(asteria_window.window.clone()));
 
-    // ─── Phase 9C & Milestone 10: Interactive State ──────────────
+    let mut scene = if initial_scene.nodes.is_empty() {
+        asteria_window.build_active_scene()
+    } else {
+        initial_scene
+    };
+
     let mut cursor_pos: (f32, f32) = (0.0, 0.0);
     let mut current_scroll_y: f32 = 0.0;
     let mut target_scroll_y: f32 = 0.0;
     let mut hovered_node: Option<SceneNodeId> = None;
     let mut needs_redraw = true;
 
-    // ─── RenderGraph — GPU passes created ONCE, data rebuilt per frame ───
-    // Pass order: RectPass[0] → ImagePass[1] → TextPass[2]
     let mut render_graph = RenderGraph::new();
     render_graph.add_pass(Box::new(RectPass::new(
         &backend.device,
@@ -175,11 +234,8 @@ pub fn run_window_loop(mut scene: SceneGraph, mut tab_manager: crate::shell::Tab
         match event {
             Event::WindowEvent { event, window_id } if window_id == asteria_window.window.id() => {
                 match event {
-                    // ─── Window Close ────────────────────────────
                     WindowEvent::CloseRequested => elwt.exit(),
 
-                    // ─── Window Resize ───────────────────────────
-                    // Rebuild TextPass with new viewport dimensions
                     WindowEvent::Resized(physical_size) => {
                         backend.resize(physical_size);
 
@@ -193,21 +249,82 @@ pub fn run_window_loop(mut scene: SceneGraph, mut tab_manager: crate::shell::Tab
                         asteria_window.window.request_redraw();
                     }
 
-                    // ─── Mouse Cursor Movement (Hover / Hit Test) ─
-                    // Milestone 10: Update NodeState::Hovered & invalidate node.
+                    WindowEvent::ModifiersChanged(modifiers) => {
+                        asteria_window.modifiers = modifiers.state();
+                    }
+
+                    WindowEvent::KeyboardInput {
+                        event:
+                            KeyEvent {
+                                logical_key,
+                                state: ElementState::Pressed,
+                                ..
+                            },
+                        ..
+                    } => {
+                        let ctrl = asteria_window.modifiers.control_key();
+                        let alt = asteria_window.modifiers.alt_key();
+
+                        let mut handled = false;
+                        match (ctrl, alt, &logical_key) {
+                            // Ctrl + T: New Tab
+                            (true, false, Key::Character(c)) if c.eq_ignore_ascii_case("t") => {
+                                let _ = asteria_window
+                                    .tab_manager
+                                    .handle_event(ShellEvent::NewTab("<sample>".to_string()));
+                                handled = true;
+                            }
+                            // Ctrl + W: Close Active Tab
+                            (true, false, Key::Character(c)) if c.eq_ignore_ascii_case("w") => {
+                                let idx = asteria_window.tab_manager.active_tab_index;
+                                let _ = asteria_window
+                                    .tab_manager
+                                    .handle_event(ShellEvent::CloseTab(idx));
+                                handled = true;
+                            }
+                            // Alt + LeftArrow: Go Back
+                            (false, true, Key::Named(NamedKey::ArrowLeft)) => {
+                                let _ = asteria_window.tab_manager.handle_event(ShellEvent::GoBack);
+                                handled = true;
+                            }
+                            // Alt + RightArrow: Go Forward
+                            (false, true, Key::Named(NamedKey::ArrowRight)) => {
+                                let _ = asteria_window
+                                    .tab_manager
+                                    .handle_event(ShellEvent::GoForward);
+                                handled = true;
+                            }
+                            // Ctrl + R or F5: Reload
+                            (true, false, Key::Character(c)) if c.eq_ignore_ascii_case("r") => {
+                                let _ = asteria_window.tab_manager.handle_event(ShellEvent::Reload);
+                                handled = true;
+                            }
+                            (false, false, Key::Named(NamedKey::F5)) => {
+                                let _ = asteria_window.tab_manager.handle_event(ShellEvent::Reload);
+                                handled = true;
+                            }
+                            _ => {}
+                        }
+
+                        if handled {
+                            scene = asteria_window.build_active_scene();
+                            current_scroll_y = 0.0;
+                            target_scroll_y = 0.0;
+                            needs_redraw = true;
+                            asteria_window.window.request_redraw();
+                        }
+                    }
+
                     WindowEvent::CursorMoved { position, .. } => {
                         cursor_pos = (position.x as f32, position.y as f32);
 
-                        // Adjust for scroll offset when hit-testing
                         let hit_y = cursor_pos.1 + current_scroll_y;
                         let new_hover = scene.hit_test(cursor_pos.0, hit_y);
 
                         if new_hover != hovered_node {
-                            // Restore previously hovered node to Normal state
                             if let Some(old_id) = hovered_node {
                                 scene.set_node_state(old_id, NodeState::Normal);
                             }
-                            // Set newly hovered node to Hovered state
                             if let Some(new_id) = new_hover {
                                 scene.set_node_state(new_id, NodeState::Hovered);
                             }
@@ -217,8 +334,6 @@ pub fn run_window_loop(mut scene: SceneGraph, mut tab_manager: crate::shell::Tab
                         }
                     }
 
-                    // ─── Mouse Click (Select / Activate & Link Navigation) ─
-                    // Milestone 10: Update NodeState::Active & trigger link dispatch.
                     WindowEvent::MouseInput {
                         state: ElementState::Pressed,
                         button: MouseButton::Left,
@@ -228,35 +343,21 @@ pub fn run_window_loop(mut scene: SceneGraph, mut tab_manager: crate::shell::Tab
                         if let Some(node_id) = scene.hit_test(cursor_pos.0, hit_y) {
                             scene.set_node_state(node_id, NodeState::Active);
 
-                            // Check for HTML <a> link URL
                             if let Some(url) = scene.node_url(node_id) {
                                 println!("[ASTERIA NAV] Link Clicked → Target URL: {}", url);
-                                // Milestone 10 Component 3: Trigger TabManager navigation
-                                if let Err(e) = tab_manager.navigate(url) {
+                                if let Err(e) = asteria_window.tab_manager.navigate(url) {
                                     eprintln!("Navigation failed: {}", e);
+                                } else {
+                                    scene = asteria_window.build_active_scene();
+                                    current_scroll_y = 0.0;
+                                    target_scroll_y = 0.0;
                                 }
-                            } else {
-                                let kind_label = match scene.node_kind(node_id) {
-                                    Some(crate::scene::SceneNodeKind::SolidRect) => "SolidRect",
-                                    Some(crate::scene::SceneNodeKind::Text { .. }) => "Text",
-                                    Some(crate::scene::SceneNodeKind::Image) => "Image",
-                                    Some(crate::scene::SceneNodeKind::Border { .. }) => "Border",
-                                    Some(crate::scene::SceneNodeKind::Container) => "Container",
-                                    None => "Unknown",
-                                };
-                                println!(
-                                    "[ASTERIA] Click @ ({:.0},{:.0}) → Node {:?} [{}]",
-                                    cursor_pos.0, cursor_pos.1, node_id, kind_label,
-                                );
                             }
-
                             needs_redraw = true;
                             asteria_window.window.request_redraw();
                         }
                     }
 
-                    // ─── Mouse Scroll (Viewport Scroll) ──────────
-                    // Phase 9C: Accumulate scroll delta, clamp to [0, max_scroll].
                     WindowEvent::MouseWheel { delta, .. } => {
                         let scroll_dy = match delta {
                             MouseScrollDelta::LineDelta(_, y) => y * 40.0,
@@ -270,17 +371,13 @@ pub fn run_window_loop(mut scene: SceneGraph, mut tab_manager: crate::shell::Tab
                         asteria_window.window.request_redraw();
                     }
 
-                    // ─── Frame Render ─────────────────────────────
-                    // Milestone 10: Skip GPU submission if 0 tiles are dirty!
                     WindowEvent::RedrawRequested => {
                         let dirty_segs = scene.dirty_segments();
                         if dirty_segs.is_empty() && !needs_redraw {
-                            return; // 0% GPU / VRAM usage when scene is clean!
+                            return;
                         }
                         needs_redraw = false;
 
-                        // ── Update pass data via RenderGraph downcast ──
-                        // RectPass: rebuild vertex/index buffers with scroll offset
                         let new_batch = build_rect_batch(&scene, current_scroll_y);
                         if let Some(rp) =
                             render_graph.pass_downcast_mut::<RectPass>(RECT_PASS_INDEX)
@@ -288,17 +385,14 @@ pub fn run_window_loop(mut scene: SceneGraph, mut tab_manager: crate::shell::Tab
                             rp.update_buffers(&backend.device, &new_batch);
                         }
 
-                        // TextPass: repopulate glyph buffers with scroll offset
                         if let Some(tp) =
                             render_graph.pass_downcast_mut::<TextPass>(TEXT_PASS_INDEX)
                         {
                             populate_text_pass(tp, &scene, current_scroll_y);
                         }
 
-                        // ── RenderGraph.prepare() → shape glyphs, upload buffers ──
                         render_graph.prepare(&backend.device, &backend.queue);
 
-                        // ── GPU Frame Submission ──────────────────────
                         let frame = match backend.surface.get_current_texture() {
                             Ok(frame) => frame,
                             Err(wgpu::SurfaceError::Lost | wgpu::SurfaceError::Outdated) => {
@@ -351,14 +445,12 @@ pub fn run_window_loop(mut scene: SceneGraph, mut tab_manager: crate::shell::Tab
                                     occlusion_query_set: None,
                                 });
 
-                            // ── RenderGraph.render() → execute all passes in Z-order ──
                             render_graph.render(&mut rpass);
                         }
 
                         backend.queue.submit(std::iter::once(encoder.finish()));
                         frame.present();
 
-                        // Clear dirty flags after successful render
                         scene.clear_dirty();
                     }
 
@@ -366,10 +458,9 @@ pub fn run_window_loop(mut scene: SceneGraph, mut tab_manager: crate::shell::Tab
                 }
             }
             Event::AboutToWait => {
-                // Smooth scroll interpolation
                 let diff = target_scroll_y - current_scroll_y;
                 if diff.abs() > 0.5 {
-                    current_scroll_y += diff * 0.15; // smooth factor
+                    current_scroll_y += diff * 0.15;
                     needs_redraw = true;
                     asteria_window.window.request_redraw();
                 } else if diff.abs() > 0.0 {
