@@ -329,15 +329,39 @@ fn build_styled_node(
                         copy_property(&mut computed, parent_style, prop_id);
                     }
                     // Non-inherited: keep initial value from Default impl
-                    // User-Agent default stylesheet: block tags default to Display::Block
-                    if prop_id == PropertyId::Display {
-                        if let NodeKind::Element { tag_start, tag_end } = &node.kind {
-                            let tag_name = std::str::from_utf8(
-                                &source[*tag_start as usize..*tag_end as usize],
-                            )
-                            .unwrap_or("");
-                            if is_default_block_tag(tag_name) {
-                                computed.display = Display::Block;
+                    // User-Agent default stylesheet: block tags default to Display::Block & base colors
+                    if let NodeKind::Element { tag_start, tag_end } = &node.kind {
+                        let tag_name =
+                            std::str::from_utf8(&source[*tag_start as usize..*tag_end as usize])
+                                .unwrap_or("")
+                                .to_ascii_lowercase();
+
+                        if prop_id == PropertyId::Display && is_default_block_tag(&tag_name) {
+                            computed.display = Display::Block;
+                        }
+
+                        if !specified.contains_key("background-color") {
+                            match tag_name.as_str() {
+                                "body" => {
+                                    computed.background_color = values::Color::rgb(248, 250, 252);
+                                }
+                                "h1" => {
+                                    computed.background_color = values::Color::rgb(235, 248, 255);
+                                }
+                                "div" => {
+                                    computed.background_color = values::Color::rgb(237, 242, 247);
+                                }
+                                _ => {}
+                            }
+                        }
+
+                        if !specified.contains_key("color") && tag_name == "h1" {
+                            computed.color = values::Color::rgb(43, 108, 176);
+                        }
+
+                        if !specified.contains_key("padding-top") {
+                            if tag_name == "h1" || tag_name == "div" {
+                                computed.padding = values::Edges::uniform(10.0);
                             }
                         }
                     }
