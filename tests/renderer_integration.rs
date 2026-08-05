@@ -6,7 +6,7 @@
 
 use asteria::arena::FrameArena;
 use asteria::cache::LruCache;
-use asteria::frame::{FrameBudget, FrameTimer};
+use asteria::frame::FrameBudget;
 use asteria::layout::Rect;
 use asteria::paint::{DisplayCommand, DisplayList};
 use asteria::pool::Pool;

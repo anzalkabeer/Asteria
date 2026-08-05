@@ -6,7 +6,7 @@
 //   - CSS paint order (Background -> Border -> Text -> Children) is preserved
 
 use asteria::css_parser::Stylesheet;
-use asteria::dom::Dom;
+
 use asteria::layout::layout_document;
 use asteria::paint::{DisplayCommand, build_display_list};
 use asteria::parser::Parser;
