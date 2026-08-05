@@ -183,11 +183,13 @@ impl EngineProfiler {
         let total_duration = match self.finalized_total_duration {
             Some(duration) => duration,
             None => {
-                let duration = self
+                let start_elapsed = self
                     .total_start
                     .take()
                     .map(|start| start.elapsed())
-                    .unwrap_or_else(|| self.durations.values().sum());
+                    .unwrap_or_default();
+                let recorded_elapsed = self.durations.values().copied().sum::<Duration>();
+                let duration = start_elapsed.max(recorded_elapsed);
                 self.finalized_total_duration = Some(duration);
                 duration
             }

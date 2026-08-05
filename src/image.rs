@@ -208,10 +208,7 @@ fn parse_image_dimensions(format: ImageFormat, data: &[u8]) -> (u32, u32) {
         ImageFormat::Bmp if data.len() >= 26 => {
             let width = i32::from_le_bytes([data[18], data[19], data[20], data[21]]);
             let height = i32::from_le_bytes([data[22], data[23], data[24], data[25]]);
-            (
-                width.unsigned_abs().max(1),
-                height.unsigned_abs().max(1),
-            )
+            (width.unsigned_abs().max(1), height.unsigned_abs().max(1))
         }
         ImageFormat::Gif if data.len() >= 10 => {
             let width = u16::from_le_bytes([data[6], data[7]]) as u32;

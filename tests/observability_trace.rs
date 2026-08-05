@@ -1,4 +1,6 @@
-use asteria::devtools::config::{AOF_ENABLED, AofConfig, EXPORT_ENABLED, METRICS_ENABLED, SNAPSHOT_ENABLED, TRACE_ENABLED};
+use asteria::devtools::config::{
+    AOF_ENABLED, AofConfig, EXPORT_ENABLED, METRICS_ENABLED, SNAPSHOT_ENABLED, TRACE_ENABLED,
+};
 use asteria::devtools::export::export_chrome_trace;
 use asteria::devtools::trace::{TraceEventKind, record_event, trace_recorder};
 use std::fs;
@@ -85,6 +87,8 @@ fn test_mixed_observability_config_respects_subsystem_flags() {
 #[test]
 fn test_trace_recorder_assigns_distinct_thread_ids() {
     let _guard = test_lock();
+    AofConfig::full_inspection().apply();
+
     let mut recorder = trace_recorder().lock().unwrap();
     recorder.clear();
     drop(recorder);
@@ -101,7 +105,11 @@ fn test_trace_recorder_assigns_distinct_thread_ids() {
     }
 
     let recorder = trace_recorder().lock().unwrap();
-    let thread_ids: Vec<u32> = recorder.events.iter().map(|event| event.thread_id).collect();
+    let thread_ids: Vec<u32> = recorder
+        .events
+        .iter()
+        .map(|event| event.thread_id)
+        .collect();
     assert_eq!(thread_ids.len(), 2);
     assert_ne!(thread_ids[0], thread_ids[1]);
 }

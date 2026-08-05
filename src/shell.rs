@@ -147,15 +147,19 @@ impl Default for TabManager {
 impl TabManager {
     /// Create a new `TabManager` initialized with one default sample tab.
     pub fn new() -> Self {
-        let initial_tab_id = TabId(1);
-        let initial_tab = Tab::new(initial_tab_id, "<sample>");
-
-        TabManager {
+        let mut manager = TabManager {
             next_tab_id: 2,
-            tabs: vec![initial_tab],
+            tabs: Vec::new(),
             active_tab_index: 0,
             loader: ResourceLoader::new(),
-        }
+        };
+
+        let initial_tab_id = TabId(1);
+        let mut initial_tab = Tab::new(initial_tab_id, "<sample>");
+        let _ = manager.load_tab_content(&mut initial_tab);
+        manager.tabs.push(initial_tab);
+
+        manager
     }
 
     /// Open a new tab with the given URL and switch to it.

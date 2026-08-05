@@ -4,7 +4,7 @@
 // Collects traces, snapshots, and metrics, then outputs them
 // via the requested exporters and formatters.
 
-use crate::devtools::config::{AOF_ENABLED, EXPORT_ENABLED, AofConfig};
+use crate::devtools::config::{AOF_ENABLED, AofConfig, EXPORT_ENABLED};
 use crate::devtools::export::export_chrome_trace;
 use crate::devtools::formatter::{
     format_energy_diagnostics, format_memory_inspector, format_segment_inspector,
