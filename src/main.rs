@@ -208,6 +208,7 @@ fn main() {
         let mut segments = asteria::segment::SegmentBuilder::new(256.0);
         let _ = segments.build_segments(800.0, 600.0);
 
+
         profiler.set_counts(dom.nodes.len(), box_count, display_list.commands.len());
         let report = profiler.finish_pipeline();
 
