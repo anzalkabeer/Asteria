@@ -131,7 +131,7 @@ fn main() {
             println!("      }}");
         }
     } else {
-        println!("\n── No author CSS rules provided (using default ComputedStyle) ──\n");
+        println!("\n── No custom CSS rules (applying User-Agent defaults) ──\n");
     }
 
     // ─── Phase 3: Resolve Styles (Cascade & Inheritance) ───────────
@@ -193,7 +193,7 @@ fn main() {
 
         let scene = asteria::scene::build_scene_graph(&display_list, 256.0);
         let scene_duration = scene_start.elapsed();
-        profiler.record_stage_duration(EngineStage::SceneBuild, scene_duration);
+        profiler.record_stage_duration(EngineStage::Render, scene_duration);
         record_event(TraceEventKind::SceneEnd {
             node_count: scene.len(),
             duration_ms: scene_duration.as_secs_f64() * 1000.0,
@@ -224,14 +224,13 @@ fn main() {
         energy.gpu_uploads = GPU_VRAM_USED.load(std::sync::atomic::Ordering::Relaxed);
         energy.impact = energy.analyze_impact();
 
-        if args.contains(&"--window".to_string()) {
-            println!("\n── Launching Hardware Renderer (wgpu) ─────────");
-            AofInspector::inspect(snapshot, &energy, "trace.json");
+        AofInspector::inspect(snapshot, &energy, "trace.json");
+
+        if !args.contains(&"--cli".to_string()) {
+            println!("\n── Launching Hardware Renderer (wgpu) & OS Window Loop ─────────");
             asteria::renderer::window::window::run_window_loop(scene, tab_manager);
             return;
         }
-
-        AofInspector::inspect(snapshot, &energy, "trace.json");
     } else {
         profiler.set_counts(dom.nodes.len(), 0, 0);
         let report = profiler.finish_pipeline();
