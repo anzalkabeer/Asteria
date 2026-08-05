@@ -85,26 +85,37 @@ impl AsteriaWindow {
         let viewport_w = size.width as f32;
         let viewport_h = size.height as f32;
 
-        if let Some(active_tab) = self.tab_manager.active_tab() {
-            let html_source = active_tab.content.as_bytes();
-            let css_source = active_tab.stylesheet_content.as_bytes();
+        let sample_html_bytes = b"<!DOCTYPE html><html><head><style>body { background-color: #1e1e2e; color: #cdd6f4; } h1 { color: #89b4fa; font-size: 24px; } p { color: #a6adc8; font-size: 16px; } div { background-color: #313244; }</style></head><body><h1>Asteria Browser Engine</h1><p>Hardware-accelerated GPU renderer running with wgpu + winit.</p><div><p>Interactive Viewport: Scroll, Hover, Click supported!</p></div></body></html>";
 
-            let mut tokenizer = Tokenizer::new(html_source);
-            let tokens = tokenizer.tokenize();
-            let dom = Parser::new(&tokens, html_source).parse();
+        let active_tab = self.tab_manager.active_tab();
+        let html_bytes = active_tab
+            .page_resources
+            .as_ref()
+            .map(|r| r.html.bytes.as_slice())
+            .unwrap_or(sample_html_bytes);
 
-            let stylesheet = Stylesheet::parse(css_source);
-            let styled = crate::style::resolve_styles_with_viewport(
-                &dom,
-                &stylesheet,
-                html_source,
-                viewport_w,
-            );
+        let mut tokenizer = Tokenizer::new(html_bytes);
+        let tokens = tokenizer.tokenize();
+        let dom = Parser::new(&tokens, html_bytes).parse();
 
-            if let Ok(layout) = crate::layout::layout_document(&styled, &dom, html_source, viewport_w, viewport_h) {
-                let display_list = crate::paint::build_display_list(&layout, &dom, html_source);
-                return build_scene_graph(&display_list, 256.0);
-            }
+        let css_bytes = active_tab
+            .page_resources
+            .as_ref()
+            .and_then(|r| r.stylesheets.first())
+            .map(|c| c.bytes.as_slice())
+            .unwrap_or(b"");
+
+        let stylesheet = Stylesheet::parse(css_bytes);
+        let styled = crate::style::resolve_styles_with_viewport(
+            &dom,
+            &stylesheet,
+            html_bytes,
+            viewport_w,
+        );
+
+        if let Some(layout) = crate::layout::layout_document(&styled, &dom, html_bytes, viewport_w, viewport_h) {
+            let display_list = crate::paint::build_display_list(&layout, &dom, html_bytes);
+            return build_scene_graph(&display_list, 256.0);
         }
 
         SceneGraph::new()

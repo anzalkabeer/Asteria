@@ -3,6 +3,14 @@ name = "asteria"
 version = "0.1.0"
 edition = "2024"
 
+[lib]
+name = "asteria"
+path = "src/lib.rs"
+
+[[bin]]
+name = "asteria"
+path = "src/main.rs"
+
 [dependencies]
 wgpu = "22.1"
 winit = "0.29"

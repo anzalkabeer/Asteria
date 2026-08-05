@@ -54,6 +54,7 @@ fn main() {
 
     // ─── Async Scheduler Pipeline Stage Dispatch ──────────────────────
     let sample_html_bytes = b"<!DOCTYPE html><html><head><style>body { background-color: #1e1e2e; color: #cdd6f4; } h1 { color: #89b4fa; font-size: 24px; } p { color: #a6adc8; font-size: 16px; } div { background-color: #313244; }</style></head><body><h1>Asteria Browser Engine</h1><p>Hardware-accelerated GPU renderer running with wgpu + winit.</p><div><p>Interactive Viewport: Scroll, Hover, Click supported!</p></div></body></html>";
+    let sample_css_bytes = b"body { background-color: #1e1e2e; color: #cdd6f4; } h1 { color: #89b4fa; font-size: 24px; } p { color: #a6adc8; font-size: 16px; } div { background-color: #313244; }";
 
     let bytes = active_tab
         .page_resources
@@ -208,12 +209,7 @@ fn main() {
         let mut segments = asteria::segment::SegmentBuilder::new(256.0);
         let _ = segments.build_segments(800.0, 600.0);
 
-<<<<<<< HEAD
-
-
-=======
         // ─── Performance Profiler & AOF Inspection ─────────────────
->>>>>>> 39d3626 (Final push)
         profiler.set_counts(dom.nodes.len(), box_count, display_list.commands.len());
         let report = profiler.finish_pipeline();
 
@@ -240,11 +236,7 @@ fn main() {
 
         if !args.contains(&"--cli".to_string()) {
             println!("\n── Launching Hardware Renderer (wgpu) & OS Window Loop ─────────");
-<<<<<<< HEAD
             asteria::renderer::window::window::run_window_loop(scene, tab_manager);
-=======
-            asteria::renderer::window::window::run_window_loop(tab_manager, scene);
->>>>>>> 39d3626 (Final push)
             return;
         }
     } else {

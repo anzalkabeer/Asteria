@@ -14,8 +14,8 @@
 use std::fmt;
 
 use crate::dom::{Dom, NodeId, NodeKind};
-use crate::layout::{LayoutBox, Rect};
-use crate::values::{BorderStyleValue, Color, Edges};
+use crate::layout::{EdgeSizes, LayoutBox, Rect};
+use crate::values::Color;
 
 // ─── Display Commands ─────────────────────────────────────────────
 
@@ -29,7 +29,7 @@ pub enum DisplayCommand {
     Border {
         color: Color,
         rect: Rect,
-        border_width: Edges,
+        border_width: EdgeSizes,
         link_url: Option<String>,
     },
     Text {
