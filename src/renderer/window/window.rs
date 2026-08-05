@@ -55,20 +55,7 @@ pub struct AsteriaWindow {
 
 impl AsteriaWindow {
     pub fn new(event_loop: &EventLoop<()>, width: u32, height: u32) -> Self {
-        let window = Arc::new(
-            WindowBuilder::new()
-                .with_title("Asteria Engine")
-                .with_inner_size(winit::dpi::LogicalSize::new(width, height))
-                .build(event_loop)
-                .expect("Failed to create Window"),
-        );
-
-        Self {
-            window,
-            tab_manager: TabManager::new(),
-            scheduler: ThreadedScheduler::new(4),
-            modifiers: ModifiersState::default(),
-        }
+        Self::with_tab_manager(event_loop, width, height, TabManager::new())
     }
 
     pub fn with_tab_manager(
@@ -79,7 +66,7 @@ impl AsteriaWindow {
     ) -> Self {
         let window = Arc::new(
             WindowBuilder::new()
-                .with_title("Asteria Engine")
+                .with_title("Asteria Engine Browser Shell")
                 .with_inner_size(winit::dpi::LogicalSize::new(width, height))
                 .build(event_loop)
                 .expect("Failed to create Window"),
@@ -98,17 +85,9 @@ impl AsteriaWindow {
         let viewport_w = size.width as f32;
         let viewport_h = size.height as f32;
 
-<<<<<<< HEAD
         if let Some(active_tab) = self.tab_manager.active_tab() {
             let html_source = active_tab.content.as_bytes();
             let css_source = active_tab.stylesheet_content.as_bytes();
-=======
-        let sample_html_bytes =
-            b"<!DOCTYPE html><html><body><div class=\"header\"><h1>Asteria Browser Engine</h1></div><div class=\"content\"><p>Multi-Tab GPU Rendering Pipeline</p></div></body></html>";
-
-        let sample_css_bytes =
-            b"body { background-color: #f7fafc; margin: 20px; } .header { background-color: #3182ce; padding: 20px; } h1 { color: #ffffff; } .content { background-color: #e2e8f0; padding: 15px; margin-top: 10px; } p { color: #2d3748; }";
->>>>>>> d8cc28a (fix(renderer): build quad vertices for Text commands and provide default styled sample page)
 
             let mut tokenizer = Tokenizer::new(html_source);
             let tokens = tokenizer.tokenize();
@@ -128,21 +107,9 @@ impl AsteriaWindow {
             }
         }
 
-<<<<<<< HEAD
         SceneGraph::new()
     }
 }
-=======
-        if css_source.is_empty() {
-            css_source = std::str::from_utf8(sample_css_bytes)
-                .unwrap_or("")
-                .to_string();
-        }
-
-        let stylesheet = Stylesheet::parse(css_source.as_bytes());
-        let styled =
-            crate::style::resolve_styles_with_viewport(&dom, &stylesheet, bytes, viewport_w);
->>>>>>> d8cc28a (fix(renderer): build quad vertices for Text commands and provide default styled sample page)
 
 // ─── Batch Builder Helper ─────────────────────────────────────────
 
