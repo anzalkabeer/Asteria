@@ -8,7 +8,6 @@ use crate::devtools::config::TRACE_ENABLED;
 use std::cell::Cell;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Mutex, OnceLock};
-use std::thread;
 use std::time::Instant;
 
 thread_local! {

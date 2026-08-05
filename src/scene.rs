@@ -354,8 +354,6 @@ pub fn build_scene_graph(display_list: &DisplayList, segment_height: f32) -> Sce
 
 // ─── Scene Graph Inspector ───────────────────────────────────────
 
-use std::fmt;
-
 impl std::fmt::Display for SceneGraph {
     #[allow(clippy::collapsible_if)]
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

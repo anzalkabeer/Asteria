@@ -8,10 +8,9 @@ use asteria::devtools::inspector::AofInspector;
 use asteria::devtools::metrics::{GPU_VRAM_USED, MEMORY_ALLOCATED, reset_frame_metrics};
 use asteria::devtools::snapshot::EngineSnapshot;
 use asteria::devtools::trace::{TraceEventKind, record_event};
-use asteria::loader::ResourceLoader;
 use asteria::parser::Parser;
 use asteria::profiler::{EngineProfiler, EngineStage};
-use asteria::scheduler::{PipelineStage, TaskResult, ThreadedScheduler};
+use asteria::scheduler::{PipelineStage, ThreadedScheduler};
 use asteria::shell::{ShellEvent, TabManager};
 use asteria::style::resolve_styles;
 use asteria::tokenizer::Tokenizer;
@@ -39,11 +38,9 @@ fn main() {
         "<sample>"
     };
 
-    if target_url != "<sample>" {
-        if let Err(e) = tab_manager.handle_event(ShellEvent::NavigateTo(target_url.to_string())) {
-            eprintln!("Error loading {}: {}", target_url, e);
-            process::exit(1);
-        }
+    if target_url != "<sample>" && let Err(e) = tab_manager.handle_event(ShellEvent::NavigateTo(target_url.to_string())) {
+        eprintln!("Error loading {}: {}", target_url, e);
+        process::exit(1);
     }
 
     let active_tab = tab_manager.active_tab();
@@ -94,15 +91,14 @@ fn main() {
     dom.print_tree(bytes);
 
     // Verify async worker completed concurrently
-    if let Some(expected_id) = async_parse_id {
-        if let Some(msg) = threaded_scheduler.poll_completed() {
-            if msg.task_id == expected_id {
-                println!(
-                    "\n[Async Scheduler] Task #{} completed concurrently on background thread",
-                    msg.task_id
-                );
-            }
-        }
+    if let Some(expected_id) = async_parse_id
+        && let Some(msg) = threaded_scheduler.poll_completed()
+        && msg.task_id == expected_id
+    {
+        println!(
+            "\n[Async Scheduler] Task #{} completed concurrently on background thread",
+            msg.task_id
+        );
     }
 
     // ─── Phase 2: Parse CSS Stylesheets ────────────────────────────────
