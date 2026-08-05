@@ -58,6 +58,7 @@ fn test_decoded_image_to_display_command() {
         y,
         width,
         height,
+        link_url: _,
     } = cmd
     {
         assert_eq!(image_id, "hero.png");

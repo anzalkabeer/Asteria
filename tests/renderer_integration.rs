@@ -10,7 +10,9 @@ use asteria::frame::{FrameBudget, FrameTimer};
 use asteria::layout::Rect;
 use asteria::paint::{DisplayCommand, DisplayList};
 use asteria::pool::Pool;
-use asteria::scene::{SceneGraph, SceneNode, SceneNodeId, SceneNodeKind, build_scene_graph};
+use asteria::scene::{
+    NodeState, SceneGraph, SceneNode, SceneNodeId, SceneNodeKind, build_scene_graph,
+};
 use asteria::scheduler::{TaskPriority, TaskScheduler};
 use asteria::segment::SegmentBuilder;
 use asteria::values::Color;
@@ -166,6 +168,8 @@ fn test_scene_graph_flat_storage() {
             z_order: 0,
             segment_id: 0,
             dirty: true,
+            state: NodeState::Normal,
+            link_url: None,
         },
         [1.0, 0.0, 0.0, 1.0],
         None,
@@ -193,6 +197,8 @@ fn test_scene_graph_dirty_propagation() {
             z_order: 0,
             segment_id: 0,
             dirty: false,
+            state: NodeState::Normal,
+            link_url: None,
         },
         [0.0; 4],
         None,
@@ -212,6 +218,8 @@ fn test_scene_graph_dirty_propagation() {
             z_order: 1,
             segment_id: 0,
             dirty: false,
+            state: NodeState::Normal,
+            link_url: None,
         },
         [1.0, 0.0, 0.0, 1.0],
         None,
@@ -232,20 +240,22 @@ fn test_scene_graph_dirty_propagation() {
 fn test_build_scene_graph_from_display_list() {
     let mut list = DisplayList::default();
     list.commands.push(DisplayCommand::SolidColor {
-        color: Color::rgb(255, 0, 0),
+        color: Color::new(255, 0, 0, 255), // Red
         rect: Rect {
             x: 0.0,
             y: 0.0,
             width: 800.0,
-            height: 100.0,
+            height: 600.0,
         },
+        link_url: None,
     });
     list.commands.push(DisplayCommand::Text {
-        text: "Hello".into(),
-        x: 10.0,
-        y: 10.0,
+        text: "Hello".to_string(),
+        x: 100.0,
+        y: 100.0,
         font_size: 16.0,
-        color: Color::BLACK,
+        color: Color::new(255, 255, 255, 255),
+        link_url: None,
     });
 
     let scene = build_scene_graph(&list, 256.0);
@@ -347,4 +357,312 @@ fn test_lazy_decode_skips_offscreen_images() {
         cache.get_or_decode_if_visible("onscreen.png", &fake_png, &onscreen_rect, &viewport);
     assert!(result.unwrap().is_some());
     assert_eq!(cache.len(), 1);
+}
+
+// ─── Phase 9C: Hit Testing Tests ─────────────────────────────────
+
+#[test]
+fn test_hit_test_finds_topmost_node() {
+    let mut scene = SceneGraph::new();
+
+    // Background rect covering entire area z_order=0
+    scene.push(
+        SceneNode {
+            rect: Rect {
+                x: 0.0,
+                y: 0.0,
+                width: 800.0,
+                height: 600.0,
+            },
+            kind: SceneNodeKind::SolidRect,
+            parent: None,
+            z_order: 0,
+            segment_id: 0,
+            dirty: false,
+            state: NodeState::Normal,
+            link_url: None,
+        },
+        [0.9, 0.9, 0.9, 1.0],
+        None,
+    );
+
+    // Foreground button rect z_order=1
+    let button_id = scene.push(
+        SceneNode {
+            rect: Rect {
+                x: 100.0,
+                y: 100.0,
+                width: 200.0,
+                height: 50.0,
+            },
+            kind: SceneNodeKind::SolidRect,
+            parent: None,
+            z_order: 1,
+            segment_id: 0,
+            dirty: false,
+            state: NodeState::Normal,
+            link_url: None,
+        },
+        [0.2, 0.5, 1.0, 1.0],
+        None,
+    );
+
+    // Click inside the button area → should return button (higher z_order)
+    let hit = scene.hit_test(150.0, 120.0);
+    assert_eq!(
+        hit,
+        Some(button_id),
+        "Should hit topmost (highest z_order) node"
+    );
+}
+
+#[test]
+fn test_hit_test_miss_returns_none() {
+    let mut scene = SceneGraph::new();
+
+    scene.push(
+        SceneNode {
+            rect: Rect {
+                x: 100.0,
+                y: 100.0,
+                width: 50.0,
+                height: 50.0,
+            },
+            kind: SceneNodeKind::SolidRect,
+            parent: None,
+            z_order: 0,
+            segment_id: 0,
+            dirty: false,
+            state: NodeState::Normal,
+            link_url: None,
+        },
+        [1.0, 0.0, 0.0, 1.0],
+        None,
+    );
+
+    // Point outside all nodes
+    let hit = scene.hit_test(500.0, 500.0);
+    assert!(
+        hit.is_none(),
+        "Should return None when nothing is under cursor"
+    );
+}
+
+#[test]
+fn test_hit_test_edge_boundary() {
+    let mut scene = SceneGraph::new();
+
+    let id = scene.push(
+        SceneNode {
+            rect: Rect {
+                x: 50.0,
+                y: 50.0,
+                width: 100.0,
+                height: 100.0,
+            },
+            kind: SceneNodeKind::SolidRect,
+            parent: None,
+            z_order: 0,
+            segment_id: 0,
+            dirty: false,
+            state: NodeState::Normal,
+            link_url: None,
+        },
+        [0.0, 1.0, 0.0, 1.0],
+        None,
+    );
+
+    // Exact top-left corner — inside
+    assert_eq!(scene.hit_test(50.0, 50.0), Some(id));
+    // Exact bottom-right corner — inside
+    assert_eq!(scene.hit_test(150.0, 150.0), Some(id));
+    // Just outside right edge — miss
+    assert_eq!(scene.hit_test(151.0, 100.0), None);
+}
+
+#[test]
+fn test_invalidate_after_hit() {
+    let mut scene = SceneGraph::new();
+
+    let id = scene.push(
+        SceneNode {
+            rect: Rect {
+                x: 0.0,
+                y: 0.0,
+                width: 100.0,
+                height: 100.0,
+            },
+            kind: SceneNodeKind::SolidRect,
+            parent: None,
+            z_order: 0,
+            segment_id: 0,
+            dirty: false,
+            state: NodeState::Normal,
+            link_url: None,
+        },
+        [1.0, 1.0, 0.0, 1.0],
+        None,
+    );
+
+    // Node starts clean
+    assert!(!scene.nodes[id.index()].dirty);
+
+    // Simulate click → invalidate
+    let hit = scene.hit_test(50.0, 50.0);
+    if let Some(node_id) = hit {
+        scene.invalidate(node_id);
+    }
+
+    // Node should now be dirty
+    assert!(scene.nodes[id.index()].dirty);
+}
+
+// ─── Milestone 10 Component 1 Tests ───────────────────────────────
+
+#[test]
+fn test_node_state_invalidation() {
+    let mut scene = SceneGraph::new();
+
+    let id = scene.push(
+        SceneNode {
+            rect: Rect {
+                x: 0.0,
+                y: 0.0,
+                width: 100.0,
+                height: 50.0,
+            },
+            kind: SceneNodeKind::SolidRect,
+            parent: None,
+            z_order: 0,
+            segment_id: 2,
+            dirty: false,
+            state: NodeState::Normal,
+            link_url: None,
+        },
+        [1.0, 0.0, 0.0, 1.0],
+        None,
+    );
+
+    assert_eq!(scene.nodes[id.index()].state, NodeState::Normal);
+    assert!(!scene.nodes[id.index()].dirty);
+
+    // Change state to Hovered → should mark dirty
+    let changed = scene.set_node_state(id, NodeState::Hovered);
+    assert!(changed);
+    assert_eq!(scene.nodes[id.index()].state, NodeState::Hovered);
+    assert!(scene.nodes[id.index()].dirty);
+
+    // Setting same state again → returns false, no redundant invalidation
+    scene.clear_dirty();
+    let changed_again = scene.set_node_state(id, NodeState::Hovered);
+    assert!(!changed_again);
+    assert!(!scene.nodes[id.index()].dirty);
+}
+
+#[test]
+fn test_dirty_segments_query() {
+    let mut scene = SceneGraph::new();
+
+    // Node in segment 0 (clean)
+    scene.push(
+        SceneNode {
+            rect: Rect {
+                x: 0.0,
+                y: 0.0,
+                width: 100.0,
+                height: 50.0,
+            },
+            kind: SceneNodeKind::SolidRect,
+            parent: None,
+            z_order: 0,
+            segment_id: 0,
+            dirty: false,
+            state: NodeState::Normal,
+            link_url: None,
+        },
+        [0.0; 4],
+        None,
+    );
+
+    // Node in segment 2 (dirty)
+    let n2 = scene.push(
+        SceneNode {
+            rect: Rect {
+                x: 0.0,
+                y: 500.0,
+                width: 100.0,
+                height: 50.0,
+            },
+            kind: SceneNodeKind::SolidRect,
+            parent: None,
+            z_order: 1,
+            segment_id: 2,
+            dirty: true,
+            state: NodeState::Normal,
+            link_url: None,
+        },
+        [0.0; 4],
+        None,
+    );
+
+    let dirty_segs = scene.dirty_segments();
+    assert_eq!(dirty_segs, vec![2], "Should isolate dirty segment 2");
+    assert_eq!(n2.index(), 1);
+}
+
+#[test]
+fn test_node_link_url_retrieval() {
+    let mut scene = SceneGraph::new();
+
+    let id = scene.push(
+        SceneNode {
+            rect: Rect {
+                x: 0.0,
+                y: 0.0,
+                width: 100.0,
+                height: 50.0,
+            },
+            kind: SceneNodeKind::Text { font_size: 16.0 },
+            parent: None,
+            z_order: 0,
+            segment_id: 0,
+            dirty: false,
+            state: NodeState::Normal,
+            link_url: Some("https://asteria.dev".to_string()),
+        },
+        [0.0; 4],
+        None,
+    );
+
+    assert_eq!(scene.node_url(id), Some("https://asteria.dev"));
+}
+
+#[test]
+fn test_clean_scene_empty_dirty_segments() {
+    let mut scene = SceneGraph::new();
+
+    scene.push(
+        SceneNode {
+            rect: Rect {
+                x: 0.0,
+                y: 0.0,
+                width: 100.0,
+                height: 50.0,
+            },
+            kind: SceneNodeKind::SolidRect,
+            parent: None,
+            z_order: 0,
+            segment_id: 0,
+            dirty: false,
+            state: NodeState::Normal,
+            link_url: None,
+        },
+        [0.0; 4],
+        None,
+    );
+
+    assert!(
+        scene.dirty_segments().is_empty(),
+        "Clean scene should return 0 dirty segments"
+    );
 }

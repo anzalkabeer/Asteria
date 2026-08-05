@@ -62,6 +62,7 @@ impl RectPass {
                 alpha_to_coverage_enabled: false,
             },
             multiview: None,
+            cache: None,
         });
 
         Self {
@@ -113,5 +114,9 @@ impl RenderPass for RectPass {
                 pass.draw_indexed(0..self.num_indices, 0, 0..1);
             }
         }
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+        self
     }
 }

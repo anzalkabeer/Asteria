@@ -36,6 +36,7 @@ impl<'a> WgpuBackend<'a> {
                     required_features: wgpu::Features::empty(),
                     required_limits: wgpu::Limits::default(),
                     label: Some("Asteria GPU Device"),
+                    memory_hints: wgpu::MemoryHints::default(),
                 },
                 None, // Trace path
             )

@@ -183,13 +183,11 @@ impl EngineProfiler {
         let total_duration = match self.finalized_total_duration {
             Some(duration) => duration,
             None => {
-                let start_elapsed = self
+                let duration = self
                     .total_start
                     .take()
                     .map(|start| start.elapsed())
-                    .unwrap_or_default();
-                let recorded_elapsed = self.durations.values().copied().sum::<Duration>();
-                let duration = start_elapsed.max(recorded_elapsed);
+                    .unwrap_or_else(|| self.durations.values().sum());
                 self.finalized_total_duration = Some(duration);
                 duration
             }
@@ -262,6 +260,7 @@ mod tests {
     fn test_finish_pipeline_consumes_total_start() {
         let mut profiler = EngineProfiler::new();
         profiler.start_pipeline();
+        std::thread::sleep(Duration::from_millis(15));
         profiler.record_stage_duration(EngineStage::ParseHtml, Duration::from_millis(15));
 
         let report1 = profiler.finish_pipeline();

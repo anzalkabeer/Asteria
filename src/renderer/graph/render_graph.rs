@@ -19,6 +19,12 @@ impl RenderGraph {
         self.passes.push(pass);
     }
 
+    /// Downcast a pass at `index` to a concrete type `T`.
+    /// Returns `None` if the index is out of bounds or the type doesn't match.
+    pub fn pass_downcast_mut<T: 'static>(&mut self, index: usize) -> Option<&mut T> {
+        self.passes.get_mut(index)?.as_any_mut().downcast_mut::<T>()
+    }
+
     pub fn prepare(&mut self, device: &wgpu::Device, queue: &wgpu::Queue) {
         for pass in &mut self.passes {
             pass.prepare(device, queue);

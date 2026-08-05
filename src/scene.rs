@@ -44,12 +44,17 @@ pub enum SceneNodeKind {
     /// Grouping container (no visual output, used for hierarchy)
     Container,
 }
-
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NodeState {
+    Normal,
+    Hovered,
+    Active,
+}
 /// A single visual primitive in the scene, stored contiguously in Vec<SceneNode>
 ///
 /// Layout:  [0][1][2][3][4][5]...
 /// All nodes live in one contiguous memory block for maximum cache locality.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct SceneNode {
     /// Bounding box in document coordinates (x, y, width, height)
     pub rect: Rect,
@@ -64,6 +69,10 @@ pub struct SceneNode {
     /// Incremental invalidation flag (Pillar 3)
     /// When true, this node needs re-rendering
     pub dirty: bool,
+    //this state is from the NOdestate
+    pub state: NodeState,
+    //interactive visuall state of a oarticular node on ehihc the mous e is hovering
+    pub link_url: Option<String>, //target url of the anchor tag if the node is a link, otherwise None
 }
 
 // ─── Text Run Data ───────────────────────────────────────────────
@@ -201,6 +210,66 @@ impl SceneGraph {
             .iter()
             .any(|n| n.segment_id == segment_id && n.dirty)
     }
+
+    // ─── Hit Testing (Pillar 5 — Interaction) ────────────────────
+
+    /// Point-in-bounding-box spatial query.
+    /// Returns the topmost (highest z_order) SceneNode under (x, y).
+    ///
+    /// Uses a zero-allocation single-pass scan with max_by_key,
+    /// safe to call on every CursorMoved event (~60Hz).
+    pub fn hit_test(&self, x: f32, y: f32) -> Option<SceneNodeId> {
+        self.nodes
+            .iter()
+            .enumerate()
+            .filter(|(_, node)| {
+                let r = &node.rect;
+                x >= r.x && x <= r.x + r.width && y >= r.y && y <= r.y + r.height
+            })
+            .max_by_key(|(_, node)| node.z_order)
+            .map(|(i, _)| SceneNodeId(i as u32))
+    }
+
+    /// Returns the kind of a node by ID (useful for interaction dispatch).
+    pub fn node_kind(&self, id: SceneNodeId) -> Option<&SceneNodeKind> {
+        self.nodes.get(id.index()).map(|n| &n.kind)
+    }
+
+    /// Returns the bounding rect of a node by ID.
+    pub fn node_rect(&self, id: SceneNodeId) -> Option<crate::layout::Rect> {
+        self.nodes.get(id.index()).map(|n| n.rect)
+    }
+
+    pub fn set_node_state(&mut self, id: SceneNodeId, state: NodeState) -> bool {
+        let idx = id.index();
+        if idx < self.nodes.len() && self.nodes[idx].state != state {
+            self.nodes[idx].state = state;
+            self.invalidate(id);
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Get link URL if the node represents an HTML <a> tag
+    pub fn node_url(&self, id: SceneNodeId) -> Option<&str> {
+        self.nodes
+            .get(id.index())
+            .and_then(|n| n.link_url.as_deref())
+    }
+
+    /// Collect unique segment IDs of all currently dirty nodes
+    pub fn dirty_segments(&self) -> Vec<u16> {
+        let mut segs: Vec<u16> = self
+            .nodes
+            .iter()
+            .filter(|n| n.dirty)
+            .map(|n| n.segment_id)
+            .collect();
+        segs.sort_unstable();
+        segs.dedup();
+        segs
+    }
 }
 
 impl Default for SceneGraph {
@@ -243,7 +312,11 @@ pub fn build_scene_graph(display_list: &DisplayList, segment_height: f32) -> Sce
 
     for cmd in &display_list.commands {
         match cmd {
-            DisplayCommand::SolidColor { color, rect } => {
+            DisplayCommand::SolidColor {
+                color,
+                rect,
+                link_url,
+            } => {
                 let seg = assign_segment(rect.y, segment_height);
                 scene.push(
                     SceneNode {
@@ -253,6 +326,8 @@ pub fn build_scene_graph(display_list: &DisplayList, segment_height: f32) -> Sce
                         z_order,
                         segment_id: seg,
                         dirty: true,
+                        state: NodeState::Normal,
+                        link_url: link_url.clone(),
                     },
                     color_to_rgba(color),
                     None,
@@ -263,6 +338,7 @@ pub fn build_scene_graph(display_list: &DisplayList, segment_height: f32) -> Sce
                 color,
                 rect,
                 border_width,
+                link_url,
             } => {
                 let seg = assign_segment(rect.y, segment_height);
                 scene.push(
@@ -275,6 +351,8 @@ pub fn build_scene_graph(display_list: &DisplayList, segment_height: f32) -> Sce
                         z_order,
                         segment_id: seg,
                         dirty: true,
+                        state: NodeState::Normal,
+                        link_url: link_url.clone(),
                     },
                     color_to_rgba(color),
                     None,
@@ -287,6 +365,7 @@ pub fn build_scene_graph(display_list: &DisplayList, segment_height: f32) -> Sce
                 y,
                 font_size,
                 color,
+                link_url,
             } => {
                 let text_width = text.chars().count() as f32 * font_size * 0.55;
                 let rect = Rect {
@@ -306,6 +385,8 @@ pub fn build_scene_graph(display_list: &DisplayList, segment_height: f32) -> Sce
                         z_order,
                         segment_id: seg,
                         dirty: true,
+                        state: NodeState::Normal,
+                        link_url: link_url.clone(),
                     },
                     color_to_rgba(color),
                     Some(TextRun {
@@ -321,6 +402,7 @@ pub fn build_scene_graph(display_list: &DisplayList, segment_height: f32) -> Sce
                 y,
                 width,
                 height,
+                link_url,
             } => {
                 let rect = Rect {
                     x: *x,
@@ -337,6 +419,8 @@ pub fn build_scene_graph(display_list: &DisplayList, segment_height: f32) -> Sce
                         z_order,
                         segment_id: seg,
                         dirty: true,
+                        state: NodeState::Normal,
+                        link_url: link_url.clone(),
                     },
                     [1.0, 1.0, 1.0, 1.0], // White placeholder (texture replaces this)
                     Some(TextRun {

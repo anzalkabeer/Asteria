@@ -1,5 +1,6 @@
 use crate::scene::SceneGraph;
 
+#[derive(Clone)]
 pub enum RenderCommand {
     SolidRect {
         rect: [f32; 4],

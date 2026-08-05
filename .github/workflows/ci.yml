@@ -2,25 +2,22 @@ name: Rust CI
 
 on:
   push:
-    branches: ["main"]
+    branches: [ "main" ]
   pull_request:
-    branches: ["main"]
+    branches: [ "main" ]
 
 env:
   CARGO_TERM_COLOR: always
 
 jobs:
   check-and-test:
-    permissions:
-      contents: read
     name: Check & Test
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-        with:
-          persist-credentials: false
+
       - name: Set up Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:

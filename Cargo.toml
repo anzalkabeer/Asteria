@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-wgpu = "0.20"
+wgpu = "22.1"
 winit = "0.29"
 pollster = "0.3"
 bytemuck = { version = "1.16", features = ["derive"] }

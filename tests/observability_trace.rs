@@ -87,11 +87,10 @@ fn test_mixed_observability_config_respects_subsystem_flags() {
 #[test]
 fn test_trace_recorder_assigns_distinct_thread_ids() {
     let _guard = test_lock();
-    AofConfig::full_inspection().apply();
-
     let mut recorder = trace_recorder().lock().unwrap();
     recorder.clear();
     drop(recorder);
+    asteria::devtools::config::AofConfig::full_inspection().apply();
 
     let mut handles = Vec::new();
     for _ in 0..2 {

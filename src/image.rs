@@ -230,5 +230,6 @@ pub fn decoded_image_to_display_command(
         y,
         width: decoded_image.width as f32,
         height: decoded_image.height as f32,
+        link_url: None,
     }
 }

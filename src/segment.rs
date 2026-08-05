@@ -193,6 +193,29 @@ impl SegmentBuilder {
             None
         }
     }
+
+    /// Returns the screen-space bounding box of a specific segment
+    pub fn segment_rect(&self, segment_id: u16) -> Option<Rect> {
+        self.segments
+            .iter()
+            .find(|s| s.id == segment_id)
+            .map(|s| s.rect)
+    }
+
+    /// Returns IDs of all segments currently intersecting the visible window area
+    pub fn visible_segments(&self, scroll_y: f32, visible_height: f32) -> Vec<u16> {
+        let visible_rect = Rect {
+            x: 0.0,
+            y: scroll_y,
+            width: self.viewport_width,
+            height: visible_height,
+        };
+        self.segments
+            .iter()
+            .filter(|s| rects_intersect(&s.rect, &visible_rect))
+            .map(|s| s.id)
+            .collect()
+    }
 }
 
 impl Default for SegmentBuilder {

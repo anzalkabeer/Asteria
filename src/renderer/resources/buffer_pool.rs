@@ -1,15 +1,30 @@
 use std::collections::VecDeque;
-use wgpu::util::DeviceExt;
+
+const MAX_FREE_BUFFERS: usize = 8;
+
+struct PooledBuffer {
+    buffer: wgpu::Buffer,
+    capacity: usize,
+}
 
 pub struct BufferPool {
-    free_vertex_buffers: VecDeque<wgpu::Buffer>,
-    free_index_buffers: VecDeque<wgpu::Buffer>,
+    free_vertex_buffers: VecDeque<PooledBuffer>,
+    free_index_buffers: VecDeque<PooledBuffer>,
 }
 
 impl Default for BufferPool {
     fn default() -> Self {
         Self::new()
     }
+}
+
+fn build_aligned_payload(data: &[u8], required_capacity: usize) -> Vec<u8> {
+    let mut payload = Vec::with_capacity(required_capacity);
+    payload.extend_from_slice(data);
+    if payload.len() < required_capacity {
+        payload.resize(required_capacity, 0);
+    }
+    payload
 }
 
 impl BufferPool {
@@ -20,29 +35,85 @@ impl BufferPool {
         }
     }
 
-    pub fn acquire_vertex_buffer(&mut self, device: &wgpu::Device, data: &[u8]) -> wgpu::Buffer {
-        // In a real robust implementation, we would reuse buffers that fit the size.
-        // For this milestone, we'll implement simple reallocation if empty.
-        device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+    pub fn acquire_vertex_buffer(
+        &mut self,
+        queue: &wgpu::Queue,
+        device: &wgpu::Device,
+        data: &[u8],
+    ) -> wgpu::Buffer {
+        let required_capacity = (data.len().max(1) as u64)
+            .max(wgpu::COPY_BUFFER_ALIGNMENT)
+            .next_multiple_of(wgpu::COPY_BUFFER_ALIGNMENT) as usize;
+        let payload = build_aligned_payload(data, required_capacity);
+
+        if let Some(index) = self
+            .free_vertex_buffers
+            .iter()
+            .position(|pooled| pooled.capacity >= required_capacity)
+        {
+            let pooled = self.free_vertex_buffers.remove(index).unwrap();
+            queue.write_buffer(&pooled.buffer, 0, &payload);
+            return pooled.buffer;
+        }
+
+        let buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("Vertex Buffer"),
-            contents: data,
+            size: required_capacity as u64,
             usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
-        })
+            mapped_at_creation: false,
+        });
+        queue.write_buffer(&buffer, 0, &payload);
+        buffer
     }
 
-    pub fn acquire_index_buffer(&mut self, device: &wgpu::Device, data: &[u8]) -> wgpu::Buffer {
-        device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+    pub fn acquire_index_buffer(
+        &mut self,
+        queue: &wgpu::Queue,
+        device: &wgpu::Device,
+        data: &[u8],
+    ) -> wgpu::Buffer {
+        let required_capacity = (data.len().max(1) as u64)
+            .max(wgpu::COPY_BUFFER_ALIGNMENT)
+            .next_multiple_of(wgpu::COPY_BUFFER_ALIGNMENT) as usize;
+        let payload = build_aligned_payload(data, required_capacity);
+
+        if let Some(index) = self
+            .free_index_buffers
+            .iter()
+            .position(|pooled| pooled.capacity >= required_capacity)
+        {
+            let pooled = self.free_index_buffers.remove(index).unwrap();
+            queue.write_buffer(&pooled.buffer, 0, &payload);
+            return pooled.buffer;
+        }
+
+        let buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("Index Buffer"),
-            contents: data,
+            size: required_capacity as u64,
             usage: wgpu::BufferUsages::INDEX | wgpu::BufferUsages::COPY_DST,
-        })
+            mapped_at_creation: false,
+        });
+        queue.write_buffer(&buffer, 0, &payload);
+        buffer
     }
 
     pub fn release_vertex_buffer(&mut self, buffer: wgpu::Buffer) {
-        self.free_vertex_buffers.push_back(buffer);
+        if self.free_vertex_buffers.len() >= MAX_FREE_BUFFERS {
+            return;
+        }
+
+        let capacity = buffer.size() as usize;
+        self.free_vertex_buffers
+            .push_back(PooledBuffer { buffer, capacity });
     }
 
     pub fn release_index_buffer(&mut self, buffer: wgpu::Buffer) {
-        self.free_index_buffers.push_back(buffer);
+        if self.free_index_buffers.len() >= MAX_FREE_BUFFERS {
+            return;
+        }
+
+        let capacity = buffer.size() as usize;
+        self.free_index_buffers
+            .push_back(PooledBuffer { buffer, capacity });
     }
 }

@@ -38,7 +38,9 @@ fn main() {
         "<sample>"
     };
 
-    if target_url != "<sample>" && let Err(e) = tab_manager.handle_event(ShellEvent::NavigateTo(target_url.to_string())) {
+    if target_url != "<sample>"
+        && let Err(e) = tab_manager.handle_event(ShellEvent::NavigateTo(target_url.to_string()))
+    {
         eprintln!("Error loading {}: {}", target_url, e);
         process::exit(1);
     }
@@ -51,8 +53,7 @@ fn main() {
     println!("Active URL : {}\n", active_tab.url);
 
     // ─── Async Scheduler Pipeline Stage Dispatch ──────────────────────
-    let sample_html_bytes =
-        b"<!DOCTYPE html><html><body><h1>Asteria Shell</h1><p>Sample Tab</p></body></html>";
+    let sample_html_bytes = b"<!DOCTYPE html><html><head><style>body { background-color: #1e1e2e; color: #cdd6f4; } h1 { color: #89b4fa; font-size: 24px; } p { color: #a6adc8; font-size: 16px; } div { background-color: #313244; }</style></head><body><h1>Asteria Browser Engine</h1><p>Hardware-accelerated GPU renderer running with wgpu + winit.</p><div><p>Interactive Viewport: Scroll, Hover, Click supported!</p></div></body></html>";
 
     let bytes = active_tab
         .page_resources
@@ -129,113 +130,110 @@ fn main() {
             }
             println!("      }}");
         }
-
-        // ─── Phase 3: Resolve Styles (Cascade & Inheritance) ───────────
-        let style_start = Instant::now();
-        record_event(TraceEventKind::StyleStart);
-
-        let styled = resolve_styles(&dom, &stylesheet, bytes);
-
-        let style_duration = style_start.elapsed();
-        profiler.record_stage_duration(EngineStage::ResolveStyles, style_duration);
-        record_event(TraceEventKind::StyleEnd {
-            styled_count: dom.nodes.len(),
-            duration_ms: style_duration.as_secs_f64() * 1000.0,
-        });
-
-        println!("\n── Styled DOM Tree (typed ComputedStyle) ───\n");
-        styled.print_tree(&dom, bytes);
-
-        // ─── Phase 4: 2D Layout Engine ─────────────────────────────────
-        let layout_start = Instant::now();
-        record_event(TraceEventKind::LayoutStart);
-
-        let maybe_layout_tree =
-            asteria::layout::layout_document(&styled, &dom, bytes, 800.0, 600.0);
-        let layout_duration = layout_start.elapsed();
-        profiler.record_stage_duration(EngineStage::Layout, layout_duration);
-
-        let box_count = maybe_layout_tree
-            .as_ref()
-            .map(|tree| tree.box_count())
-            .unwrap_or(0);
-        record_event(TraceEventKind::LayoutEnd {
-            box_count,
-            duration_ms: layout_duration.as_secs_f64() * 1000.0,
-        });
-
-        if let Some(layout_tree) = maybe_layout_tree {
-            println!("\n── Layout Tree (2D Bounding Boxes & Coordinates) ───\n");
-            layout_tree.print_tree(&dom, bytes);
-
-            // ─── Phase 5: Display List Paint Engine ────────────────────
-            let paint_start = Instant::now();
-            record_event(TraceEventKind::PaintStart);
-
-            let display_list = asteria::paint::build_display_list(&layout_tree, &dom, bytes);
-
-            let paint_duration = paint_start.elapsed();
-            profiler.record_stage_duration(EngineStage::Paint, paint_duration);
-            record_event(TraceEventKind::PaintEnd {
-                command_count: display_list.commands.len(),
-                duration_ms: paint_duration.as_secs_f64() * 1000.0,
-            });
-
-            println!("\n── Display List (Visual Draw Commands) ───\n");
-            asteria::paint::print_display_list(&display_list);
-
-            // ─── Phase 6: Scene Graph & Segments ───────────────────────
-            let scene_start = Instant::now();
-            record_event(TraceEventKind::SceneStart);
-
-            let scene = asteria::scene::build_scene_graph(&display_list, 256.0);
-            let scene_duration = scene_start.elapsed();
-            profiler.record_stage_duration(EngineStage::Render, scene_duration);
-            record_event(TraceEventKind::SceneEnd {
-                node_count: scene.len(),
-                duration_ms: scene_duration.as_secs_f64() * 1000.0,
-            });
-
-            let mut segments = asteria::segment::SegmentBuilder::new(256.0);
-            let _ = segments.build_segments(800.0, 600.0);
-
-            if args.contains(&"--window".to_string()) {
-                println!("\n── Launching Hardware Renderer (wgpu) ─────────");
-                asteria::renderer::window::window::run_window_loop(scene);
-                return;
-            }
-
-            // ─── Performance Profiler & AOF Inspection ─────────────────
-            profiler.set_counts(dom.nodes.len(), box_count, display_list.commands.len());
-            let report = profiler.finish_pipeline();
-
-            println!("\n{}", report.format_summary());
-
-            record_event(TraceEventKind::FrameEnd {
-                frame_id: 1,
-                duration_ms: report.total_duration.as_secs_f64() * 1000.0,
-            });
-
-            let snapshot = EngineSnapshot::new()
-                .with_dom(&dom)
-                .with_style(&styled)
-                .with_layout(&layout_tree)
-                .with_scene(&scene)
-                .with_segments(&segments);
-
-            let mut energy = asteria::devtools::metrics::EnergyDiagnostics::new();
-            energy.allocations = MEMORY_ALLOCATED.load(std::sync::atomic::Ordering::Relaxed);
-            energy.gpu_uploads = GPU_VRAM_USED.load(std::sync::atomic::Ordering::Relaxed);
-            energy.impact = energy.analyze_impact();
-
-            AofInspector::inspect(snapshot, &energy, "trace.json");
-        } else {
-            profiler.set_counts(dom.nodes.len(), 0, 0);
-            let report = profiler.finish_pipeline();
-            println!("\n{}", report.format_summary());
-        }
     } else {
-        println!("\n── No CSS rules to apply ───────────────────\n");
+        println!("\n── No author CSS rules provided (using default ComputedStyle) ──\n");
+    }
+
+    // ─── Phase 3: Resolve Styles (Cascade & Inheritance) ───────────
+    let style_start = Instant::now();
+    record_event(TraceEventKind::StyleStart);
+
+    let styled = resolve_styles(&dom, &stylesheet, bytes);
+
+    let style_duration = style_start.elapsed();
+    profiler.record_stage_duration(EngineStage::ResolveStyles, style_duration);
+    record_event(TraceEventKind::StyleEnd {
+        styled_count: dom.nodes.len(),
+        duration_ms: style_duration.as_secs_f64() * 1000.0,
+    });
+
+    println!("\n── Styled DOM Tree (typed ComputedStyle) ───\n");
+    styled.print_tree(&dom, bytes);
+
+    // ─── Phase 4: 2D Layout Engine ─────────────────────────────────
+    let layout_start = Instant::now();
+    record_event(TraceEventKind::LayoutStart);
+
+    let maybe_layout_tree = asteria::layout::layout_document(&styled, &dom, bytes, 800.0, 600.0);
+    let layout_duration = layout_start.elapsed();
+    profiler.record_stage_duration(EngineStage::Layout, layout_duration);
+
+    let box_count = maybe_layout_tree
+        .as_ref()
+        .map(|tree| tree.box_count())
+        .unwrap_or(0);
+    record_event(TraceEventKind::LayoutEnd {
+        box_count,
+        duration_ms: layout_duration.as_secs_f64() * 1000.0,
+    });
+
+    if let Some(layout_tree) = maybe_layout_tree {
+        println!("\n── Layout Tree (2D Bounding Boxes & Coordinates) ───\n");
+        layout_tree.print_tree(&dom, bytes);
+
+        // ─── Phase 5: Display List Paint Engine ────────────────────
+        let paint_start = Instant::now();
+        record_event(TraceEventKind::PaintStart);
+
+        let display_list = asteria::paint::build_display_list(&layout_tree, &dom, bytes);
+
+        let paint_duration = paint_start.elapsed();
+        profiler.record_stage_duration(EngineStage::Paint, paint_duration);
+        record_event(TraceEventKind::PaintEnd {
+            command_count: display_list.commands.len(),
+            duration_ms: paint_duration.as_secs_f64() * 1000.0,
+        });
+
+        println!("\n── Display List (Visual Draw Commands) ───\n");
+        asteria::paint::print_display_list(&display_list);
+
+        // ─── Phase 6: Scene Graph & Segments ───────────────────────
+        let scene_start = Instant::now();
+        record_event(TraceEventKind::SceneStart);
+
+        let scene = asteria::scene::build_scene_graph(&display_list, 256.0);
+        let scene_duration = scene_start.elapsed();
+        profiler.record_stage_duration(EngineStage::SceneBuild, scene_duration);
+        record_event(TraceEventKind::SceneEnd {
+            node_count: scene.len(),
+            duration_ms: scene_duration.as_secs_f64() * 1000.0,
+        });
+
+        let mut segments = asteria::segment::SegmentBuilder::new(256.0);
+        let _ = segments.build_segments(800.0, 600.0);
+
+        profiler.set_counts(dom.nodes.len(), box_count, display_list.commands.len());
+        let report = profiler.finish_pipeline();
+
+        println!("\n{}", report.format_summary());
+
+        record_event(TraceEventKind::FrameEnd {
+            frame_id: 1,
+            duration_ms: report.total_duration.as_secs_f64() * 1000.0,
+        });
+
+        let snapshot = EngineSnapshot::new()
+            .with_dom(&dom)
+            .with_style(&styled)
+            .with_layout(&layout_tree)
+            .with_scene(&scene)
+            .with_segments(&segments);
+
+        let mut energy = asteria::devtools::metrics::EnergyDiagnostics::new();
+        energy.allocations = MEMORY_ALLOCATED.load(std::sync::atomic::Ordering::Relaxed);
+        energy.gpu_uploads = GPU_VRAM_USED.load(std::sync::atomic::Ordering::Relaxed);
+        energy.impact = energy.analyze_impact();
+
+        if args.contains(&"--window".to_string()) {
+            println!("\n── Launching Hardware Renderer (wgpu) ─────────");
+            AofInspector::inspect(snapshot, &energy, "trace.json");
+            asteria::renderer::window::window::run_window_loop(scene, tab_manager);
+            return;
+        }
+
+        AofInspector::inspect(snapshot, &energy, "trace.json");
+    } else {
+        profiler.set_counts(dom.nodes.len(), 0, 0);
         let report = profiler.finish_pipeline();
         println!("\n{}", report.format_summary());
     }

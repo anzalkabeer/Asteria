@@ -1,4 +1,5 @@
 use crate::renderer::commands::command_builder::RenderCommand;
+use crate::scene::SceneGraph;
 
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
@@ -65,5 +66,15 @@ impl BatchBuilder {
                 ]);
             }
         }
+    }
+
+    /// Build vertex/index buffers only if there are dirty ViewportSegments.
+    /// Skips work entirely when 0 tiles are dirty (0% GPU/VRAM overhead).
+    pub fn build_dirty_batches(&mut self, commands: &[RenderCommand], scene: &SceneGraph) {
+        let dirty_segs = scene.dirty_segments();
+        if dirty_segs.is_empty() {
+            return;
+        }
+        self.build_batches(commands);
     }
 }
