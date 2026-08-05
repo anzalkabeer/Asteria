@@ -258,6 +258,7 @@ fn format_selector(selector: &asteria::css_parser::Selector) -> String {
                     SimpleSelector::Class(name) => format!(".{}", name),
                     SimpleSelector::Id(name) => format!("#{}", name),
                     SimpleSelector::Universal => "*".to_string(),
+                    SimpleSelector::PseudoClass(name) => format!(":{}", name),
                 })
                 .collect::<String>()
         })
