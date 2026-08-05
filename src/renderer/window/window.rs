@@ -38,7 +38,6 @@ use crate::renderer::scheduler::batching::BatchPlanner;
 use crate::scene::{NodeState, SceneGraph, SceneNodeId, build_scene_graph};
 use crate::scheduler::ThreadedScheduler;
 use crate::shell::{ShellEvent, TabManager};
-use crate::style::resolve_styles;
 use crate::tokenizer::Tokenizer;
 
 // ─── Pass indices in the RenderGraph ──────────────────────────────
@@ -107,7 +106,7 @@ impl AsteriaWindow {
             let tokens = tokenizer.tokenize();
             let dom = Parser::new(&tokens, html_source).parse();
 
-            let stylesheet = Stylesheet::parse(css_source.as_bytes());
+            let stylesheet = Stylesheet::parse(css_source);
             let styled = crate::style::resolve_styles_with_viewport(
                 &dom,
                 &stylesheet,

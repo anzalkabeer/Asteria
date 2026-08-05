@@ -51,7 +51,7 @@ pub fn compute_specificity(selector: &Selector) -> Specificity {
         for simple in compound {
             match simple {
                 SimpleSelector::Id(_) => ids += 1,
-                SimpleSelector::Class(_) => classes += 1,
+                SimpleSelector::Class(_) | SimpleSelector::PseudoClass(_) => classes += 1,
                 SimpleSelector::Tag(_) => tags += 1,
                 SimpleSelector::Universal => {} // contributes 0
             }
