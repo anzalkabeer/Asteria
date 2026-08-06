@@ -3,7 +3,7 @@ use std::fs;
 use std::path::Path;
 
 use crate::dom::{Dom, NodeId, NodeKind};
-use crate::net::http::HttpClient;
+use crate::net::http::{HttpClient, Url};
 
 // ─── Resource Loader & Cache ─────────────────────────────────────
 //
@@ -162,7 +162,8 @@ impl ResourceLoader {
         let dom = parser.parse();
 
         // Discover stylesheets
-        let stylesheets = self.discover_stylesheets(&dom, &html.bytes, base_dir.as_deref())?;
+        let stylesheets =
+            self.discover_stylesheets(&dom, &html.bytes, base_dir.as_deref(), None)?;
 
         Ok(PageResources { html, stylesheets })
     }
@@ -207,9 +208,12 @@ impl ResourceLoader {
         let parser = crate::parser::Parser::new(&tokens, &html.bytes);
         let dom = parser.parse();
 
-        // Discover inline stylesheets only (no base_dir for network resources)
+        // Parse the URL so we can use it as a base for relative resources
+        let base_url = Url::parse(url).ok();
+
+        // Discover inline stylesheets and remote stylesheets
         let stylesheets = self
-            .discover_stylesheets(&dom, &html.bytes, None)
+            .discover_stylesheets(&dom, &html.bytes, None, base_url.as_ref())
             .unwrap_or_default();
 
         Ok(PageResources { html, stylesheets })
@@ -249,7 +253,7 @@ impl ResourceLoader {
 
         // Discover stylesheets (no base_dir for in-memory strings)
         let stylesheets = self
-            .discover_stylesheets(&dom, &html_resource.bytes, None)
+            .discover_stylesheets(&dom, &html_resource.bytes, None, None)
             .unwrap_or_default();
 
         PageResources {
@@ -285,6 +289,37 @@ impl ResourceLoader {
         Ok(resource)
     }
 
+    /// Fetch a sub-resource via HTTP.
+    pub fn fetch_subresource(
+        &mut self,
+        url: &Url,
+        resource_type: ResourceType,
+    ) -> Result<Resource, LoadError> {
+        let mut http_client = HttpClient::new();
+        let response = http_client
+            .get(&url.raw)
+            .map_err(|e| LoadError::NetworkError {
+                url: url.raw.clone(),
+                message: format!("{}", e),
+            })?;
+
+        if !response.is_success() {
+            return Err(LoadError::NetworkError {
+                url: url.raw.clone(),
+                message: format!("HTTP {} {}", response.status_code, response.status_text),
+            });
+        }
+
+        let resource = Resource {
+            url: url.raw.clone(),
+            resource_type,
+            bytes: response.body,
+        };
+
+        self.cache.insert(resource.clone());
+        Ok(resource)
+    }
+
     /// Walk a parsed DOM to discover all stylesheets (inline + external).
     /// Returns them in document order using an explicit worklist stack.
     fn discover_stylesheets(
@@ -292,6 +327,7 @@ impl ResourceLoader {
         dom: &Dom,
         source: &[u8],
         base_dir: Option<&Path>,
+        base_url: Option<&Url>,
     ) -> Result<Vec<Resource>, LoadError> {
         let mut stylesheets = Vec::new();
         let mut inline_counter = 0u32;
@@ -305,6 +341,7 @@ impl ResourceLoader {
                 node_id,
                 source,
                 base_dir,
+                base_url,
                 &mut stylesheets,
                 &mut inline_counter,
             )?;
@@ -325,12 +362,14 @@ impl ResourceLoader {
     /// Process a single DOM node for stylesheet content (<style> or <link rel="stylesheet">).
     /// Returns Ok(true) if the node was a handled stylesheet (so traversal should stop for its children),
     /// or Ok(false) if it was not.
+    #[allow(clippy::too_many_arguments)]
     fn process_stylesheet_node(
         &mut self,
         dom: &Dom,
         node_id: NodeId,
         source: &[u8],
         base_dir: Option<&Path>,
+        base_url: Option<&Url>,
         stylesheets: &mut Vec<Resource>,
         inline_counter: &mut u32,
     ) -> Result<bool, LoadError> {
@@ -393,14 +432,35 @@ impl ResourceLoader {
 
                 if is_stylesheet {
                     if let Some(href_value) = href {
-                        let resolved = resolve_path(&href_value, base_dir);
-                        match self.read_resource(&resolved, ResourceType::Css) {
-                            Ok(resource) => stylesheets.push(resource),
-                            Err(err) => {
-                                eprintln!(
-                                    "Warning: Could not load stylesheet '{}': {}",
-                                    href_value, err
-                                );
+                        // Limit to 10 sub-resources for now
+                        if stylesheets.len() >= 10 {
+                            eprintln!(
+                                "Warning: Reached max of 10 sub-resources. Skipping '{}'",
+                                href_value
+                            );
+                            return Ok(true);
+                        }
+
+                        if let Some(base_u) = base_url {
+                            if let Ok(resolved_url) = base_u.resolve_relative(&href_value) {
+                                match self.fetch_subresource(&resolved_url, ResourceType::Css) {
+                                    Ok(resource) => stylesheets.push(resource),
+                                    Err(err) => eprintln!(
+                                        "Warning: Could not fetch stylesheet '{}': {}",
+                                        resolved_url.raw, err
+                                    ),
+                                }
+                            }
+                        } else {
+                            let resolved = resolve_path(&href_value, base_dir);
+                            match self.read_resource(&resolved, ResourceType::Css) {
+                                Ok(resource) => stylesheets.push(resource),
+                                Err(err) => {
+                                    eprintln!(
+                                        "Warning: Could not load stylesheet '{}': {}",
+                                        href_value, err
+                                    );
+                                }
                             }
                         }
                     }
@@ -667,7 +727,7 @@ mod tests {
         let dom = parser.parse();
 
         let mut loader = ResourceLoader::new();
-        let stylesheets = loader.discover_stylesheets(&dom, html, None).unwrap();
+        let stylesheets = loader.discover_stylesheets(&dom, html, None, None).unwrap();
         assert!(stylesheets.is_empty());
     }
 
@@ -680,7 +740,7 @@ mod tests {
         let dom = parser.parse();
 
         let mut loader = ResourceLoader::new();
-        let stylesheets = loader.discover_stylesheets(&dom, html, None).unwrap();
+        let stylesheets = loader.discover_stylesheets(&dom, html, None, None).unwrap();
 
         assert_eq!(stylesheets.len(), 1);
         let css = std::str::from_utf8(&stylesheets[0].bytes).unwrap();
@@ -700,7 +760,7 @@ mod tests {
         let dom = parser.parse();
 
         let mut loader = ResourceLoader::new();
-        let stylesheets = loader.discover_stylesheets(&dom, html, None).unwrap();
+        let stylesheets = loader.discover_stylesheets(&dom, html, None, None).unwrap();
 
         // Missing file → warning printed, not added to stylesheets
         assert!(stylesheets.is_empty());
@@ -717,7 +777,7 @@ mod tests {
         let dom = parser.parse();
 
         let mut loader = ResourceLoader::new();
-        let stylesheets = loader.discover_stylesheets(&dom, html, None).unwrap();
+        let stylesheets = loader.discover_stylesheets(&dom, html, None, None).unwrap();
         assert!(stylesheets.is_empty());
     }
 

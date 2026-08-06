@@ -114,6 +114,11 @@ pub enum PipelineStage {
     ParseHtml { url: String, bytes: Vec<u8> },
     /// Tokenize and parse CSS bytes into a Stylesheet
     ParseCss { url: String, bytes: Vec<u8> },
+    /// Stream a URL over the network resource bus
+    FetchStreamUrl {
+        url: String,
+        sender: std::sync::mpsc::Sender<crate::net::bus::ResourceBusEvent>,
+    },
 }
 
 /// Results returned by completed pipeline tasks.
@@ -132,6 +137,8 @@ pub enum TaskResult {
         url: String,
         stylesheet: crate::css_parser::Stylesheet,
     },
+    /// Streaming fetch completed
+    StreamFinished { url: String },
 }
 
 /// Message payload returned over the channel from worker threads.
@@ -302,6 +309,13 @@ fn execute_stage(stage: PipelineStage) -> Result<TaskResult, String> {
         PipelineStage::ParseCss { url, bytes } => {
             let stylesheet = crate::css_parser::Stylesheet::parse(&bytes);
             Ok(TaskResult::CssParsed { url, stylesheet })
+        }
+        PipelineStage::FetchStreamUrl { url, sender } => {
+            let mut client = crate::net::http::HttpClient::new();
+            if let Err(e) = client.stream(&url, sender) {
+                return Err(e.to_string());
+            }
+            Ok(TaskResult::StreamFinished { url })
         }
     }
 }

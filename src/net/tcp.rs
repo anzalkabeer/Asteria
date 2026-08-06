@@ -12,9 +12,11 @@
 /// - Fault-tolerant connection handling
 use std::collections::HashMap;
 use std::fmt;
-use std::io;
+use std::io::{self, Read, Write};
 use std::net::{SocketAddr, TcpStream};
 use std::time::{Duration, Instant};
+
+use crate::net::tls::TlsConnection;
 
 // ─── NetworkError Enum ───────────
 
@@ -44,6 +46,8 @@ pub enum NetworkError {
     Io(String),
     /// Generic / catch-all error for protocol violations, malformed data, etc.
     Other(String),
+    /// TLS connection error.
+    TlsError(String),
 }
 
 impl fmt::Display for NetworkError {
@@ -73,8 +77,9 @@ impl fmt::Display for NetworkError {
                 write!(f, "Too many redirects (max {}) for URL: {}", max, url)
             }
             NetworkError::IoError(err) => write!(f, "I/O Error: {}", err),
-            NetworkError::Io(msg) => write!(f, "I/O Error: {}", msg),
+            NetworkError::Io(msg) => write!(f, "I/O error: {}", msg),
             NetworkError::Other(msg) => write!(f, "Network error: {}", msg),
+            NetworkError::TlsError(msg) => write!(f, "TLS error: {}", msg),
         }
     }
 }
@@ -85,20 +90,90 @@ impl From<io::Error> for NetworkError {
     }
 }
 
+// ─── Stream Enum ───────────
+
+/// Represents either a plain TCP stream or a TLS-encrypted stream.
+pub enum Stream {
+    Plain(TcpStream),
+    Tls(Box<TlsConnection>),
+}
+
+impl Stream {
+    pub fn peek(&self, buf: &mut [u8]) -> io::Result<usize> {
+        match self {
+            Stream::Plain(s) => s.peek(buf),
+            Stream::Tls(t) => t.get_ref().sock.peek(buf),
+        }
+    }
+
+    pub fn set_read_timeout(&self, dur: Option<Duration>) -> io::Result<()> {
+        match self {
+            Stream::Plain(s) => s.set_read_timeout(dur),
+            Stream::Tls(t) => t.get_ref().sock.set_read_timeout(dur),
+        }
+    }
+
+    pub fn set_write_timeout(&self, dur: Option<Duration>) -> io::Result<()> {
+        match self {
+            Stream::Plain(s) => s.set_write_timeout(dur),
+            Stream::Tls(t) => t.get_ref().sock.set_write_timeout(dur),
+        }
+    }
+
+    pub fn set_nodelay(&self, nodelay: bool) -> io::Result<()> {
+        match self {
+            Stream::Plain(s) => s.set_nodelay(nodelay),
+            Stream::Tls(t) => t.get_ref().sock.set_nodelay(nodelay),
+        }
+    }
+}
+
+impl Read for Stream {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        match self {
+            Stream::Plain(s) => s.read(buf),
+            Stream::Tls(t) => t.get_mut().read(buf),
+        }
+    }
+}
+
+impl Write for Stream {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        match self {
+            Stream::Plain(s) => s.write(buf),
+            Stream::Tls(t) => t.get_mut().write(buf),
+        }
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        match self {
+            Stream::Plain(s) => s.flush(),
+            Stream::Tls(t) => t.get_mut().flush(),
+        }
+    }
+}
+
 // ─── TcpConnection Struct ───────────
 
-/// Represents a single active TCP connection to a remote host.
-/// Stores connection metadata alongside the actual stream.
-#[derive(Debug)]
+/// Represents a single active network connection (plain or TLS).
 pub struct TcpConnection {
-    /// The remote IP and port.
+    /// The remote address this connection is bound to.
     pub remote_addr: SocketAddr,
-    /// The underlying TCP stream.
-    pub stream: TcpStream,
-    /// When this connection was established.
+    /// The underlying stream (plain TCP or TLS).
+    pub stream: Stream,
+    /// When the connection was established.
     pub connected_at: Instant,
     /// The unique identifier in the pool, typically `host:port` or `ip:port`.
     pub key: String,
+}
+
+impl fmt::Debug for TcpConnection {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("TcpConnection")
+            .field("remote_addr", &self.remote_addr)
+            .field("key", &self.key)
+            .finish()
+    }
 }
 
 impl TcpConnection {
@@ -150,7 +225,7 @@ impl ConnectionPool {
 
     /// Connects to a specific IP address, reusing an existing connection if alive.
     /// If a connection exists but is dead, it is replaced.
-    pub fn connect(&mut self, addr: SocketAddr) -> Result<&mut TcpStream, NetworkError> {
+    pub fn connect(&mut self, addr: SocketAddr) -> Result<&mut Stream, NetworkError> {
         let key = addr.to_string();
 
         if let Some(conn) = self.connections.get(&key)
@@ -172,7 +247,7 @@ impl ConnectionPool {
 
         let conn = TcpConnection {
             remote_addr: addr,
-            stream,
+            stream: Stream::Plain(stream),
             connected_at: Instant::now(),
             key: key.clone(),
         };
@@ -188,7 +263,7 @@ impl ConnectionPool {
         host: &str,
         port: u16,
         addr: SocketAddr,
-    ) -> Result<&mut TcpStream, NetworkError> {
+    ) -> Result<&mut Stream, NetworkError> {
         let key = format!("{}:{}", host, port);
 
         if let Some(conn) = self.connections.get(&key)
@@ -210,13 +285,29 @@ impl ConnectionPool {
 
         let conn = TcpConnection {
             remote_addr: addr,
-            stream,
+            stream: Stream::Plain(stream),
             connected_at: Instant::now(),
             key: key.clone(),
         };
 
         self.connections.insert(key.clone(), conn);
         Ok(&mut self.connections.get_mut(&key).unwrap().stream)
+    }
+
+    /// Inserts an externally created connection (e.g., a TLS upgraded stream) into the pool.
+    pub fn insert(&mut self, key: String, conn: TcpConnection) -> &mut Stream {
+        self.connections.insert(key.clone(), conn);
+        &mut self.connections.get_mut(&key).unwrap().stream
+    }
+
+    /// Gets an existing connection if alive, otherwise returns None.
+    pub fn get(&mut self, key: &str) -> Option<&mut Stream> {
+        if let Some(conn) = self.connections.get(key)
+            && conn.is_alive()
+        {
+            return Some(&mut self.connections.get_mut(key).unwrap().stream);
+        }
+        None
     }
 
     /// Disconnects and removes a connection from the pool by its key.

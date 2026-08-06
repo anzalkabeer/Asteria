@@ -1,10 +1,11 @@
 // ─── Imports ───────────
 use std::fmt;
-use std::io::{Read, Write};
+use std::io::Write;
 use std::net::TcpStream;
 
 use super::dns::DnsResolver;
-use super::tcp::{ConnectionPool, NetworkError};
+use super::tcp::{ConnectionPool, NetworkError, Stream, TcpConnection};
+use super::tls::TlsConnector;
 
 // ─── URL Parsing ───────────
 
@@ -31,12 +32,7 @@ impl Url {
         })?;
 
         let scheme = &url[..scheme_end];
-        if scheme != "http" {
-            if scheme == "https" {
-                return Err(NetworkError::InvalidUrl(
-                    "HTTPS is not supported yet".into(),
-                ));
-            }
+        if scheme != "http" && scheme != "https" {
             return Err(NetworkError::InvalidUrl(format!(
                 "Unsupported scheme: {}",
                 scheme
@@ -69,7 +65,7 @@ impl Url {
                 .map_err(|_| NetworkError::InvalidUrl("Invalid port number".into()))?;
             (h, p)
         } else {
-            (host_port, 80)
+            (host_port, if scheme == "https" { 443 } else { 80 })
         };
 
         Ok(Url {
@@ -84,6 +80,32 @@ impl Url {
     /// Returns the host and port in "host:port" format.
     pub fn host_port(&self) -> String {
         format!("{}:{}", self.host, self.port)
+    }
+
+    /// Resolves a relative or absolute URL string against this base URL.
+    pub fn resolve_relative(&self, location: &str) -> Result<Url, NetworkError> {
+        if location.starts_with("http://") || location.starts_with("https://") {
+            Url::parse(location)
+        } else if location.starts_with('/') {
+            let new_url_str = format!("{}://{}{}", self.scheme, self.host_port(), location);
+            Url::parse(&new_url_str)
+        } else {
+            // Relative path not starting with '/'
+            let mut path_base = self.path.clone();
+            if let Some(last_slash) = path_base.rfind('/') {
+                path_base.truncate(last_slash + 1);
+            } else {
+                path_base = "/".to_string();
+            }
+            let new_url_str = format!(
+                "{}://{}{}{}",
+                self.scheme,
+                self.host_port(),
+                path_base,
+                location
+            );
+            Url::parse(&new_url_str)
+        }
     }
 }
 
@@ -221,6 +243,7 @@ impl HttpResponse {
 pub struct HttpClient {
     pub dns: DnsResolver,
     pub pool: ConnectionPool,
+    pub tls: TlsConnector,
     pub max_redirects: usize,
 }
 
@@ -230,6 +253,7 @@ impl HttpClient {
         Self {
             dns: DnsResolver::new(),
             pool: ConnectionPool::new(),
+            tls: TlsConnector::new(),
             max_redirects: 5,
         }
     }
@@ -254,7 +278,7 @@ impl HttpClient {
                 }
 
                 if let Some(location) = response.redirect_location() {
-                    current_url = resolve_redirect(&current_url, location)?;
+                    current_url = current_url.resolve_relative(location)?;
                     redirects += 1;
                     continue;
                 }
@@ -281,10 +305,34 @@ impl HttpClient {
         })?;
         let addr = std::net::SocketAddr::new(*ip, request.url.port);
 
-        // 3. Get or create a TCP connection from the pool
-        let stream = self
-            .pool
-            .get_or_connect(&request.url.host, request.url.port, addr)?;
+        let key = format!("{}:{}", request.url.host, request.url.port);
+
+        if self.pool.get(&key).is_none() {
+            let tcp = TcpStream::connect_timeout(&addr, std::time::Duration::from_secs(10))
+                .map_err(|_| NetworkError::ConnectionTimeout {
+                    addr: key.clone(),
+                    timeout: std::time::Duration::from_secs(10),
+                })?;
+            let _ = tcp.set_read_timeout(Some(std::time::Duration::from_secs(30)));
+            let _ = tcp.set_write_timeout(Some(std::time::Duration::from_secs(10)));
+            let _ = tcp.set_nodelay(true);
+
+            let stream_wrapper = if request.url.scheme == "https" {
+                Stream::Tls(Box::new(self.tls.connect(&request.url.host, tcp)?))
+            } else {
+                Stream::Plain(tcp)
+            };
+
+            let conn = TcpConnection {
+                remote_addr: addr,
+                stream: stream_wrapper,
+                connected_at: std::time::Instant::now(),
+                key: key.clone(),
+            };
+            self.pool.insert(key.clone(), conn);
+        }
+
+        let stream = self.pool.get(&key).unwrap();
 
         // 4. Write the HTTP request
         let req_bytes = request.to_request_bytes();
@@ -300,6 +348,105 @@ impl HttpClient {
 
         Ok(response)
     }
+    pub fn stream(
+        &mut self,
+        url: &str,
+        sender: std::sync::mpsc::Sender<crate::net::bus::ResourceBusEvent>,
+    ) -> Result<(), NetworkError> {
+        let current_url = Url::parse(url)?;
+        let request = HttpRequest {
+            method: HttpMethod::Get,
+            url: current_url.clone(),
+            headers: Vec::new(),
+        };
+
+        // 1. DNS resolve
+        let dns_entry = self
+            .dns
+            .resolve(&request.url.host)
+            .map_err(|e| NetworkError::DnsError(format!("{}", e)))?;
+
+        // 2. Pick the first resolved IP and build a SocketAddr
+        let ip = dns_entry.ip_addresses.first().ok_or_else(|| {
+            NetworkError::DnsError(format!(
+                "No IP addresses resolved for '{}'",
+                request.url.host
+            ))
+        })?;
+        let addr = std::net::SocketAddr::new(*ip, request.url.port);
+
+        let key = format!("{}:{}", request.url.host, request.url.port);
+
+        if self.pool.get(&key).is_none() {
+            let tcp =
+                std::net::TcpStream::connect_timeout(&addr, std::time::Duration::from_secs(10))
+                    .map_err(|_| NetworkError::ConnectionTimeout {
+                        addr: key.clone(),
+                        timeout: std::time::Duration::from_secs(10),
+                    })?;
+            let _ = tcp.set_read_timeout(Some(std::time::Duration::from_secs(30)));
+            let _ = tcp.set_write_timeout(Some(std::time::Duration::from_secs(10)));
+            let _ = tcp.set_nodelay(true);
+
+            let stream_wrapper = if request.url.scheme == "https" {
+                Stream::Tls(Box::new(self.tls.connect(&request.url.host, tcp)?))
+            } else {
+                Stream::Plain(tcp)
+            };
+
+            let conn = TcpConnection {
+                remote_addr: addr,
+                stream: stream_wrapper,
+                connected_at: std::time::Instant::now(),
+                key: key.clone(),
+            };
+            self.pool.insert(key.clone(), conn);
+        }
+
+        let stream = self.pool.get(&key).unwrap();
+
+        // Write request
+        let req_bytes = request.to_request_bytes();
+        stream
+            .write_all(&req_bytes)
+            .map_err(|e| NetworkError::WriteError {
+                message: e.to_string(),
+            })?;
+
+        // Read headers
+        let (status_code, _, headers) = read_response_headers(stream)?;
+
+        let is_chunked = headers.iter().any(|(k, v)| {
+            k.to_lowercase() == "transfer-encoding" && v.to_lowercase().contains("chunked")
+        });
+        let content_length = headers
+            .iter()
+            .find(|(k, _)| k.to_lowercase() == "content-length")
+            .and_then(|(_, v)| v.parse::<usize>().ok());
+        let content_type = headers
+            .iter()
+            .find(|(k, _)| k.to_lowercase() == "content-type")
+            .map(|(_, v)| v.clone());
+
+        let url_str = url.to_string();
+
+        let _ = sender.send(crate::net::bus::ResourceBusEvent::HeaderReceived {
+            url: url_str.clone(),
+            status_code,
+            content_length,
+            content_type,
+        });
+
+        if is_chunked {
+            stream_chunked_body(stream, &url_str, &sender)?;
+        } else if let Some(len) = content_length {
+            stream_exact_body(stream, len, &url_str, &sender)?;
+        } else {
+            stream_eof_body(stream, &url_str, &sender)?;
+        }
+
+        Ok(())
+    }
 }
 
 impl Default for HttpClient {
@@ -310,8 +457,10 @@ impl Default for HttpClient {
 
 // ─── Internal Parsing Helpers ───────────
 
-/// Reads and parses an HTTP response from a TCP stream.
-fn read_response(stream: &mut TcpStream) -> Result<HttpResponse, NetworkError> {
+#[allow(clippy::type_complexity)]
+fn read_response_headers<R: std::io::Read>(
+    stream: &mut R,
+) -> Result<(u16, String, Vec<(String, String)>), NetworkError> {
     let mut header_buf = Vec::new();
     let mut byte = [0u8; 1];
 
@@ -361,6 +510,13 @@ fn read_response(stream: &mut TcpStream) -> Result<HttpResponse, NetworkError> {
         }
     }
 
+    Ok((status_code, status_text, headers))
+}
+
+/// Reads and parses an HTTP response from a TCP stream.
+fn read_response<R: std::io::Read>(stream: &mut R) -> Result<HttpResponse, NetworkError> {
+    let (status_code, status_text, headers) = read_response_headers(stream)?;
+
     let is_chunked = headers.iter().any(|(k, v)| {
         k.to_lowercase() == "transfer-encoding" && v.to_lowercase().contains("chunked")
     });
@@ -390,8 +546,8 @@ fn read_response(stream: &mut TcpStream) -> Result<HttpResponse, NetworkError> {
     })
 }
 
-/// Reads a chunked response body from a TCP stream.
-fn read_chunked_body(stream: &mut TcpStream) -> Result<Vec<u8>, NetworkError> {
+/// Reads a chunked HTTP response body.
+fn read_chunked_body<R: std::io::Read>(stream: &mut R) -> Result<Vec<u8>, NetworkError> {
     let mut body = Vec::new();
     let mut byte = [0u8; 1];
 
@@ -436,8 +592,11 @@ fn read_chunked_body(stream: &mut TcpStream) -> Result<Vec<u8>, NetworkError> {
     Ok(body)
 }
 
-/// Reads exactly `length` bytes from a TCP stream.
-fn read_exact_body(stream: &mut TcpStream, length: usize) -> Result<Vec<u8>, NetworkError> {
+/// Reads an exact number of bytes for the HTTP response body.
+fn read_exact_body<R: std::io::Read>(
+    stream: &mut R,
+    length: usize,
+) -> Result<Vec<u8>, NetworkError> {
     let mut body = vec![0u8; length];
     stream
         .read_exact(&mut body)
@@ -445,37 +604,152 @@ fn read_exact_body(stream: &mut TcpStream, length: usize) -> Result<Vec<u8>, Net
     Ok(body)
 }
 
-/// Resolves a redirect location against the current URL.
-fn resolve_redirect(current_url: &Url, location: &str) -> Result<Url, NetworkError> {
-    if location.starts_with("http://") || location.starts_with("https://") {
-        Url::parse(location)
-    } else if location.starts_with('/') {
-        let new_url_str = format!(
-            "{}://{}{}",
-            current_url.scheme,
-            current_url.host_port(),
-            location
-        );
-        Url::parse(&new_url_str)
-    } else {
-        // Relative redirect not starting with '/'
-        let mut path_base = current_url.path.clone();
-        if let Some(last_slash) = path_base.rfind('/') {
-            path_base.truncate(last_slash + 1);
-        } else {
-            path_base = "/".to_string();
+fn stream_chunked_body<R: std::io::Read>(
+    stream: &mut R,
+    url: &str,
+    sender: &std::sync::mpsc::Sender<crate::net::bus::ResourceBusEvent>,
+) -> Result<(), NetworkError> {
+    let mut offset = 0;
+    loop {
+        let mut size_buf = Vec::new();
+        let mut byte = [0u8; 1];
+
+        // Read chunk size
+        loop {
+            if stream.read_exact(&mut byte).is_err() {
+                return Err(NetworkError::Io(
+                    "Connection closed while reading chunk size".into(),
+                ));
+            }
+            size_buf.push(byte[0]);
+            if size_buf.ends_with(b"\r\n") {
+                break;
+            }
         }
-        let new_url_str = format!(
-            "{}://{}{}{}",
-            current_url.scheme,
-            current_url.host_port(),
-            path_base,
-            location
-        );
-        Url::parse(&new_url_str)
+
+        let size_str = String::from_utf8_lossy(&size_buf[..size_buf.len() - 2]);
+        let size = usize::from_str_radix(size_str.trim(), 16)
+            .map_err(|_| NetworkError::Other("Invalid chunk size".into()))?;
+
+        if size == 0 {
+            // Read trailing \r\n
+            let mut trailing = [0u8; 2];
+            let _ = stream.read_exact(&mut trailing);
+            let _ = sender.send(crate::net::bus::ResourceBusEvent::ChunkReceived {
+                url: url.to_string(),
+                chunk_data: Vec::new(),
+                offset,
+                is_final: true,
+            });
+            break;
+        }
+
+        let mut chunk = vec![0u8; size];
+        stream
+            .read_exact(&mut chunk)
+            .map_err(|_| NetworkError::Io("Failed to read chunk data".into()))?;
+
+        let _ = sender.send(crate::net::bus::ResourceBusEvent::ChunkReceived {
+            url: url.to_string(),
+            chunk_data: chunk,
+            offset,
+            is_final: false,
+        });
+        offset += size;
+
+        // Read trailing \r\n
+        let mut trailing = [0u8; 2];
+        stream
+            .read_exact(&mut trailing)
+            .map_err(|_| NetworkError::Io("Failed to read chunk trailing CRLF".into()))?;
     }
+    Ok(())
 }
 
+fn stream_exact_body<R: std::io::Read>(
+    stream: &mut R,
+    length: usize,
+    url: &str,
+    sender: &std::sync::mpsc::Sender<crate::net::bus::ResourceBusEvent>,
+) -> Result<(), NetworkError> {
+    let mut remaining = length;
+    let mut offset = 0;
+    let mut buf = [0u8; 8192];
+
+    while remaining > 0 {
+        let to_read = std::cmp::min(remaining, buf.len());
+        let n = stream
+            .read(&mut buf[..to_read])
+            .map_err(|_| NetworkError::Io("Read error".into()))?;
+        if n == 0 {
+            break;
+        }
+        remaining -= n;
+        let is_final = remaining == 0;
+        let _ = sender.send(crate::net::bus::ResourceBusEvent::ChunkReceived {
+            url: url.to_string(),
+            chunk_data: buf[..n].to_vec(),
+            offset,
+            is_final,
+        });
+        offset += n;
+    }
+
+    // In case connection closed early
+    if remaining > 0 {
+        let _ = sender.send(crate::net::bus::ResourceBusEvent::ChunkReceived {
+            url: url.to_string(),
+            chunk_data: Vec::new(),
+            offset,
+            is_final: true,
+        });
+    }
+
+    Ok(())
+}
+
+fn stream_eof_body<R: std::io::Read>(
+    stream: &mut R,
+    url: &str,
+    sender: &std::sync::mpsc::Sender<crate::net::bus::ResourceBusEvent>,
+) -> Result<(), NetworkError> {
+    let mut buf = [0u8; 8192];
+    let mut offset = 0;
+    loop {
+        match stream.read(&mut buf) {
+            Ok(0) => {
+                let _ = sender.send(crate::net::bus::ResourceBusEvent::ChunkReceived {
+                    url: url.to_string(),
+                    chunk_data: Vec::new(),
+                    offset,
+                    is_final: true,
+                });
+                break;
+            }
+            Ok(n) => {
+                let _ = sender.send(crate::net::bus::ResourceBusEvent::ChunkReceived {
+                    url: url.to_string(),
+                    chunk_data: buf[..n].to_vec(),
+                    offset,
+                    is_final: false,
+                });
+                offset += n;
+            }
+            Err(_) => {
+                let _ = sender.send(crate::net::bus::ResourceBusEvent::ChunkReceived {
+                    url: url.to_string(),
+                    chunk_data: Vec::new(),
+                    offset,
+                    is_final: true,
+                });
+                break;
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Resolves a redirect location against the current URL.
 // ─── Tests ───────────
 #[cfg(test)]
 mod tests {
@@ -512,12 +786,10 @@ mod tests {
     }
 
     #[test]
-    fn test_url_parse_https_rejected() {
-        let err = Url::parse("https://example.com").unwrap_err();
-        match err {
-            NetworkError::InvalidUrl(msg) => assert!(msg.contains("HTTPS is not supported")),
-            _ => panic!("Expected InvalidUrl error"),
-        }
+    fn test_url_parse_https_accepted() {
+        let url = Url::parse("https://example.com").unwrap();
+        assert_eq!(url.scheme, "https");
+        assert_eq!(url.port, 443);
     }
 
     #[test]
@@ -603,7 +875,7 @@ mod tests {
     #[test]
     fn test_resolve_redirect_absolute() {
         let url = Url::parse("http://example.com/path").unwrap();
-        let redirect = resolve_redirect(&url, "http://new.com/page").unwrap();
+        let redirect = url.resolve_relative("http://new.com/page").unwrap();
         assert_eq!(redirect.host, "new.com");
         assert_eq!(redirect.path, "/page");
     }
@@ -611,11 +883,11 @@ mod tests {
     #[test]
     fn test_resolve_redirect_relative() {
         let url = Url::parse("http://example.com/dir/page.html").unwrap();
-        let redirect = resolve_redirect(&url, "/new-page.html").unwrap();
+        let redirect = url.resolve_relative("/new-page.html").unwrap();
         assert_eq!(redirect.host, "example.com");
         assert_eq!(redirect.path, "/new-page.html");
 
-        let redirect2 = resolve_redirect(&url, "other.html").unwrap();
+        let redirect2 = url.resolve_relative("other.html").unwrap();
         assert_eq!(redirect2.path, "/dir/other.html");
     }
 }
