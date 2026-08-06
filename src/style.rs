@@ -942,10 +942,9 @@ mod tests {
     /// Helper: parse HTML and CSS, resolve styles, return the styled tree
     fn styled_tree(html: &str, css: &str) -> (StyledNode, Dom, Vec<u8>) {
         let html_bytes = html.as_bytes().to_vec();
-        let mut tokenizer = Tokenizer::new(&html_bytes);
-        let tokens = tokenizer.tokenize();
-        let parser = Parser::new(&tokens, &html_bytes);
-        let dom = parser.parse();
+        let mut processor = crate::streaming_parser::StreamingHtmlProcessor::new();
+        let _ = processor.receive_network_chunk(&html_bytes, true);
+        let dom = processor.finish();
 
         let stylesheet = Stylesheet::parse(css.as_bytes());
         let styled = resolve_styles(&dom, &stylesheet, &html_bytes);
@@ -1328,8 +1327,9 @@ mod tests {
     #[test]
     fn test_media_query_viewport_matching() {
         let source = b"<div>Content</div>";
-        let html_tokens = crate::tokenizer::Tokenizer::new(source).tokenize();
-        let dom = crate::parser::Parser::new(&html_tokens, source).parse();
+        let mut processor = crate::streaming_parser::StreamingHtmlProcessor::new();
+        let _ = processor.receive_network_chunk(source, true);
+        let dom = processor.finish();
         let stylesheet = crate::css_parser::Stylesheet::parse(
             b"@media (min-width: 600px) { div { color: red; } }",
         );

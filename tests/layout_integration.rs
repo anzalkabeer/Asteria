@@ -24,10 +24,9 @@ fn parse_and_layout<'a>(
     styled_store: &'a mut Option<StyledNode>,
 ) -> LayoutBox<'a> {
     *bytes_store = html.as_bytes().to_vec();
-    let mut tokenizer = Tokenizer::new(bytes_store);
-    let tokens = tokenizer.tokenize();
-    let parser = Parser::new(&tokens, bytes_store);
-    *dom_store = Some(parser.parse());
+    let mut processor = asteria::streaming_parser::StreamingHtmlProcessor::new();
+    let _ = processor.receive_network_chunk(bytes_store, true);
+    *dom_store = Some(processor.finish());
 
     let stylesheet = Stylesheet::parse(css.as_bytes());
     *styled_store = Some(resolve_styles(

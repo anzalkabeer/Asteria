@@ -73,10 +73,9 @@ fn main() {
     let parse_start = Instant::now();
     record_event(TraceEventKind::ParseStart);
 
-    let mut tokenizer = Tokenizer::new(bytes);
-    let tokens = tokenizer.tokenize();
-    let parser = Parser::new(&tokens, bytes);
-    let dom = parser.parse();
+    let mut processor = asteria::streaming_parser::StreamingHtmlProcessor::new();
+    let _ = processor.receive_network_chunk(bytes, true);
+    let dom = processor.finish();
 
     let parse_duration = parse_start.elapsed();
     profiler.record_stage_duration(EngineStage::ParseHtml, parse_duration);
@@ -86,8 +85,7 @@ fn main() {
     });
 
     println!(
-        "── HTML Tokens ({}) & DOM Tree ({} nodes) ─────\n",
-        tokens.len(),
+        "── HTML DOM Tree ({} nodes) ─────\n",
         dom.nodes.len()
     );
     dom.print_tree(bytes);

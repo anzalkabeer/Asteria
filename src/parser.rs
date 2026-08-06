@@ -60,89 +60,64 @@ fn is_void_element(source: &[u8], tag_start: u32, tag_end: u32) -> bool {
 //   EndTag "div"    | pop div                              | [Document]
 //   Eof             | done                                 | [Document]
 
-pub struct Parser<'a> {
-    tokens: &'a [Token],
-    pos: usize,
-    dom: Dom,
+pub struct Parser {
     /// Stack of open element NodeIds — the current "insertion path"
     /// The top of the stack is the current parent for new nodes.
     open_elements: Vec<NodeId>,
-    /// The original HTML source buffer — needed to compare tag names
-    source: &'a [u8],
 }
 
-impl<'a> Parser<'a> {
-    pub fn new(tokens: &'a [Token], source: &'a [u8]) -> Self {
-        let dom = Dom::new();
-        let root = dom.root();
+impl Parser {
+    pub fn new() -> Self {
+        // Assume Document root (NodeId(0)) is always the starting point
         Parser {
-            tokens,
-            pos: 0,
-            dom,
-            open_elements: vec![root], // Document root is always on the stack
-            source,
+            open_elements: vec![NodeId(0)],
         }
     }
 
-    /// Run the parser and return the constructed DOM.
-    /// Consumes the parser since the DOM is moved out.
-    pub fn parse(mut self) -> Dom {
-        while self.pos < self.tokens.len() {
-            let token = &self.tokens[self.pos];
-
+    pub fn push_tokens(&mut self, dom: &mut Dom, tokens: &[Token], source: &[u8]) -> Vec<NodeId> {
+        let mut dirty = Vec::new();
+        
+        for token in tokens {
             match token.kind {
-                TokenKind::StartTag => self.handle_start_tag(token),
-                TokenKind::EndTag => self.handle_end_tag(token),
-                TokenKind::SelfClosingTag => self.handle_self_closing_tag(token),
-                TokenKind::Text => self.handle_text(token),
-                TokenKind::Comment => self.handle_comment(token),
-                TokenKind::Doctype => {
-                    // Skip doctype for now — could store as Document metadata later
-                }
+                TokenKind::StartTag => self.handle_start_tag(dom, token, source, &mut dirty),
+                TokenKind::EndTag => self.handle_end_tag(dom, token, source, &mut dirty),
+                TokenKind::SelfClosingTag => self.handle_self_closing_tag(dom, token, source, &mut dirty),
+                TokenKind::Text => self.handle_text(dom, token, &mut dirty),
+                TokenKind::Comment => self.handle_comment(dom, token, &mut dirty),
+                TokenKind::Doctype => {}
                 TokenKind::Eof => break,
             }
-
-            self.pos += 1;
         }
 
-        self.dom
+        dirty
     }
 
     // ─── Token Handlers ──────────────────────────────────────────
 
-    fn handle_start_tag(&mut self, token: &Token) {
+    fn handle_start_tag(&mut self, dom: &mut Dom, token: &Token, source: &[u8], dirty: &mut Vec<NodeId>) {
         let parent = self.current_parent();
 
-        let node_id = self
-            .dom
-            .add_element(parent, token.start, token.end, &token.attributes);
+        let node_id = dom.add_element(parent, token.start, token.end, &token.attributes);
 
-        // Only push onto the open elements stack if it's NOT a void element.
-        // Void elements like <br>, <img>, <input> can never have children,
-        // so they should not become the current parent.
-        if !is_void_element(self.source, token.start, token.end) {
+        if !is_void_element(source, token.start, token.end) {
             self.open_elements.push(node_id);
+        } else {
+            // Void elements complete immediately, mark them dirty
+            dirty.push(node_id);
         }
+        
+        // Also mark parent as dirty since its children changed
+        dirty.push(parent);
     }
 
-    fn handle_end_tag(&mut self, token: &Token) {
-        let end_tag_name = &self.source[token.start as usize..token.end as usize];
-
-        // Walk the stack from top to bottom looking for a matching open tag.
-        // This handles cases where tags are improperly nested — we pop everything
-        // above the matching tag (lenient error recovery).
-        //
-        // Example: <div><p><span></p></div>
-        //   When we see </p>, the stack is [Document, div, p, span]
-        //   We search from top: span (no match), p (match!) → pop span and p
-        //   Stack becomes [Document, div]
+    fn handle_end_tag(&mut self, dom: &mut Dom, token: &Token, source: &[u8], dirty: &mut Vec<NodeId>) {
+        let end_tag_name = &source[token.start as usize..token.end as usize];
 
         let mut match_index = None;
         for i in (1..self.open_elements.len()).rev() {
-            // Skip index 0 (Document root — never pop it)
-            let node = self.dom.get(self.open_elements[i]);
+            let node = dom.get(self.open_elements[i]);
             if let crate::dom::NodeKind::Element { tag_start, tag_end } = &node.kind {
-                let open_tag_name = &self.source[*tag_start as usize..*tag_end as usize];
+                let open_tag_name = &source[*tag_start as usize..*tag_end as usize];
                 if tag_names_match(open_tag_name, end_tag_name) {
                     match_index = Some(i);
                     break;
@@ -150,29 +125,34 @@ impl<'a> Parser<'a> {
             }
         }
 
-        // If we found a match, pop everything from that point up (inclusive)
         if let Some(idx) = match_index {
+            for i in idx..self.open_elements.len() {
+                dirty.push(self.open_elements[i]);
+            }
             self.open_elements.truncate(idx);
         }
-        // If no match found, ignore the end tag (lenient parsing)
     }
 
-    fn handle_self_closing_tag(&mut self, token: &Token) {
+    fn handle_self_closing_tag(&mut self, dom: &mut Dom, token: &Token, source: &[u8], dirty: &mut Vec<NodeId>) {
         let parent = self.current_parent();
-
-        // Self-closing tags are like start tags but never pushed onto the stack
-        self.dom
+        let node_id = dom
             .add_element(parent, token.start, token.end, &token.attributes);
+        dirty.push(node_id);
+        dirty.push(parent);
     }
 
-    fn handle_text(&mut self, token: &Token) {
+    fn handle_text(&mut self, dom: &mut Dom, token: &Token, dirty: &mut Vec<NodeId>) {
         let parent = self.current_parent();
-        self.dom.add_text(parent, token.start, token.end);
+        let node_id = dom.add_text(parent, token.start, token.end);
+        dirty.push(node_id);
+        dirty.push(parent);
     }
 
-    fn handle_comment(&mut self, token: &Token) {
+    fn handle_comment(&mut self, dom: &mut Dom, token: &Token, dirty: &mut Vec<NodeId>) {
         let parent = self.current_parent();
-        self.dom.add_comment(parent, token.start, token.end);
+        let node_id = dom.add_comment(parent, token.start, token.end);
+        dirty.push(node_id);
+        dirty.push(parent);
     }
 
     // ─── Helpers ─────────────────────────────────────────────────
@@ -208,11 +188,9 @@ mod tests {
     /// Helper: tokenize + parse an HTML string, return the DOM
     fn parse_html(html: &str) -> (Dom, Vec<u8>) {
         let bytes = html.as_bytes().to_vec();
-        let mut tokenizer = Tokenizer::new(&bytes);
-        let tokens = tokenizer.tokenize();
-        let parser = Parser::new(&tokens, &bytes);
-        let dom = parser.parse();
-        (dom, bytes)
+        let mut processor = crate::streaming_parser::StreamingHtmlProcessor::new();
+        let _ = processor.receive_network_chunk(&bytes, true);
+        (processor.finish(), bytes)
     }
 
     /// Helper: get the tag name of a node as a string

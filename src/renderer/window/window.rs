@@ -94,9 +94,9 @@ impl AsteriaWindow {
             .map(|r| r.html.bytes.as_slice())
             .unwrap_or(sample_html_bytes);
 
-        let mut tokenizer = Tokenizer::new(html_bytes);
-        let tokens = tokenizer.tokenize();
-        let dom = Parser::new(&tokens, html_bytes).parse();
+        let mut processor = crate::streaming_parser::StreamingHtmlProcessor::new();
+        let _ = processor.receive_network_chunk(html_bytes, true);
+        let dom = processor.finish();
 
         let css_bytes = active_tab
             .page_resources

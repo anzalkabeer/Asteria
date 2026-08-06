@@ -156,10 +156,9 @@ impl ResourceLoader {
         let html = self.read_resource(&canonical, ResourceType::Html)?;
 
         // Parse the HTML into a DOM for resource discovery
-        let mut tokenizer = crate::tokenizer::Tokenizer::new(&html.bytes);
-        let tokens = tokenizer.tokenize();
-        let parser = crate::parser::Parser::new(&tokens, &html.bytes);
-        let dom = parser.parse();
+        let mut processor = crate::streaming_parser::StreamingHtmlProcessor::new();
+        let _ = processor.receive_network_chunk(&html.bytes, true);
+        let dom = processor.finish();
 
         // Discover stylesheets
         let stylesheets =
@@ -203,10 +202,9 @@ impl ResourceLoader {
         self.cache.insert(html.clone());
 
         // Parse for resource discovery
-        let mut tokenizer = crate::tokenizer::Tokenizer::new(&html.bytes);
-        let tokens = tokenizer.tokenize();
-        let parser = crate::parser::Parser::new(&tokens, &html.bytes);
-        let dom = parser.parse();
+        let mut processor = crate::streaming_parser::StreamingHtmlProcessor::new();
+        let _ = processor.receive_network_chunk(&html.bytes, true);
+        let dom = processor.finish();
 
         // Parse the URL so we can use it as a base for relative resources
         let base_url = Url::parse(url).ok();
@@ -246,10 +244,9 @@ impl ResourceLoader {
         self.cache.insert(html_resource.clone());
 
         // Parse for resource discovery
-        let mut tokenizer = crate::tokenizer::Tokenizer::new(&html_resource.bytes);
-        let tokens = tokenizer.tokenize();
-        let parser = crate::parser::Parser::new(&tokens, &html_resource.bytes);
-        let dom = parser.parse();
+        let mut processor = crate::streaming_parser::StreamingHtmlProcessor::new();
+        let _ = processor.receive_network_chunk(&html_resource.bytes, true);
+        let dom = processor.finish();
 
         // Discover stylesheets (no base_dir for in-memory strings)
         let stylesheets = self
@@ -721,10 +718,9 @@ mod tests {
     #[test]
     fn test_discover_inline_style_empty() {
         let html = b"<html><body><p>Hello</p></body></html>";
-        let mut tokenizer = crate::tokenizer::Tokenizer::new(html);
-        let tokens = tokenizer.tokenize();
-        let parser = crate::parser::Parser::new(&tokens, html);
-        let dom = parser.parse();
+        let mut processor = crate::streaming_parser::StreamingHtmlProcessor::new();
+        let _ = processor.receive_network_chunk(html, true);
+        let dom = processor.finish();
 
         let mut loader = ResourceLoader::new();
         let stylesheets = loader.discover_stylesheets(&dom, html, None, None).unwrap();
@@ -734,10 +730,9 @@ mod tests {
     #[test]
     fn test_discover_inline_style() {
         let html = b"<html><head><style>body { margin: 0; }</style></head><body></body></html>";
-        let mut tokenizer = crate::tokenizer::Tokenizer::new(html);
-        let tokens = tokenizer.tokenize();
-        let parser = crate::parser::Parser::new(&tokens, html);
-        let dom = parser.parse();
+        let mut processor = crate::streaming_parser::StreamingHtmlProcessor::new();
+        let _ = processor.receive_network_chunk(html, true);
+        let dom = processor.finish();
 
         let mut loader = ResourceLoader::new();
         let stylesheets = loader.discover_stylesheets(&dom, html, None, None).unwrap();
@@ -754,10 +749,9 @@ mod tests {
         // <link rel="stylesheet" href="missing.css"> should warn but not fail
         let html =
             br#"<html><head><link rel="stylesheet" href="missing.css"></head><body></body></html>"#;
-        let mut tokenizer = crate::tokenizer::Tokenizer::new(html);
-        let tokens = tokenizer.tokenize();
-        let parser = crate::parser::Parser::new(&tokens, html);
-        let dom = parser.parse();
+        let mut processor = crate::streaming_parser::StreamingHtmlProcessor::new();
+        let _ = processor.receive_network_chunk(html, true);
+        let dom = processor.finish();
 
         let mut loader = ResourceLoader::new();
         let stylesheets = loader.discover_stylesheets(&dom, html, None, None).unwrap();
@@ -771,10 +765,9 @@ mod tests {
         // <link rel="icon" href="favicon.ico"> should be ignored
         let html =
             br#"<html><head><link rel="icon" href="favicon.ico"></head><body></body></html>"#;
-        let mut tokenizer = crate::tokenizer::Tokenizer::new(html);
-        let tokens = tokenizer.tokenize();
-        let parser = crate::parser::Parser::new(&tokens, html);
-        let dom = parser.parse();
+        let mut processor = crate::streaming_parser::StreamingHtmlProcessor::new();
+        let _ = processor.receive_network_chunk(html, true);
+        let dom = processor.finish();
 
         let mut loader = ResourceLoader::new();
         let stylesheets = loader.discover_stylesheets(&dom, html, None, None).unwrap();

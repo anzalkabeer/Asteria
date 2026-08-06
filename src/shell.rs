@@ -307,10 +307,9 @@ impl TabManager {
                 "<!DOCTYPE html><html><body><h1>Asteria Shell</h1><p>Sample Tab</p></body></html>";
             let page = self.loader.load_html_string(sample_html, "<sample>");
 
-            let mut tokenizer = crate::tokenizer::Tokenizer::new(&page.html.bytes);
-            let tokens = tokenizer.tokenize();
-            let parser = crate::parser::Parser::new(&tokens, &page.html.bytes);
-            let dom = parser.parse();
+            let mut processor = crate::streaming_parser::StreamingHtmlProcessor::new();
+            let _ = processor.receive_network_chunk(&page.html.bytes, true);
+            let dom = processor.finish();
 
             let mut css_bytes = Vec::new();
             for res in &page.stylesheets {
@@ -328,10 +327,9 @@ impl TabManager {
                 .load_resource(&tab.url)
                 .map_err(|e| e.to_string())?;
 
-            let mut tokenizer = crate::tokenizer::Tokenizer::new(&page.html.bytes);
-            let tokens = tokenizer.tokenize();
-            let parser = crate::parser::Parser::new(&tokens, &page.html.bytes);
-            let dom = parser.parse();
+            let mut processor = crate::streaming_parser::StreamingHtmlProcessor::new();
+            let _ = processor.receive_network_chunk(&page.html.bytes, true);
+            let dom = processor.finish();
 
             let mut css_bytes = Vec::new();
             for res in &page.stylesheets {

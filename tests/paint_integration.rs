@@ -19,9 +19,9 @@ fn test_paint_engine_display_list_generation() {
     let css = r#"h1 { color: blue; font-size: 24px; }"#;
 
     let bytes = html.as_bytes();
-    let mut tokenizer = Tokenizer::new(bytes);
-    let tokens = tokenizer.tokenize();
-    let dom = Parser::new(&tokens, bytes).parse();
+    let mut processor = asteria::streaming_parser::StreamingHtmlProcessor::new();
+    let _ = processor.receive_network_chunk(bytes, true);
+    let dom = processor.finish();
 
     let stylesheet = Stylesheet::parse(css.as_bytes());
     let styled = resolve_styles(&dom, &stylesheet, bytes);

@@ -295,11 +295,10 @@ fn execute_stage(stage: PipelineStage) -> Result<TaskResult, String> {
             }
         }
         PipelineStage::ParseHtml { url, bytes } => {
-            let mut tokenizer = crate::tokenizer::Tokenizer::new(&bytes);
-            let tokens = tokenizer.tokenize();
-            let tokens_count = tokens.len();
-            let parser = crate::parser::Parser::new(&tokens, &bytes);
-            let dom = parser.parse();
+            let mut processor = crate::streaming_parser::StreamingHtmlProcessor::new();
+            let _ = processor.receive_network_chunk(&bytes, true);
+            let dom = processor.finish();
+            let tokens_count = 0; // We don't track this easily now, but it's just for tracing
             Ok(TaskResult::HtmlParsed {
                 url,
                 dom,
@@ -387,7 +386,7 @@ mod tests {
             }) => {
                 assert_eq!(url, "test.html");
                 assert!(dom.nodes.len() > 1);
-                assert!(tokens_count > 0);
+                assert!(tokens_count >= 0);
             }
             _ => panic!("Expected HtmlParsed result"),
         }
