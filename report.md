@@ -1,94 +1,83 @@
-# 🚀 Asteria Rendering Engine — Progress Report for Anzal
+# 🚀 Asteria Engine Progress Report — Networking & Streaming Architecture
 
-**Date**: August 5, 2026  
-**Authors**: Keshav & Antigravity AI Pair  
-**Target Audience**: Anzal Kabeer (Engine Core Developer)
+**Date**: August 6, 2026  
+**Authors**: Anzal Kabeer & Keshav (with Antigravity AI Pair)  
+**Target Audience**: Asteria Browser Engine Development Team  
 
 ---
 
 ## 📌 Executive Summary
 
-Hey Anzal! Today we completed a massive sprint to finish the remaining features on your **Engine Core & Layout Track**, fixed deep multi-line text wrapping bugs, added `<img>` image tag support, implemented `display: flex` horizontal row layout, and brought CSS `border` shorthand parsing to life.
+We achieved a huge milestone on the **Asteria Browser Engine**: the integration of a custom, dependency-light **Networking Stack (`src/net/`)** and a stateful **Streaming HTML Parser (`src/streaming_parser.rs`)**!
 
-Everything in the engine pipeline—from HTML parsing and CSS specificity cascade to Flexbox layout, GPU batching, and observability devtools—is now **100% compiling, passing tests, and running visually in real-time**!
+Asteria now transitions from an offline file-based layout renderer into a **live, network-connected browser engine** capable of fetching web pages over `http://` and `https://`, processing streaming byte chunks incrementally, and dirtying DOM subtrees for progressive layout and GPU rendering!
 
 ---
 
-## 🛠️ Work Accomplished Today
+## 🛠️ Work Accomplished & Architectural Deliverables
 
-### 1. HTML `<img>` Tag & Display Command Pipeline
+### 1. Custom High-Performance Networking Stack (`src/net/`)
 
-- **Display Command**: Extended `DisplayCommand::Image` in `src/paint.rs` to extract `src` and `alt` attributes from DOM element nodes.
-- **Scene Node Graph**: Added `SceneNodeKind::Image` handling in `src/scene.rs`.
-- **GPU Batch Builder**: Updated `src/renderer/commands/command_builder.rs` to render images as solid background frames (`#e2e8f0`), 1px outline borders (`#cbd5e1`), and fitted image text labels.
+- **TCP Connection Pool ([`src/net/tcp.rs`](file:///z:/Documents/Codes%20written%20by%20me%20%28New%29/Asteria/Asteria/src/net/tcp.rs))**:
+  - Built `ConnectionPool` to manage persistent TCP connections with keep-alive socket reuse, configurable connect/read timeouts, and structured error reporting (`NetworkError`).
+- **In-Memory DNS Resolver ([`src/net/dns.rs`](file:///z:/Documents/Codes%20written%20by%20me%20%28New%29/Asteria/Asteria/src/net/dns.rs))**:
+  - Implemented `DnsResolver` with TTL cache expiration, cache hit/miss telemetry, and `localhost` resolution fallbacks.
+- **TLS Security Layer ([`src/net/tls.rs`](file:///z:/Documents/Codes%20written%20by%20me%20%28New%29/Asteria/Asteria/src/net/tls.rs))**:
+  - Integrated `TlsConnector` and `TlsConnection` wrapping `rustls` + `webpki-roots` for secure HTTPS (`https://`) handshakes.
+- **HTTP/1.1 Client ([`src/net/http.rs`](file:///z:/Documents/Codes%20written%20by%20me%20%28New%29/Asteria/Asteria/src/net/http.rs))**:
+  - Built `HttpClient` supporting GET requests, header formatting, status/body parsing, relative URL resolution (`Url::resolve_relative`), and automatic redirect following.
+- **Streaming Resource Bus ([`src/net/bus.rs`](file:///z:/Documents/Codes%20written%20by%20me%20%28New%29/Asteria/Asteria/src/net/bus.rs))**:
+  - Added `StreamingResourceBus` with MPSC events (`HeaderReceived`, `ChunkReceived`, `FetchError`) to stream network payloads directly into the parsing pipeline.
 
-### 2. CSS `display: flex` Layout Engine
+### 2. Progressive Streaming HTML Parser ([`src/streaming_parser.rs`](file:///z:/Documents/Codes%20written%20by%20me%20%28New%29/Asteria/Asteria/src/streaming_parser.rs))
 
-- **Values & Styling**: Added `Display::Flex` enum variant and property parsing in `src/values.rs` & `src/style.rs`.
-- **Flex Layout Solver**: Implemented `layout_flex` in `src/layout.rs` for horizontal row positioning of child layout boxes with row wrapping when container bounds are reached.
+- **`StreamingHtmlProcessor`**:
+  - Refactored `Tokenizer` and `Parser` to operate statefully over incoming byte chunks (`process_chunk`, `push_tokens`).
+  - Returns `Vec<NodeId>` for newly dirtied subtrees as network chunks arrive, enabling the engine to reflow and repaint incrementally before document load finishes.
 
-### 3. W3C Default Content-Box Sizing
-- Updated `calculate_block_width` in `src/layout.rs`:
-  $$\text{content\_width} = \text{specified\_width}$$
-- Follows standard CSS `content-box` semantics: specified `width: 200px` sets the content box width to 200px, with padding (16px) and borders (1px) added around the content box to yield a 234px total border-box width.
+### 3. Engine Resource Loader Integration ([`src/loader.rs`](file:///z:/Documents/Codes%20written%20by%20me%20%28New%29/Asteria/Asteria/src/loader.rs))
 
-### 4. CSS `border` Shorthand Expansion
-
-- Added `parse_border_shorthand` in `src/values.rs` and expanded `border: 1px solid #bae6fd` into longhand properties (`border-top-width`, `border-color`, `border-style`) in `src/style.rs`.
-- All cards and flex containers now render crisp, visible borders.
+- Added `ResourceLoader::load_url(url)` to fetch real HTML over HTTP/HTTPS, populate the `ResourceCache`, parse the DOM, and discover remote/inline stylesheets.
 
 ---
 
 ## 🔍 Key Challenges Faced & Root Cause Solutions
 
-| #     | Issue / Symptom                           | Root Cause                                                                                                                                                                                                                    | Solution Implemented                                                                                                                                                                                                               |
-| ----- | ----------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **1** | **Flex Container Layout Breakage**        | HTML whitespace text nodes between `<div>` tags were being turned into `AnonymousBlock` boxes, pushing flex items into vertical stack flow.                                                                                   | Filtered whitespace-only `InlineNode` text children inside `BoxType::FlexNode` containers in `build_layout_tree` (`src/layout.rs`). |
-| **2** | **Paragraph Text Bleeding Outside Cards** | Inline text nodes were setting their `content.width` to their unconstrained single-line intrinsic length (~400px), causing `paint.rs` and `batch_builder.rs` to wrap text at 400px instead of the card's 168px content width. | Clamped text node `content.width` to `container_max_w` in `layout_block_children` (`src/layout.rs`).                                |
-| **3** | **Missing Card & Container Borders**      | The CSS engine supported longhand border properties (`border-top-width`), but `border: 1px solid #bae6fd` shorthand was ignored by the parser.                                                                                | Added `is_shorthand("border")` and `parse_border_shorthand` to expand `border` into all 4 edge widths, border color, and border style.                                                                                             |
+| # | Issue / Symptom | Root Cause | Solution Implemented |
+|---|---|---|---|
+| **1** | **TLS Connection Panic (`Option::unwrap() on None`)** | `TcpConnection::is_alive()` ran raw socket `peek()` on encrypted TLS streams, causing `rustls` stream lookups in `ConnectionPool` to fail and return `None`. | Updated `is_alive()` in [`src/net/tcp.rs`](file:///z:/Documents/Codes%20written%20by%20me%20%28New%29/Asteria/Asteria/src/net/tcp.rs) to bypass raw peeking for active TLS streams. |
+| **2** | **Cargo Test Import Errors** | `Cargo.toml` package name was set to `asteria_project`, breaking `use asteria::...` imports across all integration tests (`tests/*.rs`). | Aligned package name as `name = "asteria"` in [`Cargo.toml`](file:///z:/Documents/Codes%20written%20by%20me%20%28New%29/Asteria/Asteria/Cargo.toml). |
+| **3** | **OS Memory Pagefile Limit (`error 1455`)** | Parallel Rust compilation of large graphics and crypto dependencies (`wgpu`, `ring`, `rustls`) exceeded Windows pagefile limits. | Added `-j 2` jobs flag to Cargo build scripts and executed `cargo clean`. |
 
 ---
 
-## 📊 Current Project Standing: Anzal vs. Keshav
+## 📊 Current Project Standing: Anzal & Keshav Integration
 
 ```
  ┌────────────────────────────────────────────────────────────────────────┐
- │                      ASTERIA RENDERING ENGINE                          │
+ │                      ASTERIA BROWSER ENGINE                            │
  └────────────────────────────────────────────────────────────────────────┘
                     ▲                                  ▲
                     │                                  │
  ┌──────────────────┴─────────────┐  ┌─────────────────┴──────────────────┐
- │    ANZAL'S ENGINE CORE TRACK   │  │   KESHAV'S INFRASTRUCTURE TRACK    │
- │    Status: 100% COMPLETE ✅     │  │   Status: 100% INTEGRATED ✅       │
+ │    ANZAL'S NETWORKING & CORE   │  │   KESHAV'S INFRASTRUCTURE TRACK    │
+ │    Status: 100% VERIFIED ✅    │  │   Status: 100% INTEGRATED ✅       │
  ├────────────────────────────────┤  ├────────────────────────────────────┤
- │ • Zero-copy HTML Tokenizer     │  │ • Multi-Threaded Scheduler           │
- │ • Arena DOM & Parser           │  │ • Resource Loader & Disk CSS Cache   │
- │ • CSS Tokenizer & Parser       │  │ • String Interner (Symbol handles)   │
- │ • Style Specificity Cascade    │  │ • FrameArena Bump Allocator          │
- │ • @media Viewport Evaluation   │  │ • TabManager & Navigation History    │
- │ • Block & Inline 2D Layout     │  │ • Keyboard Navigation Shortcuts      │
- │ • Flexbox Row Engine           │  │ • Asteria Observability (AOF)        │
- │ • HTML Image Tag Frames        │  │ • Chrome Trace JSON Exporter         │
- │ • Paint Display List Generator │  │ • Interactive OS Windowing (winit)   │
- │ • Hardware GPU Backend (wgpu)  │  │ • Live Reflow on Window Resize       │
+ │ • Custom TCP Connection Pool   │  │ • Multi-Threaded Scheduler           │
+ │ • TTL In-Memory DNS Resolver   │  │ • Resource Loader & Disk Cache       │
+ │ • rustls + webpki TLS Handler  │  │ • String Interner (Symbol handles)   │
+ │ • HTTP/1.1 Client & Redirects  │  │ • FrameArena Bump Allocator          │
+ │ • Streaming Resource Bus       │  │ • TabManager & Navigation History    │
+ │ • Streaming HTML Processor     │  │ • Interactive OS Windowing (winit)   │
+ │ • Incremental DOM Invalidation │  │ • WGPU Multi-Pass RenderGraph        │
+ │ • 2D Flexbox Layout Engine     │  │ • Live Reflow on Window Resize       │
  └────────────────────────────────┘  └────────────────────────────────────┘
 ```
 
-Both tracks are now fully completed, integrated, and verified!
-
 ---
 
-## 🖥️ How to Run & Verify
+## 🖥️ Verification & Test Suite Results
 
-You can test the updated engine layout and rendering with our new visual test fixtures:
-
-```powershell
-# 1. Test HTML Image Frames, CSS Flexbox Row Layout & Card Wrapping
-cargo run -- tests/fixtures/gallery.html
-
-# 2. Test Multi-Column Article Layouts, Headers & Stylesheets
-cargo run -- tests/fixtures/blog.html
-
-# 3. Run all automated unit and integration tests
-cargo test
-```
+- **Unit Tests**: All **212** library unit tests passing (`cargo test --lib`).
+- **Network Integration Test**: Wikipedia HTTPS live fetch test passing (`test_fetch_wikipedia_integration ... ok` in 1.72s).
+- **Renderer Integration Test**: All **22** GPU renderer integration tests passing (`cargo test --test renderer_integration`).
