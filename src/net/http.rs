@@ -25,48 +25,53 @@ impl Url {
     /// Defaults to port 80 for HTTP and path "/" if not specified.
     pub fn parse(url: &str) -> Result<Url, NetworkError> {
         let raw = url.to_string();
-        
+
         let scheme_end = url.find("://").ok_or_else(|| {
             NetworkError::InvalidUrl("Missing scheme (expected 'http://')".into())
         })?;
-        
+
         let scheme = &url[..scheme_end];
         if scheme != "http" {
             if scheme == "https" {
-                return Err(NetworkError::InvalidUrl("HTTPS is not supported yet".into()));
+                return Err(NetworkError::InvalidUrl(
+                    "HTTPS is not supported yet".into(),
+                ));
             }
-            return Err(NetworkError::InvalidUrl(format!("Unsupported scheme: {}", scheme)));
+            return Err(NetworkError::InvalidUrl(format!(
+                "Unsupported scheme: {}",
+                scheme
+            )));
         }
-        
+
         let rest = &url[scheme_end + 3..];
         if rest.is_empty() {
             return Err(NetworkError::InvalidUrl("Empty host".into()));
         }
-        
+
         let (host_port, path) = if let Some(path_start) = rest.find('/') {
             (&rest[..path_start], &rest[path_start..])
         } else {
             (rest, "/")
         };
-        
+
         if host_port.is_empty() {
             return Err(NetworkError::InvalidUrl("Empty host".into()));
         }
-        
+
         let (host, port) = if let Some(colon_pos) = host_port.find(':') {
             let h = &host_port[..colon_pos];
             if h.is_empty() {
                 return Err(NetworkError::InvalidUrl("Empty host".into()));
             }
             let p_str = &host_port[colon_pos + 1..];
-            let p = p_str.parse::<u16>().map_err(|_| {
-                NetworkError::InvalidUrl("Invalid port number".into())
-            })?;
+            let p = p_str
+                .parse::<u16>()
+                .map_err(|_| NetworkError::InvalidUrl("Invalid port number".into()))?;
             (h, p)
         } else {
             (host_port, 80)
         };
-        
+
         Ok(Url {
             scheme: scheme.to_string(),
             host: host.to_string(),
@@ -113,7 +118,7 @@ impl HttpRequest {
     pub fn to_request_bytes(&self) -> Vec<u8> {
         let mut req = String::new();
         req.push_str(&format!("{} {} HTTP/1.1\r\n", self.method, self.url.path));
-        
+
         let mut has_host = false;
         let mut has_connection = false;
         let mut has_user_agent = false;
@@ -122,10 +127,18 @@ impl HttpRequest {
         for (k, v) in &self.headers {
             req.push_str(&format!("{}: {}\r\n", k, v));
             let lower_k = k.to_lowercase();
-            if lower_k == "host" { has_host = true; }
-            if lower_k == "connection" { has_connection = true; }
-            if lower_k == "user-agent" { has_user_agent = true; }
-            if lower_k == "accept" { has_accept = true; }
+            if lower_k == "host" {
+                has_host = true;
+            }
+            if lower_k == "connection" {
+                has_connection = true;
+            }
+            if lower_k == "user-agent" {
+                has_user_agent = true;
+            }
+            if lower_k == "accept" {
+                has_accept = true;
+            }
         }
 
         if !has_host {
@@ -239,7 +252,7 @@ impl HttpClient {
                 if redirects >= self.max_redirects {
                     return Err(NetworkError::Other("Too many redirects".into()));
                 }
-                
+
                 if let Some(location) = response.redirect_location() {
                     current_url = resolve_redirect(&current_url, location)?;
                     redirects += 1;
@@ -254,24 +267,32 @@ impl HttpClient {
     /// Sends a prepared `HttpRequest` and returns the `HttpResponse`.
     pub fn send_request(&mut self, request: &HttpRequest) -> Result<HttpResponse, NetworkError> {
         // 1. DNS resolve
-        let dns_entry = self.dns.resolve(&request.url.host)
+        let dns_entry = self
+            .dns
+            .resolve(&request.url.host)
             .map_err(|e| NetworkError::DnsError(format!("{}", e)))?;
 
         // 2. Pick the first resolved IP and build a SocketAddr
-        let ip = dns_entry.ip_addresses.first()
-            .ok_or_else(|| NetworkError::DnsError(format!(
-                "No IP addresses resolved for '{}'", request.url.host
-            )))?;
+        let ip = dns_entry.ip_addresses.first().ok_or_else(|| {
+            NetworkError::DnsError(format!(
+                "No IP addresses resolved for '{}'",
+                request.url.host
+            ))
+        })?;
         let addr = std::net::SocketAddr::new(*ip, request.url.port);
 
         // 3. Get or create a TCP connection from the pool
-        let stream = self.pool.get_or_connect(&request.url.host, request.url.port, addr)?;
+        let stream = self
+            .pool
+            .get_or_connect(&request.url.host, request.url.port, addr)?;
 
         // 4. Write the HTTP request
         let req_bytes = request.to_request_bytes();
-        stream.write_all(&req_bytes).map_err(|e| NetworkError::WriteError {
-            message: e.to_string(),
-        })?;
+        stream
+            .write_all(&req_bytes)
+            .map_err(|e| NetworkError::WriteError {
+                message: e.to_string(),
+            })?;
 
         // 5. Read the response
         let mut response = read_response(stream)?;
@@ -293,35 +314,40 @@ impl Default for HttpClient {
 fn read_response(stream: &mut TcpStream) -> Result<HttpResponse, NetworkError> {
     let mut header_buf = Vec::new();
     let mut byte = [0u8; 1];
-    
+
     // Read headers byte-by-byte until \r\n\r\n
     loop {
         if stream.read_exact(&mut byte).is_err() {
             return Err(NetworkError::Io("Connection closed unexpectedly".into()));
         }
         header_buf.push(byte[0]);
-        
+
         if header_buf.ends_with(b"\r\n\r\n") {
             break;
         }
-        if header_buf.len() > 1024 * 1024 { // 1MB max header size protection
+        if header_buf.len() > 1024 * 1024 {
+            // 1MB max header size protection
             return Err(NetworkError::Other("Headers too large".into()));
         }
     }
-    
+
     let header_str = String::from_utf8_lossy(&header_buf);
     let mut lines = header_str.split("\r\n");
-    
+
     // Parse status line
-    let status_line = lines.next().ok_or_else(|| NetworkError::Other("Empty response".into()))?;
+    let status_line = lines
+        .next()
+        .ok_or_else(|| NetworkError::Other("Empty response".into()))?;
     let parts: Vec<&str> = status_line.splitn(3, ' ').collect();
     if parts.len() < 2 {
         return Err(NetworkError::Other("Invalid status line".into()));
     }
-    
-    let status_code: u16 = parts[1].parse().map_err(|_| NetworkError::Other("Invalid status code".into()))?;
+
+    let status_code: u16 = parts[1]
+        .parse()
+        .map_err(|_| NetworkError::Other("Invalid status code".into()))?;
     let status_text = parts.get(2).unwrap_or(&"").to_string();
-    
+
     // Parse headers
     let mut headers = Vec::new();
     for line in lines {
@@ -334,13 +360,16 @@ fn read_response(stream: &mut TcpStream) -> Result<HttpResponse, NetworkError> {
             headers.push((key, val));
         }
     }
-    
-    let is_chunked = headers.iter().any(|(k, v)| k.to_lowercase() == "transfer-encoding" && v.to_lowercase().contains("chunked"));
-    
-    let content_length = headers.iter()
+
+    let is_chunked = headers.iter().any(|(k, v)| {
+        k.to_lowercase() == "transfer-encoding" && v.to_lowercase().contains("chunked")
+    });
+
+    let content_length = headers
+        .iter()
         .find(|(k, _)| k.to_lowercase() == "content-length")
         .and_then(|(_, v)| v.parse::<usize>().ok());
-        
+
     let body = if is_chunked {
         read_chunked_body(stream)?
     } else if let Some(len) = content_length {
@@ -351,7 +380,7 @@ fn read_response(stream: &mut TcpStream) -> Result<HttpResponse, NetworkError> {
         let _ = stream.read_to_end(&mut body);
         body
     };
-    
+
     Ok(HttpResponse {
         status_code,
         status_text,
@@ -365,44 +394,54 @@ fn read_response(stream: &mut TcpStream) -> Result<HttpResponse, NetworkError> {
 fn read_chunked_body(stream: &mut TcpStream) -> Result<Vec<u8>, NetworkError> {
     let mut body = Vec::new();
     let mut byte = [0u8; 1];
-    
+
     loop {
         // Read chunk size
         let mut size_str = String::new();
         loop {
-            stream.read_exact(&mut byte).map_err(|_| NetworkError::Io("Failed to read chunk size".into()))?;
+            stream
+                .read_exact(&mut byte)
+                .map_err(|_| NetworkError::Io("Failed to read chunk size".into()))?;
             size_str.push(byte[0] as char);
             if size_str.ends_with("\r\n") {
                 break;
             }
         }
-        
+
         let hex_size = size_str.trim();
         let size = usize::from_str_radix(hex_size, 16)
             .map_err(|_| NetworkError::Other("Invalid chunk size format".into()))?;
-            
+
         if size == 0 {
             // Read the final \r\n
-            stream.read_exact(&mut [0u8; 2]).map_err(|_| NetworkError::Io("Failed to read chunk trailer".into()))?;
+            stream
+                .read_exact(&mut [0u8; 2])
+                .map_err(|_| NetworkError::Io("Failed to read chunk trailer".into()))?;
             break;
         }
-        
+
         // Read chunk data
         let mut chunk = vec![0u8; size];
-        stream.read_exact(&mut chunk).map_err(|_| NetworkError::Io("Failed to read chunk data".into()))?;
+        stream
+            .read_exact(&mut chunk)
+            .map_err(|_| NetworkError::Io("Failed to read chunk data".into()))?;
         body.extend_from_slice(&chunk);
-        
+
         // Read \r\n after chunk data
-        stream.read_exact(&mut [0u8; 2]).map_err(|_| NetworkError::Io("Failed to read chunk newline".into()))?;
+        stream
+            .read_exact(&mut [0u8; 2])
+            .map_err(|_| NetworkError::Io("Failed to read chunk newline".into()))?;
     }
-    
+
     Ok(body)
 }
 
 /// Reads exactly `length` bytes from a TCP stream.
 fn read_exact_body(stream: &mut TcpStream, length: usize) -> Result<Vec<u8>, NetworkError> {
     let mut body = vec![0u8; length];
-    stream.read_exact(&mut body).map_err(|_| NetworkError::Io("Failed to read exact body".into()))?;
+    stream
+        .read_exact(&mut body)
+        .map_err(|_| NetworkError::Io("Failed to read exact body".into()))?;
     Ok(body)
 }
 
@@ -411,7 +450,12 @@ fn resolve_redirect(current_url: &Url, location: &str) -> Result<Url, NetworkErr
     if location.starts_with("http://") || location.starts_with("https://") {
         Url::parse(location)
     } else if location.starts_with('/') {
-        let new_url_str = format!("{}://{}{}", current_url.scheme, current_url.host_port(), location);
+        let new_url_str = format!(
+            "{}://{}{}",
+            current_url.scheme,
+            current_url.host_port(),
+            location
+        );
         Url::parse(&new_url_str)
     } else {
         // Relative redirect not starting with '/'
@@ -421,7 +465,13 @@ fn resolve_redirect(current_url: &Url, location: &str) -> Result<Url, NetworkErr
         } else {
             path_base = "/".to_string();
         }
-        let new_url_str = format!("{}://{}{}{}", current_url.scheme, current_url.host_port(), path_base, location);
+        let new_url_str = format!(
+            "{}://{}{}{}",
+            current_url.scheme,
+            current_url.host_port(),
+            path_base,
+            location
+        );
         Url::parse(&new_url_str)
     }
 }

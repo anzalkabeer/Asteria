@@ -502,7 +502,7 @@ pub fn build_layout_tree<'a>(
             .filter(|child| {
                 if child.box_type == BoxType::InlineNode {
                     // Check if child contains non-whitespace text
-                    let is_empty = child.styled_node.map_or(true, |n| {
+                    let is_empty = child.styled_node.is_none_or(|n| {
                         if let NodeKind::Text { start, end } = dom.get(n.node_id).kind {
                             let text = std::str::from_utf8(&source[start as usize..end as usize])
                                 .unwrap_or("");

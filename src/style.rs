@@ -185,8 +185,8 @@ fn build_styled_node(
                 stylesheet.rules.iter().collect();
 
             for media in &stylesheet.media_rules {
-                let matches_min = media.min_width.map_or(true, |mw| viewport_width >= mw);
-                let matches_max = media.max_width.map_or(true, |mw| viewport_width <= mw);
+                let matches_min = media.min_width.is_none_or(|mw| viewport_width >= mw);
+                let matches_max = media.max_width.is_none_or(|mw| viewport_width <= mw);
                 if matches_min && matches_max {
                     all_rules.extend(media.rules.iter());
                 }
@@ -354,10 +354,9 @@ fn build_styled_node(
 
             // User-Agent default stylesheet: apply tag-specific defaults for un-specified properties
             if let NodeKind::Element { tag_start, tag_end } = &node.kind {
-                let tag_name =
-                    std::str::from_utf8(&source[*tag_start as usize..*tag_end as usize])
-                        .unwrap_or("")
-                        .to_ascii_lowercase();
+                let tag_name = std::str::from_utf8(&source[*tag_start as usize..*tag_end as usize])
+                    .unwrap_or("")
+                    .to_ascii_lowercase();
 
                 if !specified.contains_key("display") {
                     match tag_name.as_str() {
@@ -407,9 +406,7 @@ fn build_styled_node(
                     }
                 }
 
-                if !specified.contains_key("border")
-                    && !specified.contains_key("border-color")
-                {
+                if !specified.contains_key("border") && !specified.contains_key("border-color") {
                     match tag_name.as_str() {
                         "h1" => {
                             computed.border_color = values::Color::rgb(2, 132, 199);
@@ -439,17 +436,13 @@ fn build_styled_node(
                     }
                 }
 
-                if !specified.contains_key("margin")
-                    && !specified.contains_key("margin-top")
-                {
+                if !specified.contains_key("margin") && !specified.contains_key("margin-top") {
                     if tag_name == "body" {
                         computed.margin = values::Edges::uniform(8.0);
                     }
                 }
 
-                if !specified.contains_key("padding")
-                    && !specified.contains_key("padding-top")
-                {
+                if !specified.contains_key("padding") && !specified.contains_key("padding-top") {
                     if tag_name == "h1" || tag_name == "div" {
                         computed.padding = values::Edges::uniform(12.0);
                     }

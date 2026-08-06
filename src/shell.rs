@@ -323,7 +323,10 @@ impl TabManager {
             tab.stylesheet = Some(stylesheet);
             Ok(())
         } else {
-            let page = self.loader.load_resource(&tab.url).map_err(|e| e.to_string())?;
+            let page = self
+                .loader
+                .load_resource(&tab.url)
+                .map_err(|e| e.to_string())?;
 
             let mut tokenizer = crate::tokenizer::Tokenizer::new(&page.html.bytes);
             let tokens = tokenizer.tokenize();

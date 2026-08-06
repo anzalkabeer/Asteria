@@ -101,10 +101,10 @@ impl DnsResolver {
         self.validate_hostname(hostname)?;
 
         // Check cache for a valid entry
-        if let Some(entry) = self.cache.get(hostname) {
-            if !entry.is_expired() {
-                return Ok(entry.clone());
-            }
+        if let Some(entry) = self.cache.get(hostname)
+            && !entry.is_expired()
+        {
+            return Ok(entry.clone());
         }
 
         // Perform a fresh resolution and update the cache
@@ -127,7 +127,11 @@ impl DnsResolver {
     /// Returns cache statistics as a tuple: `(total_entries, expired_entries)`.
     pub fn cache_stats(&self) -> (usize, usize) {
         let total = self.cache.len();
-        let expired = self.cache.values().filter(|entry| entry.is_expired()).count();
+        let expired = self
+            .cache
+            .values()
+            .filter(|entry| entry.is_expired())
+            .count();
         (total, expired)
     }
 
@@ -194,7 +198,9 @@ mod tests {
     #[test]
     fn test_resolve_localhost() {
         let mut resolver = DnsResolver::new();
-        let entry = resolver.resolve("localhost").expect("Should resolve localhost");
+        let entry = resolver
+            .resolve("localhost")
+            .expect("Should resolve localhost");
         assert!(!entry.ip_addresses.is_empty());
         assert_eq!(entry.hostname, "localhost");
     }
@@ -202,8 +208,12 @@ mod tests {
     #[test]
     fn test_cache_hit() {
         let mut resolver = DnsResolver::new();
-        let entry1 = resolver.resolve("localhost").expect("Should resolve localhost");
-        let entry2 = resolver.resolve("localhost").expect("Should resolve localhost");
+        let entry1 = resolver
+            .resolve("localhost")
+            .expect("Should resolve localhost");
+        let entry2 = resolver
+            .resolve("localhost")
+            .expect("Should resolve localhost");
         // Due to extremely fast execution, Instant::now() might be very close,
         // but they should be exactly the same object if from cache.
         // We can verify by checking the exact resolved_at time.
@@ -214,13 +224,17 @@ mod tests {
     fn test_cache_expired() {
         // Create resolver with 0 TTL
         let mut resolver = DnsResolver::with_ttl(Duration::from_secs(0));
-        let entry1 = resolver.resolve("localhost").expect("Should resolve localhost");
-        
+        let entry1 = resolver
+            .resolve("localhost")
+            .expect("Should resolve localhost");
+
         // Slight delay to ensure time progresses
         std::thread::sleep(Duration::from_millis(1));
-        
-        let entry2 = resolver.resolve("localhost").expect("Should resolve localhost");
-        
+
+        let entry2 = resolver
+            .resolve("localhost")
+            .expect("Should resolve localhost");
+
         // Since TTL is 0, the first entry should be expired immediately,
         // causing a fresh resolution and thus a different resolved_at.
         assert_ne!(entry1.resolved_at, entry2.resolved_at);
@@ -243,9 +257,11 @@ mod tests {
     #[test]
     fn test_clear_cache() {
         let mut resolver = DnsResolver::new();
-        resolver.resolve("localhost").expect("Should resolve localhost");
+        resolver
+            .resolve("localhost")
+            .expect("Should resolve localhost");
         assert_eq!(resolver.cache_stats().0, 1);
-        
+
         resolver.clear_cache();
         assert_eq!(resolver.cache_stats().0, 0);
     }
@@ -253,10 +269,12 @@ mod tests {
     #[test]
     fn test_cache_stats() {
         let mut resolver = DnsResolver::with_ttl(Duration::from_secs(0));
-        resolver.resolve("localhost").expect("Should resolve localhost");
-        
+        resolver
+            .resolve("localhost")
+            .expect("Should resolve localhost");
+
         std::thread::sleep(Duration::from_millis(1));
-        
+
         let (total, expired) = resolver.cache_stats();
         assert_eq!(total, 1);
         assert_eq!(expired, 1);
@@ -265,12 +283,16 @@ mod tests {
     #[test]
     fn test_resolve_fresh_bypasses_cache() {
         let mut resolver = DnsResolver::new();
-        let entry1 = resolver.resolve("localhost").expect("Should resolve localhost");
-        
+        let entry1 = resolver
+            .resolve("localhost")
+            .expect("Should resolve localhost");
+
         std::thread::sleep(Duration::from_millis(1));
-        
-        let entry2 = resolver.resolve_fresh("localhost").expect("Should resolve fresh");
-        
+
+        let entry2 = resolver
+            .resolve_fresh("localhost")
+            .expect("Should resolve fresh");
+
         // Even though TTL is 5 min, resolve_fresh bypasses cache
         assert_ne!(entry1.resolved_at, entry2.resolved_at);
     }

@@ -149,11 +149,7 @@ fn render_background(
 
     if bg_color != Color::TRANSPARENT {
         let rect = layout_box.dimensions.border_box();
-        let link_url = find_link_url(
-            dom,
-            source,
-            layout_box.styled_node.map(|s| s.node_id),
-        );
+        let link_url = find_link_url(dom, source, layout_box.styled_node.map(|s| s.node_id));
         display_list.push(DisplayCommand::SolidColor {
             color: bg_color,
             rect,
@@ -179,11 +175,7 @@ fn render_borders(
 
     if border_color != Color::TRANSPARENT && has_border {
         let rect = layout_box.dimensions.border_box();
-        let link_url = find_link_url(
-            dom,
-            source,
-            layout_box.styled_node.map(|s| s.node_id),
-        );
+        let link_url = find_link_url(dom, source, layout_box.styled_node.map(|s| s.node_id));
         display_list.push(DisplayCommand::Border {
             color: border_color,
             rect,

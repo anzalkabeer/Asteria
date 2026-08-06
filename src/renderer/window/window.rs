@@ -106,14 +106,12 @@ impl AsteriaWindow {
             .unwrap_or(b"");
 
         let stylesheet = Stylesheet::parse(css_bytes);
-        let styled = crate::style::resolve_styles_with_viewport(
-            &dom,
-            &stylesheet,
-            html_bytes,
-            viewport_w,
-        );
+        let styled =
+            crate::style::resolve_styles_with_viewport(&dom, &stylesheet, html_bytes, viewport_w);
 
-        if let Some(layout) = crate::layout::layout_document(&styled, &dom, html_bytes, viewport_w, viewport_h) {
+        if let Some(layout) =
+            crate::layout::layout_document(&styled, &dom, html_bytes, viewport_w, viewport_h)
+        {
             let display_list = crate::paint::build_display_list(&layout, &dom, html_bytes);
             return build_scene_graph(&display_list, 256.0);
         }

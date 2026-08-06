@@ -10,7 +10,6 @@
 /// - Zero-copy operations where possible
 /// - Clean, reusable abstractions
 /// - Fault-tolerant connection handling
-
 use std::collections::HashMap;
 use std::fmt;
 use std::io;
@@ -108,10 +107,7 @@ impl TcpConnection {
     /// an error occurs during the peek, the connection is considered dead.
     pub fn is_alive(&self) -> bool {
         let mut buf = [0; 0];
-        match self.stream.peek(&mut buf) {
-            Ok(_) => true,
-            Err(_) => false,
-        }
+        self.stream.peek(&mut buf).is_ok()
     }
 }
 
@@ -127,6 +123,12 @@ pub struct ConnectionPool {
     connect_timeout: Duration,
     /// Timeout for reading data from established connections.
     read_timeout: Duration,
+}
+
+impl Default for ConnectionPool {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl ConnectionPool {
@@ -150,31 +152,31 @@ impl ConnectionPool {
     /// If a connection exists but is dead, it is replaced.
     pub fn connect(&mut self, addr: SocketAddr) -> Result<&mut TcpStream, NetworkError> {
         let key = addr.to_string();
-        
-        if let Some(conn) = self.connections.get(&key) {
-            if conn.is_alive() {
-                return Ok(&mut self.connections.get_mut(&key).unwrap().stream);
-            }
+
+        if let Some(conn) = self.connections.get(&key)
+            && conn.is_alive()
+        {
+            return Ok(&mut self.connections.get_mut(&key).unwrap().stream);
         }
-        
+
         let stream = TcpStream::connect_timeout(&addr, self.connect_timeout).map_err(|_| {
             NetworkError::ConnectionTimeout {
                 addr: key.clone(),
                 timeout: self.connect_timeout,
             }
         })?;
-        
+
         stream.set_read_timeout(Some(self.read_timeout))?;
         stream.set_write_timeout(Some(self.connect_timeout))?;
         stream.set_nodelay(true)?;
-        
+
         let conn = TcpConnection {
             remote_addr: addr,
             stream,
             connected_at: Instant::now(),
             key: key.clone(),
         };
-        
+
         self.connections.insert(key.clone(), conn);
         Ok(&mut self.connections.get_mut(&key).unwrap().stream)
     }
@@ -188,31 +190,31 @@ impl ConnectionPool {
         addr: SocketAddr,
     ) -> Result<&mut TcpStream, NetworkError> {
         let key = format!("{}:{}", host, port);
-        
-        if let Some(conn) = self.connections.get(&key) {
-            if conn.is_alive() {
-                return Ok(&mut self.connections.get_mut(&key).unwrap().stream);
-            }
+
+        if let Some(conn) = self.connections.get(&key)
+            && conn.is_alive()
+        {
+            return Ok(&mut self.connections.get_mut(&key).unwrap().stream);
         }
-        
+
         let stream = TcpStream::connect_timeout(&addr, self.connect_timeout).map_err(|_| {
             NetworkError::ConnectionTimeout {
                 addr: key.clone(),
                 timeout: self.connect_timeout,
             }
         })?;
-        
+
         stream.set_read_timeout(Some(self.read_timeout))?;
         stream.set_write_timeout(Some(self.connect_timeout))?;
         stream.set_nodelay(true)?;
-        
+
         let conn = TcpConnection {
             remote_addr: addr,
             stream,
             connected_at: Instant::now(),
             key: key.clone(),
         };
-        
+
         self.connections.insert(key.clone(), conn);
         Ok(&mut self.connections.get_mut(&key).unwrap().stream)
     }
@@ -259,7 +261,7 @@ mod tests {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let port = listener.local_addr().unwrap().port();
         let addr = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(127, 0, 0, 1), port));
-        
+
         thread::spawn(move || {
             let _ = listener.accept();
         });
@@ -275,14 +277,14 @@ mod tests {
         let mut pool = ConnectionPool::new();
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let addr = listener.local_addr().unwrap();
-        
+
         thread::spawn(move || {
             let _ = listener.accept();
         });
 
         pool.connect(addr).unwrap();
         assert_eq!(pool.pool_size(), 1);
-        
+
         pool.disconnect(&addr.to_string());
         assert_eq!(pool.pool_size(), 0);
     }
@@ -290,10 +292,10 @@ mod tests {
     #[test]
     fn test_pool_close_all() {
         let mut pool = ConnectionPool::new();
-        
+
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let addr = listener.local_addr().unwrap();
-        
+
         thread::spawn(move || {
             let _ = listener.accept();
         });
@@ -306,10 +308,10 @@ mod tests {
     #[test]
     fn test_pool_prune() {
         let mut pool = ConnectionPool::new();
-        
+
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let addr = listener.local_addr().unwrap();
-        
+
         let handle = thread::spawn(move || {
             let (stream, _) = listener.accept().unwrap();
             drop(stream);
@@ -317,10 +319,10 @@ mod tests {
 
         pool.connect(addr).unwrap();
         assert_eq!(pool.pool_size(), 1);
-        
+
         handle.join().unwrap();
         thread::sleep(Duration::from_millis(50));
-        
+
         let _ = pool.prune_dead();
     }
 
@@ -341,9 +343,15 @@ mod tests {
     #[test]
     fn test_network_error_display() {
         let err = NetworkError::DnsError("example.com not found".to_string());
-        assert_eq!(format!("{}", err), "DNS resolution failed: example.com not found");
-        
-        let err2 = NetworkError::HttpError { status: 404, message: "Not Found".to_string() };
+        assert_eq!(
+            format!("{}", err),
+            "DNS resolution failed: example.com not found"
+        );
+
+        let err2 = NetworkError::HttpError {
+            status: 404,
+            message: "Not Found".to_string(),
+        };
         assert_eq!(format!("{}", err2), "HTTP Error 404: Not Found");
     }
 
@@ -356,7 +364,7 @@ mod tests {
             _ => panic!("Expected IoError variant"),
         }
     }
-    
+
     #[test]
     fn test_connection_pool_is_send() {
         fn assert_send<T: Send>() {}

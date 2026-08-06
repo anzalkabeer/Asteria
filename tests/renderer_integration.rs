@@ -246,7 +246,6 @@ fn test_build_scene_graph_from_display_list() {
             y: 0.0,
             width: 800.0,
             height: 600.0,
-            
         },
         link_url: None,
     });
