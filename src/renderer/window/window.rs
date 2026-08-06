@@ -20,10 +20,14 @@
 use std::sync::Arc;
 use winit::{
     event::{ElementState, Event, KeyEvent, MouseButton, MouseScrollDelta, WindowEvent},
-    event_loop::{ControlFlow, EventLoop},
+    event_loop::{ControlFlow, EventLoop, EventLoopBuilder, EventLoopProxy},
     keyboard::{Key, ModifiersState, NamedKey},
     window::{Window, WindowBuilder},
 };
+
+pub enum AsteriaUserEvent {
+    SceneUpdated(SceneGraph),
+}
 
 use crate::css_parser::Stylesheet;
 use crate::parser::Parser;
@@ -54,12 +58,12 @@ pub struct AsteriaWindow {
 }
 
 impl AsteriaWindow {
-    pub fn new(event_loop: &EventLoop<()>, width: u32, height: u32) -> Self {
+    pub fn new(event_loop: &EventLoop<AsteriaUserEvent>, width: u32, height: u32) -> Self {
         Self::with_tab_manager(event_loop, width, height, TabManager::new())
     }
 
     pub fn with_tab_manager(
-        event_loop: &EventLoop<()>,
+        event_loop: &EventLoop<AsteriaUserEvent>,
         width: u32,
         height: u32,
         tab_manager: TabManager,
@@ -80,7 +84,10 @@ impl AsteriaWindow {
         }
     }
 
-    pub fn build_active_scene(&mut self) -> SceneGraph {
+    pub fn build_active_scene(
+        &mut self,
+        proxy: Option<winit::event_loop::EventLoopProxy<AsteriaUserEvent>>,
+    ) -> SceneGraph {
         let size = self.window.inner_size();
         let viewport_w = size.width as f32;
         let viewport_h = size.height as f32;
@@ -94,6 +101,17 @@ impl AsteriaWindow {
             .map(|r| r.html.bytes.as_slice())
             .unwrap_or(sample_html_bytes);
 
+        if let Some(p) = proxy {
+            let _ = self.scheduler.schedule(crate::scheduler::PipelineStage::ParseHtml {
+                url: active_tab.url.clone(),
+                bytes: html_bytes.to_vec(),
+                proxy: Some(p),
+            });
+            // Return an empty scene immediately; the proxy will deliver the real scene
+            return SceneGraph::new();
+        }
+
+        // Fallback: synchronous build
         let mut processor = crate::streaming_parser::StreamingHtmlProcessor::new();
         let _ = processor.receive_network_chunk(html_bytes, true);
         let dom = processor.finish();
@@ -194,13 +212,16 @@ fn max_scroll_for_scene(scene: &SceneGraph, viewport_height: f32) -> f32 {
 // ─── Main Window Loop ─────────────────────────────────────────────
 
 pub fn run_window_loop(initial_scene: SceneGraph, tab_manager: TabManager) {
-    let event_loop = EventLoop::new().expect("Failed to create EventLoop");
+    let event_loop = EventLoopBuilder::<AsteriaUserEvent>::with_user_event()
+        .build()
+        .expect("Failed to create EventLoop");
     let mut asteria_window = AsteriaWindow::with_tab_manager(&event_loop, 800, 600, tab_manager);
 
     let mut backend = pollster::block_on(WgpuBackend::new(asteria_window.window.clone()));
 
+    let proxy = event_loop.create_proxy();
     let mut scene = if initial_scene.nodes.is_empty() {
-        asteria_window.build_active_scene()
+        asteria_window.build_active_scene(Some(proxy.clone()))
     } else {
         initial_scene
     };
@@ -307,7 +328,7 @@ pub fn run_window_loop(initial_scene: SceneGraph, tab_manager: TabManager) {
                         }
 
                         if handled {
-                            scene = asteria_window.build_active_scene();
+                            scene = asteria_window.build_active_scene(Some(proxy.clone()));
                             current_scroll_y = 0.0;
                             target_scroll_y = 0.0;
                             needs_redraw = true;
@@ -348,9 +369,11 @@ pub fn run_window_loop(initial_scene: SceneGraph, tab_manager: TabManager) {
                                 if let Err(e) = asteria_window.tab_manager.navigate(url) {
                                     eprintln!("Navigation failed: {}", e);
                                 } else {
-                                    scene = asteria_window.build_active_scene();
+                                    scene = asteria_window.build_active_scene(Some(proxy.clone()));
                                     current_scroll_y = 0.0;
                                     target_scroll_y = 0.0;
+                                    needs_redraw = true;
+                                    asteria_window.window.request_redraw();
                                 }
                             }
                             needs_redraw = true;
@@ -469,6 +492,11 @@ pub fn run_window_loop(initial_scene: SceneGraph, tab_manager: TabManager) {
                     needs_redraw = true;
                     asteria_window.window.request_redraw();
                 }
+            }
+            Event::UserEvent(AsteriaUserEvent::SceneUpdated(new_scene)) => {
+                scene = new_scene;
+                needs_redraw = true;
+                asteria_window.window.request_redraw();
             }
             _ => {}
         }

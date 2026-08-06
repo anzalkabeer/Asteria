@@ -66,6 +66,7 @@ fn main() {
         .schedule(PipelineStage::ParseHtml {
             url: active_tab.url.clone(),
             bytes: bytes.to_vec(),
+            proxy: None,
         })
         .ok();
 
