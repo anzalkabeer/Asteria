@@ -66,6 +66,12 @@ pub struct Parser {
     open_elements: Vec<NodeId>,
 }
 
+impl Default for Parser {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Parser {
     pub fn new() -> Self {
         // Assume Document root (NodeId(0)) is always the starting point
@@ -76,12 +82,14 @@ impl Parser {
 
     pub fn push_tokens(&mut self, dom: &mut Dom, tokens: &[Token], source: &[u8]) -> Vec<NodeId> {
         let mut dirty = Vec::new();
-        
+
         for token in tokens {
             match token.kind {
                 TokenKind::StartTag => self.handle_start_tag(dom, token, source, &mut dirty),
                 TokenKind::EndTag => self.handle_end_tag(dom, token, source, &mut dirty),
-                TokenKind::SelfClosingTag => self.handle_self_closing_tag(dom, token, source, &mut dirty),
+                TokenKind::SelfClosingTag => {
+                    self.handle_self_closing_tag(dom, token, source, &mut dirty)
+                }
                 TokenKind::Text => self.handle_text(dom, token, &mut dirty),
                 TokenKind::Comment => self.handle_comment(dom, token, &mut dirty),
                 TokenKind::Doctype => {}
@@ -94,7 +102,13 @@ impl Parser {
 
     // ─── Token Handlers ──────────────────────────────────────────
 
-    fn handle_start_tag(&mut self, dom: &mut Dom, token: &Token, source: &[u8], dirty: &mut Vec<NodeId>) {
+    fn handle_start_tag(
+        &mut self,
+        dom: &mut Dom,
+        token: &Token,
+        source: &[u8],
+        dirty: &mut Vec<NodeId>,
+    ) {
         let parent = self.current_parent();
 
         let node_id = dom.add_element(parent, token.start, token.end, &token.attributes);
@@ -105,12 +119,18 @@ impl Parser {
             // Void elements complete immediately, mark them dirty
             dirty.push(node_id);
         }
-        
+
         // Also mark parent as dirty since its children changed
         dirty.push(parent);
     }
 
-    fn handle_end_tag(&mut self, dom: &mut Dom, token: &Token, source: &[u8], dirty: &mut Vec<NodeId>) {
+    fn handle_end_tag(
+        &mut self,
+        dom: &mut Dom,
+        token: &Token,
+        source: &[u8],
+        dirty: &mut Vec<NodeId>,
+    ) {
         let end_tag_name = &source[token.start as usize..token.end as usize];
 
         let mut match_index = None;
@@ -133,10 +153,15 @@ impl Parser {
         }
     }
 
-    fn handle_self_closing_tag(&mut self, dom: &mut Dom, token: &Token, source: &[u8], dirty: &mut Vec<NodeId>) {
+    fn handle_self_closing_tag(
+        &mut self,
+        dom: &mut Dom,
+        token: &Token,
+        _source: &[u8],
+        dirty: &mut Vec<NodeId>,
+    ) {
         let parent = self.current_parent();
-        let node_id = dom
-            .add_element(parent, token.start, token.end, &token.attributes);
+        let node_id = dom.add_element(parent, token.start, token.end, &token.attributes);
         dirty.push(node_id);
         dirty.push(parent);
     }

@@ -181,13 +181,8 @@ impl TcpConnection {
     /// zero-byte peek. If the remote end has closed the connection, or if
     /// an error occurs during the peek, the connection is considered dead.
     pub fn is_alive(&self) -> bool {
-        match &self.stream {
-            Stream::Plain(s) => {
-                let mut buf = [0; 0];
-                s.peek(&mut buf).is_ok()
-            }
-            Stream::Tls(_) => true,
-        }
+        let mut buf = [0; 0];
+        self.stream.peek(&mut buf).is_ok()
     }
 }
 

@@ -8,12 +8,10 @@ use asteria::devtools::inspector::AofInspector;
 use asteria::devtools::metrics::{GPU_VRAM_USED, MEMORY_ALLOCATED, reset_frame_metrics};
 use asteria::devtools::snapshot::EngineSnapshot;
 use asteria::devtools::trace::{TraceEventKind, record_event};
-use asteria::parser::Parser;
 use asteria::profiler::{EngineProfiler, EngineStage};
 use asteria::scheduler::{PipelineStage, ThreadedScheduler};
 use asteria::shell::{ShellEvent, TabManager};
 use asteria::style::resolve_styles;
-use asteria::tokenizer::Tokenizer;
 
 fn main() {
     let args: Vec<String> = env::args().collect();
@@ -85,10 +83,7 @@ fn main() {
         duration_ms: parse_duration.as_secs_f64() * 1000.0,
     });
 
-    println!(
-        "── HTML DOM Tree ({} nodes) ─────\n",
-        dom.nodes.len()
-    );
+    println!("── HTML DOM Tree ({} nodes) ─────\n", dom.nodes.len());
     dom.print_tree(bytes);
 
     // Verify async worker completed concurrently

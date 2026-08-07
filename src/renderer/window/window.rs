@@ -20,7 +20,7 @@
 use std::sync::Arc;
 use winit::{
     event::{ElementState, Event, KeyEvent, MouseButton, MouseScrollDelta, WindowEvent},
-    event_loop::{ControlFlow, EventLoop, EventLoopBuilder, EventLoopProxy},
+    event_loop::{ControlFlow, EventLoop, EventLoopBuilder},
     keyboard::{Key, ModifiersState, NamedKey},
     window::{Window, WindowBuilder},
 };
@@ -30,7 +30,6 @@ pub enum AsteriaUserEvent {
 }
 
 use crate::css_parser::Stylesheet;
-use crate::parser::Parser;
 use crate::renderer::backend::wgpu_backend::WgpuBackend;
 use crate::renderer::commands::batch_builder::BatchBuilder;
 use crate::renderer::commands::command_builder::{CommandBuilder, RenderCommand};
@@ -42,7 +41,6 @@ use crate::renderer::scheduler::batching::BatchPlanner;
 use crate::scene::{NodeState, SceneGraph, SceneNodeId, build_scene_graph};
 use crate::scheduler::ThreadedScheduler;
 use crate::shell::{ShellEvent, TabManager};
-use crate::tokenizer::Tokenizer;
 
 // ─── Pass indices in the RenderGraph ──────────────────────────────
 // These constants define the Z-order of GPU passes:
@@ -102,11 +100,13 @@ impl AsteriaWindow {
             .unwrap_or(sample_html_bytes);
 
         if let Some(p) = proxy {
-            let _ = self.scheduler.schedule(crate::scheduler::PipelineStage::ParseHtml {
-                url: active_tab.url.clone(),
-                bytes: html_bytes.to_vec(),
-                proxy: Some(p),
-            });
+            let _ = self
+                .scheduler
+                .schedule(crate::scheduler::PipelineStage::ParseHtml {
+                    url: active_tab.url.clone(),
+                    bytes: html_bytes.to_vec(),
+                    proxy: Some(p),
+                });
             // Return an empty scene immediately; the proxy will deliver the real scene
             return SceneGraph::new();
         }

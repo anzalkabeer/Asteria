@@ -114,7 +114,9 @@ pub enum PipelineStage {
     ParseHtml {
         url: String,
         bytes: Vec<u8>,
-        proxy: Option<winit::event_loop::EventLoopProxy<crate::renderer::window::window::AsteriaUserEvent>>,
+        proxy: Option<
+            winit::event_loop::EventLoopProxy<crate::renderer::window::window::AsteriaUserEvent>,
+        >,
     },
     /// Tokenize and parse CSS bytes into a Stylesheet
     ParseCss { url: String, bytes: Vec<u8> },
@@ -307,10 +309,14 @@ fn execute_stage(stage: PipelineStage) -> Result<TaskResult, String> {
                 let sample_css_bytes = b"body { background-color: #1e1e2e; color: #cdd6f4; margin: 0; } h1 { color: #89b4fa; font-size: 24px; margin: 10px; } p { color: #a6adc8; font-size: 16px; margin: 5px; } div { background-color: #313244; padding: 10px; }";
                 let stylesheet = crate::css_parser::Stylesheet::parse(sample_css_bytes);
                 let styled = crate::style::resolve_styles(&dom, &stylesheet, &bytes);
-                if let Some(layout_tree) = crate::layout::layout_document(&styled, &dom, &bytes, 800.0, 600.0) {
+                if let Some(layout_tree) =
+                    crate::layout::layout_document(&styled, &dom, &bytes, 800.0, 600.0)
+                {
                     let display_list = crate::paint::build_display_list(&layout_tree, &dom, &bytes);
                     let scene = crate::scene::build_scene_graph(&display_list, 256.0);
-                    let _ = p.send_event(crate::renderer::window::window::AsteriaUserEvent::SceneUpdated(scene));
+                    let _ = p.send_event(
+                        crate::renderer::window::window::AsteriaUserEvent::SceneUpdated(scene),
+                    );
                 }
             }
 

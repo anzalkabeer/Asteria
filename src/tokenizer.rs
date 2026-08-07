@@ -48,6 +48,13 @@ pub struct Tokenizer {
     current_attrs: Vec<Attribute>,
 }
 
+impl Default for Tokenizer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[allow(unused_variables)]
 impl Tokenizer {
     pub fn new() -> Self {
         Tokenizer {
@@ -97,8 +104,12 @@ impl Tokenizer {
                 State::AttributeName => self.handle_attribute_name(input, byte),
                 State::AfterAttributeName => self.handle_after_attribute_name(input, byte),
                 State::BeforeAttributeValue => self.handle_before_attribute_value(input, byte),
-                State::AttributeValueDoubleQuoted => self.handle_attr_value_double_quoted(input, byte),
-                State::AttributeValueSingleQuoted => self.handle_attr_value_single_quoted(input, byte),
+                State::AttributeValueDoubleQuoted => {
+                    self.handle_attr_value_double_quoted(input, byte)
+                }
+                State::AttributeValueSingleQuoted => {
+                    self.handle_attr_value_single_quoted(input, byte)
+                }
                 State::AttributeValueUnquoted => self.handle_attr_value_unquoted(input, byte),
                 State::AfterAttributeValue => self.handle_after_attribute_value(input, byte),
                 State::Comment => self.handle_comment(input, byte),
