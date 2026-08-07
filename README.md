@@ -1,126 +1,272 @@
-# Asteria Rendering Engine 🌠
+<div align="center">
 
-Asteria is a modular, high-performance web rendering engine written from scratch in Rust.
+# Asteria
 
-Most modern software sits on top of massive abstraction towers. Web browsers in particular are among the most complex engineering feats on the planet—so much so that building one from scratch is often considered crazy. We built Asteria to take the cover off the black box: parsing raw bytes of HTML and CSS, resolving cascade rules and selectors, computing 2D geometry layout boxes, generating display lists, and rendering hardware-accelerated GPU graphics—all using a hand-crafted core engine.
+**A browser engine built from scratch in Rust.**
+
+<!-- If you have a logo or banner, place it here -->
+<!-- ![Asteria Banner](assets/banner.png) -->
+
+[![Rust CI](https://github.com/anzalkabeer/Asteria/actions/workflows/ci.yml/badge.svg)](https://github.com/anzalkabeer/Asteria/actions/workflows/ci.yml)
+![Rust](https://img.shields.io/badge/Rust-2024-b7410e?logo=rust&logoColor=white)
+![License](https://img.shields.io/badge/license-MIT-blue)
+![Status](https://img.shields.io/badge/status-active_development-brightgreen)
+
+</div>
 
 ---
 
-## 💡 The Philosophy
+<!-- 🎬 DEMO GIF — This is the single most important visual on this page. -->
+<!-- It should show ~10–20 seconds of: launching Asteria, a page loading,    -->
+<!-- scrolling, images rendering, flexbox layouts, window resizing, and       -->
+<!-- smooth GPU-rendered frames. Record once the browser is visually mature.  -->
 
-1. **Custom Web Core**: No third-party web crates or browser engines. Everything from the HTML state-machine tokenizer and DOM arena to CSS selector matching, layout formatting contexts, and display list paint generation is hand-crafted in Rust.
-2. **Arena-Allocated DOM**: Instead of a maze of heap pointers (`Box`, `Rc`, `RefCell`), all DOM nodes live in a single `Vec<Node>`. Parent-child relationships use lightweight `NodeId(u32)` handles for cache locality and memory safety without reference-counting overhead.
-3. **Zero-Copy Tokenization**: HTML and CSS tokenizers store start/end byte offset pairs into the original input buffer rather than copying text strings during parsing.
-4. **Clean Pipeline Separation**: The DOM stays completely immutable after parsing. Style resolution builds a parallel `StyledNode` tree, which feeds into a distinct `LayoutBox` geometry tree, display list generator, and `SceneGraph`.
-5. **Hardware Acceleration**: 2D layout boxes and glyphs are batched and rendered using `wgpu` hardware pipelines and native `winit` windowing.
+<div align="center">
+
+> 🎬 **[Demo GIF coming soon]**
+>
+> _A short recording showing Asteria loading a real web page, rendering styled content on the GPU, and resizing the window — all in real time._
+
+</div>
 
 ---
 
-## 🏗️ Architecture & Pipeline
+## What is Asteria?
 
-Asteria transforms web content through a multi-stage pipeline:
+Asteria is a web browser engine being built entirely from scratch.
+
+It reads web pages, understands HTML and CSS, figures out where every element belongs on the screen, and paints the result using modern GPU graphics — all without borrowing code from Chrome, Firefox, or any existing browser engine.
+
+Every part of the pipeline — the HTML parser, the CSS engine, the layout solver, the renderer — is hand-written in Rust with no third-party web engine crates. The networking layer, memory allocators, task scheduler, and browser shell are all custom-built too.
+
+Asteria isn't a wrapper around someone else's work. It's the work itself.
+
+---
+
+## Why does this exist?
+
+Web browsers are among the most complex pieces of software ever built. So complex that only a handful of engines power every browser on the planet.
+
+We wanted to understand how it all works — not by reading about it, but by building it. From the first byte of HTML to the last pixel on the screen.
+
+Asteria started as a deep-dive into browser internals. It's growing into something that can actually render real web content with GPU acceleration, tabbed browsing, and live network fetching.
+
+---
+
+## What can Asteria do today?
+
+### 🌐 Web Engine
+
+| Feature        | Status | What it does                                                           |
+| -------------- | ------ | ---------------------------------------------------------------------- |
+| HTML Parsing   | ✅     | Reads raw HTML and builds a structured document tree                   |
+| CSS Parsing    | ✅     | Understands selectors, properties, media queries, and specificity      |
+| Style Cascade  | ✅     | Applies CSS rules with proper inheritance, inline styles, and `@media` |
+| DOM            | ✅     | Represents the page structure in a fast, memory-efficient arena        |
+| Block Layout   | ✅     | Positions block-level elements (headings, paragraphs, divs)            |
+| Inline Layout  | ✅     | Flows text and inline elements with line wrapping                      |
+| Flexbox        | ✅     | CSS `display: flex` row layouts with card wrapping                     |
+| GPU Rendering  | ✅     | Hardware-accelerated painting via wgpu with shader-based batching      |
+| Image Decoding | ✅     | Detects and decodes image formats for display                          |
+| Text Rendering | ✅     | GPU-rendered glyphs with proper font metrics                           |
+
+### 🖥️ Browser
+
+| Feature             | Status | What it does                                               |
+| ------------------- | ------ | ---------------------------------------------------------- |
+| Tabbed Browsing     | ✅     | Multiple tabs with keyboard shortcuts (`Ctrl+T`, `Ctrl+W`) |
+| Navigation History  | ✅     | Back, forward, and reload per tab                          |
+| Window Resizing     | ✅     | Live content reflow when you resize the window             |
+| Keyboard Navigation | ✅     | Full shortcut support (`Alt+←`, `Alt+→`, `Ctrl+R`, `F5`)   |
+| Scrolling           | ✅     | Scroll through content that exceeds the viewport           |
+
+### ⚡ Networking
+
+| Feature          | Status | What it does                                                       |
+| ---------------- | ------ | ------------------------------------------------------------------ |
+| HTTP/HTTPS       | ✅     | Custom HTTP/1.1 client with TLS, redirects, and connection pooling |
+| DNS Resolution   | ✅     | Built-in resolver with TTL caching                                 |
+| Streaming HTML   | ✅     | Pages start rendering before the full download completes           |
+| Resource Loading | ✅     | Discovers and fetches stylesheets and linked resources             |
+
+### 🔧 Internals
+
+| Feature                  | Status | What it does                                                   |
+| ------------------------ | ------ | -------------------------------------------------------------- |
+| Multi-threaded Scheduler | ✅     | Worker pool for parallel tasks with panic isolation            |
+| String Interner          | ✅     | Efficient string deduplication for fast comparisons            |
+| Frame Arena Allocator    | ✅     | Zero-overhead per-frame memory management                      |
+| LRU Cache                | ✅     | In-memory resource caching to avoid redundant loads            |
+| Engine Profiler          | ✅     | Microsecond-precision timing for every pipeline stage          |
+| Devtools & Tracing       | ✅     | Chrome Trace JSON export, memory inspector, energy diagnostics |
+
+### 🚧 Coming Next
+
+| Feature            | Status | What it will do                                    |
+| ------------------ | ------ | -------------------------------------------------- |
+| `!important` rules | 🔜     | Override specificity for priority CSS declarations |
+| CSS Animations     | 🔜     | `@keyframes` and animated transitions              |
+| Advanced Flexbox   | 🔜     | Column layouts, wrapping, and alignment options    |
+| `@import` support  | 🔜     | External stylesheet inclusion                      |
+| JavaScript Engine  | 📋     | Script execution and DOM manipulation              |
+
+---
+
+## Showcase
+
+<!-- Replace these placeholders with real screenshots as Asteria matures.     -->
+<!-- Name files descriptively and place them in an assets/ or docs/ folder.   -->
+
+> 📸 **[Screenshots coming soon]**
+
+Screenshots will be added here showing:
+
+| Screenshot             | Description                                                            |
+| ---------------------- | ---------------------------------------------------------------------- |
+| _Blog article layout_  | A styled page with headers, paragraphs, callouts, and a navigation bar |
+| _Flexbox card gallery_ | Cards arranged in a horizontal flex row with images and descriptions   |
+| _Window resize reflow_ | Content reflowing live as the window changes size                      |
+| _GPU rendering output_ | Hardware-accelerated frames with text, colors, and borders             |
+| _Tabbed browsing_      | Multiple tabs open with navigation controls                            |
+
+<!-- Example format once screenshots are available:
+<div align="center">
+<img src="docs/screenshots/blog_layout.png" width="720" alt="Blog article rendered by Asteria" />
+<p><em>A blog article with styled headings, callout boxes, and a navigation bar — rendered entirely by Asteria's GPU pipeline.</em></p>
+</div>
+-->
+
+---
+
+## How Asteria works
+
+At a high level, Asteria transforms a web page into pixels through a series of steps:
 
 ```
-HTML Bytes ──► Tokenizer ──► Parser ──► DOM Tree (Arena allocated)
-                                             │
-CSS Bytes  ──► Tokenizer ──► Parser ──► Stylesheet & @media Rules
-                                             │
-                         DOM + Stylesheet ──► Style & Cascade Engine (Combinators, @media viewport)
-                                                     │
-                                       Styled DOM ──► Layout Engine (2D Rects & Box Model)
-                                                     │
-                                      Layout Tree ──► Display List Paint Generator
-                                                     │
-                                     Display List ──► SceneGraph & Batch Planner
-                                                     │
-                                      Scene Graph ──► Hardware GPU Renderer (wgpu & winit loop)
+     📄 HTML source
+          │
+          ▼
+    ┌─────────────┐
+    │   Parsing    │  Read the HTML and build a tree of elements
+    └──────┬──────┘
+           │
+           ▼
+    ┌─────────────┐
+    │  Structure   │  Organize elements into a document (the DOM)
+    └──────┬──────┘
+           │
+           ▼
+    ┌─────────────┐
+    │   Styling    │  Apply CSS rules — colors, sizes, spacing
+    └──────┬──────┘
+           │
+           ▼
+    ┌─────────────┐
+    │   Layout     │  Calculate where every element goes on the screen
+    └──────┬──────┘
+           │
+           ▼
+    ┌─────────────┐
+    │  Painting    │  Generate a list of drawing instructions
+    └──────┬──────┘
+           │
+           ▼
+    ┌─────────────┐
+    │     GPU      │  Send everything to the graphics card for rendering
+    └─────────────┘
 ```
 
-### Modular System Split
+Each stage is a separate module. The output of one stage feeds into the next. The page never gets "partially processed" — it flows cleanly from raw text to rendered pixels.
 
-The project is developed across two distinct engineering tracks:
+**Want to go deeper?** The architecture documentation covers each stage in detail:
 
-- **Engine Core & Runtime** (_Anzal Kabeer_): HTML tokenizer & parser, DOM tree, CSS tokenizer/parser, style resolution, block/inline layout algorithms, paint display list generator, and `wgpu` GPU rendering pipeline.
-- **Architecture & Infrastructure** (_Keshav Ghai_): Multi-threaded task scheduler, resource loader & cache, string interner, frame arena memory model, browser shell & multi-tab manager, engine profiler, devtools, and windowing integration.
-
----
-
-## 🚀 Current Progress
-
-Here is where Asteria stands:
-
-- **HTML Parser & DOM Arena**: Zero-copy state-machine tokenizer and parser constructing an arena-allocated DOM with visualization tooling.
-- **Advanced CSS Engine & Selectors**: Full tokenizer and stylesheet parser supporting tag, class, ID, universal, compound, descendant, child (`>`), next sibling (`+`), subsequent sibling (`~`), pseudo-classes (`:first-child`, `:last-child`, `:hover`), and `@media` queries (`min-width`, `max-width`). Implements specificity scoring `(ID, Class, Tag)`, property inheritance (`color`, `font-size`), shorthand expansion (`margin`, `padding`), inline `style=""` precedence, typed `ComputedStyle`, and live `@media` viewport evaluation.
-- **2D Layout Engine**: Geometry solver featuring Block Formatting Contexts (auto-width expansion, margin centering), Inline Formatting Contexts (character metrics & line wrapping), and anonymous block box generation for mixed children.
-- **Paint & Display List Engine**: `paint.rs` flat display list builder (`SolidColor`, `Border`, `Text`, `Image`) ordered by CSS paint hierarchy and z-index.
-- **GPU Renderer & Native Windowing**: Hardware-accelerated `wgpu` rendering backend, WGSL shaders, vertex quad batching, pass scheduler (`RectPass`, `TextPass`), and `winit` native OS window event loop (`AsteriaWindow`).
-- **Interactive Browser Shell**: `TabManager` (`shell.rs`) managing multi-tab operations, per-tab `NavigationHistory` back/forward/reload stacks, `ShellEvent` dispatcher, interactive keyboard navigation (`Ctrl+T`, `Ctrl+W`, `Alt+Left`, `Alt+Right`, `Ctrl+R`, `F5`), and dynamic content reflow on window resize.
-- **Multi-Threaded Scheduler**: Multi-threaded worker thread pool (`scheduler.rs`) using `std::thread` and `std::sync::mpsc` channels with panic isolation.
-- **Resource Loader & Cache**: Resource management system (`loader.rs`) with in-memory caching, discovering `<style>` blocks and external `<link rel="stylesheet">` files with path resolution.
-- **String Interner**: High-performance string interner (`interner.rs`) using `Rc<str>` for 4-byte `Symbol(u32)` handles, pre-seeded with 67 standard HTML tags, attributes, and CSS properties.
-- **Engine Profiler & Devtools**: `EngineProfiler` (`profiler.rs`) with RAII `StageGuard` microsecond timing per pipeline stage, Asteria Observability Framework (AOF) with Chrome Trace JSON exporter, memory inspector, and energy impact diagnostics.
+> 📂 **[Architecture docs coming soon — will live in `/docs`]**
+>
+> Planned documentation:
+>
+> - Architecture overview
+> - Rendering pipeline deep-dive
+> - CSS engine & cascade
+> - DOM & arena model
+> - GPU renderer & shader pipeline
+> - Networking stack
+> - Project roadmap
 
 ---
 
-## 🛠️ Getting Started
+## Roadmap
 
-### Prerequisites
+Asteria is under active development. Here's where it's heading:
 
-- [Rust 2024 edition](https://www.rust-lang.org/)
+| Area               | Goal                                                            |
+| ------------------ | --------------------------------------------------------------- |
+| **CSS**            | Broader property support, animations, transitions, `@import`    |
+| **Layout**         | Advanced flexbox, CSS Grid, positioned elements                 |
+| **JavaScript**     | Script execution engine and DOM API bindings                    |
+| **Networking**     | HTTP/2, WebSockets, better caching strategies                   |
+| **Browser UI**     | Address bar, bookmarks, settings, and a polished browser chrome |
+| **Standards**      | Progressive compliance with W3C and WHATWG specifications       |
+| **Performance**    | Incremental layout, layer compositing, and render optimizations |
+| **Cross-platform** | Native builds for Windows, macOS, and Linux                     |
 
-### Building & Running
+> 📋 **[Detailed roadmap coming soon — will live in `/docs/ROADMAP.md`]**
 
-Clone the repository and run the CLI inspector:
+---
+
+## Using Asteria
+
+Asteria is not yet a daily-driver browser. It's an engine in active development.
+
+When it's ready, this section will cover:
+
+- 📦 Downloading releases
+- 🚀 Launching the browser
+- 🌍 Opening websites
+- ⚙️ Configuration and settings
+
+**For now**, you can build and run the engine from source to see it in action:
 
 ```bash
 # Clone the repository
 git clone https://github.com/anzalkabeer/Asteria.git
 cd Asteria/Asteria
 
-# Check compilation
-cargo check
-
-# Run the full pipeline CLI demo with built-in sample HTML+CSS
+# Build and run with a sample page
 cargo run
 
-# Run the pipeline on a custom HTML file from disk
-cargo run -- path/to/index.html
+# Or point it at your own HTML file
+cargo run -- path/to/page.html
 ```
+
+**Requirements:** [Rust](https://www.rust-lang.org/) (2024 edition)
 
 ---
 
-## 🧪 Testing Process & Visual Fixtures
+## For developers
 
-Asteria includes both automated unit/integration tests and visual HTML/CSS test fixtures to verify layout, styling, and rendering fidelity:
+Interested in contributing or exploring the codebase?
 
-### 1. Automated Test Suite
+| Resource           | Link                                                             |
+| ------------------ | ---------------------------------------------------------------- |
+| Contributing guide | _[`CONTRIBUTING.md` coming soon]_                                |
+| Architecture docs  | _[`/docs` coming soon]_                                          |
+| Issue tracker      | [GitHub Issues](https://github.com/anzalkabeer/Asteria/issues)   |
+| CI pipeline        | [GitHub Actions](https://github.com/anzalkabeer/Asteria/actions) |
 
-Run the full Rust test suite covering DOM parsing, CSS cascade, layout box calculation, and image decoding:
-
-```bash
-# Run all unit and integration tests
-cargo test
-
-# Run specific test suites
-cargo test --test style_integration
-cargo test --test layout_integration
-cargo test --test image_integration
-```
-
-### 2. Visual HTML/CSS Test Fixtures
-
-Test live hardware rendering (`wgpu`), window reflow, image frames, and flexbox card grid layouts using built-in test fixtures:
-
-```bash
-# Test Image Frames, CSS Flexbox Row Layout & Card Wrapping
-cargo run -- tests/fixtures/gallery.html
-
-# Test Article Layouts, Headers, Callouts & Stylesheets
-cargo run -- tests/fixtures/blog.html
-```
+The project is written in Rust (2024 edition) and uses `wgpu` for GPU rendering and `winit` for windowing. All web engine components — parsing, styling, layout, painting — are built from scratch with no third-party browser engine dependencies.
 
 ---
 
-## 📄 License
+## Built by
 
-This project is open-source under the MIT License.
+Asteria is built by Anzal Kabeer ([GitHub Link](https://github.com/anzalkabeer)) and Keshav Ghai ([GitHub Link](https://github.com/Keshav76315)).
+
+---
+
+<div align="center">
+
+**Asteria** — Rendering the web, one pixel at a time.
+
+MIT License
+
+</div>
