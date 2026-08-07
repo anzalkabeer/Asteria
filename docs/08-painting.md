@@ -141,7 +141,7 @@ The function is called once with the root layout box, and it recursively visits 
 
 ## Link tracking
 
-Every display command can optionally carry a `link_url`. When painting elements inside an `<a>` tag, the URL from the `href` attribute is propagated down to all commands generated for that subtree. This allows the GPU renderer to perform hit-testing — when a user clicks, the renderer can check which display command was under the cursor and navigate to the link's URL.
+Every display command can optionally carry a `link_url`. When painting elements inside an `<a>` tag, the URL from the `href` attribute is attached to all display commands generated for that subtree. During scene graph construction (`scene.rs`), these URLs are transferred directly onto the corresponding `SceneNode`s. When a user clicks, the window event loop performs hit-testing against `SceneNode` bounding boxes to extract `link_url` and dispatch navigation.
 
 ---
 

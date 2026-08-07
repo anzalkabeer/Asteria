@@ -65,9 +65,9 @@ Asteria started as a deep-dive into browser internals. It's growing into somethi
 | DOM            | ✅     | Represents the page structure in a fast, memory-efficient arena        |
 | Block Layout   | ✅     | Positions block-level elements (headings, paragraphs, divs)            |
 | Inline Layout  | ✅     | Flows text and inline elements with line wrapping                      |
-| Flexbox        | ✅     | CSS `display: flex` row layouts with card wrapping                     |
+| Flexbox        | ✅     | CSS `display: flex` horizontal row layouts with explicit item widths   |
 | GPU Rendering  | ✅     | Hardware-accelerated painting via wgpu with shader-based batching      |
-| Image Decoding | ✅     | Detects and decodes image formats for display                          |
+| Image Decoding | ✅     | Format detection and decoding pipeline (renders fitted placeholder frames; SVG detected but not rendered) |
 | Text Rendering | ✅     | GPU-rendered glyphs with proper font metrics                           |
 
 ### 🖥️ Browser
@@ -176,21 +176,18 @@ At a high level, Asteria transforms a web page into pixels through a series of s
     └─────────────┘
 ```
 
-Each stage is a separate module. The output of one stage feeds into the next. The page never gets "partially processed" — it flows cleanly from raw text to rendered pixels.
+Each stage is a separate module. The output of one stage feeds into the next. HTML chunks can be parsed and processed progressively as they arrive from the network, flowing through the engine stages to rendered pixels.
 
-**Want to go deeper?** The architecture documentation covers each stage in detail:
+**Want to go deeper?** The documentation covers each stage in detail:
 
-> 📂 **[Architecture docs coming soon — will live in `/docs`]**
->
-> Planned documentation:
->
-> - Architecture overview
-> - Rendering pipeline deep-dive
-> - CSS engine & cascade
-> - DOM & arena model
-> - GPU renderer & shader pipeline
-> - Networking stack
-> - Project roadmap
+- [Architecture Overview](docs/03-project-architecture.md)
+- [Pipeline Deep-Dive](docs/02-how-asteria-works.md)
+- [HTML Engine](docs/04-html-engine.md) & [DOM Arena](docs/05-dom.md)
+- [CSS Engine & Cascade](docs/06-css-engine.md)
+- [Layout Engine](docs/07-layout-engine.md)
+- [Painting](docs/08-painting.md) & [GPU Renderer](docs/09-gpu-renderer.md)
+- [Resource Loading](docs/10-resource-loading.md) & [Browser Shell](docs/11-browser-shell.md)
+- [Detailed Roadmap](docs/13-roadmap.md)
 
 ---
 
@@ -209,7 +206,7 @@ Asteria is under active development. Here's where it's heading:
 | **Performance**    | Incremental layout, layer compositing, and render optimizations |
 | **Cross-platform** | Native builds for Windows, macOS, and Linux                     |
 
-> 📋 **[Detailed roadmap coming soon — will live in `/docs/ROADMAP.md`]**
+> 📋 **See the [Detailed Roadmap](docs/13-roadmap.md)**
 
 ---
 
@@ -248,8 +245,8 @@ Interested in contributing or exploring the codebase?
 
 | Resource           | Link                                                             |
 | ------------------ | ---------------------------------------------------------------- |
-| Contributing guide | _[`CONTRIBUTING.md` coming soon]_                                |
-| Architecture docs  | _[`/docs` coming soon]_                                          |
+| Contributing guide | [Contributing Guide](docs/14-contributing.md)                    |
+| Architecture docs  | [Documentation Index](docs/00-introduction.md)                  |
 | Issue tracker      | [GitHub Issues](https://github.com/anzalkabeer/Asteria/issues)   |
 | CI pipeline        | [GitHub Actions](https://github.com/anzalkabeer/Asteria/actions) |
 

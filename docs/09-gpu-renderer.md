@@ -136,11 +136,11 @@ Draws all solid-colour rectangles and borders. This includes element backgrounds
 
 **How it works:**
 
-1. For each `SolidRect` and `Border` scene node, generate 4 vertices (a quad)
-2. Each vertex carries position (x, y) and colour (r, g, b, a)
-3. Pack all vertices into a single vertex buffer
-4. Upload the buffer to the GPU
-5. Execute one draw call with the rect shader pipeline
+1. For each `SolidRect` scene node, generate 4 vertices (1 quad) with position (x, y) and colour (r, g, b, a)
+2. For each `Border` scene node, generate up to 4 edge quads (top, right, bottom, left) based on non-zero `EdgeSizes`
+3. Pack all generated quad vertices into a single vertex buffer
+4. Upload the vertex buffer to the GPU
+5. Execute a single draw call with the rect shader pipeline
 
 **Vertex format:**
 
@@ -214,13 +214,13 @@ Similar to the rect shader, but samples from a texture:
 
 **Source files:** `src/renderer/commands/batch_builder.rs`, `src/renderer/scheduler/batching.rs`
 
-Rather than issuing one GPU draw call per element (which would be extremely slow), Asteria **batches** similar drawing operations together:
+Rather than issuing one GPU draw call per element, Asteria **batches** similar drawing operations together within each render pass:
 
 ```
 Without batching:              With batching:
-  draw(rect_1)                  draw(all_rects)    ← 1 draw call
-  draw(rect_2)                  draw(all_images)   ← 1 draw call
-  draw(rect_3)                  draw(all_text)     ← 1 draw call
+  draw(rect_1)                  draw(all_rects)    ← 1 rect pass draw call
+  draw(rect_2)                  draw(all_images)   ← 1 image pass draw call
+  draw(rect_3)                  draw(all_text)     ← 1 text pass draw call
   draw(image_1)
   draw(image_2)
   draw(text_1)
@@ -228,11 +228,11 @@ Without batching:              With batching:
   = 7 draw calls               = 3 draw calls
 ```
 
-The batch builder groups scene nodes by type, packs their vertex data into shared buffers, and hands them to the render graph for execution.
+The batch builder groups scene nodes by primitive type, packs vertex data into shared buffers, and submits them via pass execution (`RectPass` → `ImagePass` → `TextPass`). This multi-pass architecture simplifies shader pipelines while grouping primitives, though globally ordering passes by primitive type is a simplification that can interleave overlapping elements across different types.
 
-### Pipeline reuse
+### Pipeline state reuse
 
-GPU render pipelines (shaders + state configuration) are created **once at startup**. Only the vertex data changes per frame. This eliminates the overhead of pipeline creation during rendering.
+GPU `wgpu::RenderPipeline` state objects (compiled WGSL shaders and pipeline configurations) are created **once at startup** and reused across frames. Per-frame execution updates only the vertex buffers, uniforms, texture bindings, and glyphon text state.
 
 ---
 
@@ -281,19 +281,19 @@ This enables hover effects (changing `NodeState` to `Hovered`) and link navigati
 
 **Source file:** `src/segment.rs`
 
-The viewport is divided into rectangular **segments** (tiles) for region-based GPU caching. When only a small part of the page changes (like a hover effect), only the affected segments need to be re-rendered.
+The viewport is divided into rectangular **segments** (tiles) for spatial region tracking:
 
 ```
 ┌────────┬────────┬────────┐
 │ Seg 0  │ Seg 1  │ Seg 2  │
-│        │ DIRTY  │        │  ← Only segment 1 needs re-rendering
+│        │ DIRTY  │        │  ← Segment tracking
 ├────────┼────────┼────────┤
 │ Seg 3  │ Seg 4  │ Seg 5  │
 │        │        │        │
 └────────┴────────┴────────┘
 ```
 
-Each scene node is assigned to a segment based on its position. When a node is marked dirty, its segment is flagged for re-rendering. Clean segments can skip GPU submission entirely.
+Each scene node is assigned a `segment_id` based on its position, and dirty flags track region updates. Full tile backing store skipping and compositing is a planned optimization.
 
 ---
 

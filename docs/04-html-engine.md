@@ -175,9 +175,9 @@ For network-loaded pages, waiting for the entire HTML document before parsing wo
 └────────────────┘     └──────────────────┘     └──────────┘
 ```
 
-Each call to `receive_network_chunk()` feeds bytes to the tokenizer, which may produce zero or more tokens, which are immediately fed to the parser to grow the DOM. When the final chunk arrives (marked with `is_eof = true`), the processor finalises the tree.
+Each call to `receive_network_chunk()` appends incoming bytes to an internal contiguous source buffer retained by the processor. Because token and DOM node offsets (`u32` start/end pairs) index directly into this buffer, retaining the complete byte buffer across chunk receptions ensures all slice references remain valid during subsequent style resolution, layout, and paint passes. When the final chunk arrives (marked with `is_eof = true`), the processor finalises the tree.
 
-This means the browser can begin style resolution and layout on the parts of the page that have already arrived, rather than waiting for the full download.
+This means the browser can begin style resolution and layout on the accumulated DOM snapshot as chunks arrive, rather than waiting for the complete document download.
 
 ---
 

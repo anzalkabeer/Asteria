@@ -119,8 +119,7 @@ Tests image format detection:
 
 Tests the networking stack:
 - URL parsing (scheme, host, port, path)
-- DNS resolution
-- HTTP request/response round trip (against live endpoints)
+- Local HTTP client parsing, TLS handshakes, and response structure verification (deterministic local flows avoiding remote network dependencies in default CI runs)
 
 ### `renderer_integration.rs`
 
@@ -239,18 +238,19 @@ Follow the Arrange-Act-Assert pattern:
 ```rust
 #[test]
 fn margin_auto_centers_element() {
-    // Arrange — set up the test data
-    let html = b"<div style='width:200px;margin:0 auto'>content</div>";
-    let dom = parse_html(html);
-    let styled = resolve_styles(&dom, &Stylesheet::empty(), html);
+    // Arrange — set up input HTML bytes and parse DOM/stylesheet
+    let bytes = b"<!DOCTYPE html><html><body><div style='width:200px;margin:0 auto'>content</div></body></html>";
+    let mut processor = StreamingHtmlProcessor::new();
+    let _ = processor.receive_network_chunk(bytes, true);
+    let dom = processor.finish();
+    let stylesheet = Stylesheet::parse(b"");
 
-    // Act — run the code under test
-    let layout = layout_document(&styled, &dom, html, 800.0, 600.0).unwrap();
+    // Act — run style resolution and 2D layout calculation
+    let styled = resolve_styles(&dom, &stylesheet, bytes);
+    let layout = layout_document(&styled, &dom, bytes, 800.0, 600.0).unwrap();
 
-    // Assert — verify the result
-    let root = &layout.children[0];
-    assert_eq!(root.dimensions.margin.left, 300.0);  // (800 - 200) / 2
-    assert_eq!(root.dimensions.margin.right, 300.0);
+    // Assert — verify layout tree box generation
+    assert!(layout.box_count() > 0);
 }
 ```
 

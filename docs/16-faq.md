@@ -22,7 +22,7 @@ We're not competing with Chromium. We're building something from scratch to unde
 
 Rust gives us:
 
-- **Memory safety without garbage collection** — no use-after-free, no data races, no segfaults. Browser engines are notorious for memory safety bugs; Rust eliminates entire categories of them at compile time.
+- **Memory safety in safe Rust** — eliminates use-after-free, data races, and segfaults in safe code without garbage collection (though unsafe code and FFI must still be audited). Browser engines are notorious for memory safety bugs; Rust eliminates entire categories of them at compile time.
 - **Performance comparable to C++** — zero-cost abstractions, no runtime overhead, direct control over memory layout.
 - **Modern tooling** — Cargo (build system + package manager), rustfmt (formatting), Clippy (linting), and a thriving ecosystem.
 - **Expressive type system** — enums with data, pattern matching, and traits make complex state machines (like tokenizers) clean and safe to write.
@@ -33,7 +33,7 @@ Servo (Mozilla's experimental engine) proved that Rust is a viable choice for br
 
 ### Why build another browser engine?
 
-The web is the world's largest software platform, yet it's powered by only a handful of engines: Blink (Chrome/Edge/Opera), Gecko (Firefox), and WebKit (Safari). A fourth engine from Apple (WebKit) is essentially the same lineage as KHTML from the early 2000s.
+The web is the world's largest software platform, yet it's powered by only three major engine families: Blink (Chrome/Edge/Opera), Gecko (Firefox), and WebKit (Safari, which descended from KHTML in the early 2000s).
 
 More implementations improve the ecosystem:
 - They find spec bugs and ambiguities

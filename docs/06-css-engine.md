@@ -38,15 +38,9 @@ The CSS tokenizer reads CSS source text and produces a stream of tokens. CSS has
 | `Hash` | `#header`, `#ff0000` | A hash token (IDs, hex colours) |
 | `String` | `"Arial"`, `'sans-serif'` | A quoted string |
 | `Number` | `16`, `1.5` | A numeric value |
-| `Dimension` | `16px`, `2em`, `50%` | A number with a unit |
+| `Dimension` | `16px`, `2em` | A number with a unit identifier |
+| `Percentage` | `50%`, `100%` | A percentage value |
 | `Colon` | `:` | Property-value separator |
-| `Semicolon` | `;` | Declaration terminator |
-| `OpenBrace` | `{` | Rule block start |
-| `CloseBrace` | `}` | Rule block end |
-| `Dot` | `.` | Class selector prefix |
-| `Comma` | `,` | Selector group separator |
-| `Whitespace` | ` `, `\n` | Whitespace (significant in selectors) |
-| `AtKeyword` | `@media`, `@import` | At-rule keyword |
 
 ---
 
@@ -286,9 +280,9 @@ pub struct ComputedStyle {
 }
 ```
 
-All relative values have been resolved:
-- `2em` → multiplied by the parent's font-size → absolute pixels
-- `50%` → computed against the containing block's width → absolute pixels
+Relative values are resolved during style resolution and layout:
+- `2em` → multiplied by parent's font-size → absolute pixels
+- `50%` → resolved against property-specific reference bases (e.g. width/margins resolve against containing block content width; font-size percentage resolves against parent font-size). In Asteria's current layout solver, percentages on width and horizontal margins compute against the containing block's available width as a baseline simplification.
 - `inherit` → copied from parent's computed value
 - Named colours (`red`, `blue`) → RGBA values
 

@@ -267,7 +267,7 @@ The GPU runs small programs called **shaders** to determine what colour each pix
 
 ### Frame presentation
 
-Once the GPU finishes rendering, the result is presented to the screen. If the browser targets 60 frames per second, this entire process — from DOM changes to rendered frame — must complete in under 16 milliseconds.
+Once the GPU finishes rendering, the result is presented to the screen. If the browser targets a 60 Hz display, this entire process — from DOM changes to rendered frame — must complete in approximately 16.67 milliseconds (within one display refresh interval).
 
 ---
 
@@ -335,6 +335,6 @@ In the next document, we'll see how Asteria implements each of these stages.
 
 - [How Asteria Works](02-how-asteria-works.md) — Asteria's specific implementation of this pipeline
 - [Glossary](17-glossary.md) — definitions of all technical terms used here
-- [W3C HTML Specification](https://html.spec.whatwg.org/)
+- [WHATWG HTML Standard](https://html.spec.whatwg.org/)
 - [W3C CSS Specification](https://www.w3.org/Style/CSS/)
 - [How Browsers Work (web.dev)](https://web.dev/howbrowserswork/) — Google's classic deep-dive

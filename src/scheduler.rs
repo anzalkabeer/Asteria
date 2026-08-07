@@ -388,6 +388,7 @@ mod tests {
             .schedule(PipelineStage::ParseHtml {
                 url: "test.html".to_string(),
                 bytes: html,
+                proxy: None,
             })
             .expect("Schedule failed");
 
@@ -470,6 +471,7 @@ mod tests {
             .schedule(PipelineStage::ParseHtml {
                 url: "valid.html".to_string(),
                 bytes: html,
+                proxy: None,
             })
             .expect("Schedule failed");
 

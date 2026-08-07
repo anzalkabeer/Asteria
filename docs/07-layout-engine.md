@@ -131,7 +131,7 @@ When a container's children are inline-level (`<span>`, text nodes, `<a>`, `<em>
 
 **Line wrapping:** Text is measured character by character. When a word would overflow the container width, it wraps to a new line.
 
-**Character metrics:** Each character's width is approximated from the font size (Asteria uses a character-width ratio for text measurement, with proper glyph metrics available through the glyphon text engine during GPU rendering).
+**Character metrics:** Layout estimates inline text width using a font-size ratio approximation (`font_size * 0.55`). The GPU renderer subsequently rasterises glyphs using `glyphon` font metrics. This known architectural simplification creates a slight mismatch between layout text bounding boxes and GPU glyph placement.
 
 **Algorithm:**
 
@@ -152,7 +152,7 @@ For each inline child:
 
 ### Flex formatting context
 
-When a container has `display: flex`, its children are arranged along a main axis (horizontal by default) with flexible sizing.
+When a container has `display: flex`, its children are arranged along a horizontal main axis with explicit widths.
 
 ```
 ┌───────────────────────────────────────────┐
@@ -181,10 +181,10 @@ When a container has `display: flex`, its children are arranged along a main axi
 **Algorithm:**
 
 ```
-total_children_width = sum of children's widths
-For each flex child:
-  x = cursor_x
-  width = child's explicit width (or distribute remaining space)
+cursor_x = container.content.x
+For each non-whitespace flex child:
+  child.x = cursor_x
+  width = child's explicit width (clamped to container boundaries)
   cursor_x += width
 ```
 

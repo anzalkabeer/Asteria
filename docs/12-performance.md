@@ -38,9 +38,9 @@ The DOM is stored in a `Vec<Node>` with `NodeId(u32)` handles. The scene graph u
 | Memory overhead | Per-object header + alignment padding | Zero overhead (packed) |
 
 For a DOM with 500 nodes, the arena approach means:
-- **1 allocation** (the Vec itself) vs. **500 allocations** (one per node)
-- **Contiguous memory** (prefetch-friendly) vs. **scattered heap** (cache-hostile)
-- **Instant cleanup** (drop the Vec) vs. **500 destructor calls**
+- **Amortised buffer allocations** (for the arena vector and child/attribute vectors) vs. **at least 500 individual heap allocations** (one per node object)
+- **Contiguous memory layout** (prefetch-friendly node storage) vs. **scattered heap pointers** (cache-hostile)
+- **Fast bulk cleanup** (dropping the arena vector) vs. **500 individual object destructor calls**
 
 ### Frame arena
 

@@ -12,7 +12,7 @@
 
 ## What is resource loading?
 
-A web page is rarely just one file. An HTML document typically references external stylesheets, images, fonts, and scripts. The resource loader's job is to discover these references, fetch the actual bytes, and make them available to the rest of the pipeline.
+A web page is rarely just one file. An HTML document references external stylesheets, images, and other assets. Asteria's `ResourceLoader` discovers HTML and stylesheet references, fetches their bytes, and packages them for the pipeline. Image assets are handled by the image format detection and decoding pipeline (`image.rs`), while custom web fonts and script files are currently unsupported.
 
 ---
 
@@ -20,7 +20,7 @@ A web page is rarely just one file. An HTML document typically references extern
 
 **Source file:** `src/loader.rs`
 
-The `ResourceLoader` is Asteria's fetch layer. Given a URL or file path, it:
+The `ResourceLoader` is Asteria's fetch layer for page resources. Given a URL or file path, it:
 
 1. Loads the HTML document (from disk or via HTTP/HTTPS)
 2. Parses it into a temporary DOM to discover linked resources
@@ -61,9 +61,9 @@ Inline stylesheets get synthetic URLs like `<inline:0>`, `<inline:1>` to disting
 
 ## Resource cache
 
-**Source file:** `src/loader.rs` (ResourceCache), `src/cache.rs` (LruCache)
+**Source file:** `src/loader.rs` (`ResourceCache`), `src/cache.rs` (`LruCache`)
 
-The `ResourceCache` ensures the same file is never loaded twice. It maps canonical paths/URLs to their loaded `Resource`:
+The `ResourceCache` in `loader.rs` is an in-memory `HashMap` keyed by canonical path/URL to ensure the same stylesheet or document file is not read twice in a session:
 
 ```
 Cache lookup:
@@ -71,7 +71,7 @@ Cache lookup:
   "styles/theme.css" → Cache miss → load from disk → cache → return
 ```
 
-For longer-lived caching, Asteria also has an `LruCache` (least-recently-used eviction cache) that bounds memory usage by evicting the oldest entries when the cache reaches capacity.
+For bounded memory usage elsewhere in the engine (such as decoded image memory), Asteria provides a generic `LruCache` (`src/cache.rs`) that evicts the least recently used entries when capacity is reached.
 
 ---
 
@@ -131,7 +131,7 @@ The `Url` struct handles URL parsing with support for `http://` and `https://` s
 
 **Source file:** `src/net/bus.rs`
 
-`StreamingResourceBus` is an MPSC (multi-producer, single-consumer) channel for delivering resource data asynchronously. Network fetches can push chunks to the bus as they arrive, and the engine can consume them progressively:
+`StreamingResourceBus` is an MPSC (multi-producer, single-consumer) channel for delivering raw HTML network chunks asynchronously to `StreamingHtmlProcessor`. While `ResourceLoader` performs discovery and retrieval of complete linked stylesheet resources, `StreamingResourceBus` operates alongside it for progressive HTML data ingestion:
 
 ```
 Network thread          │         Engine thread

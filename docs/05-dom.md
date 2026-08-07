@@ -49,25 +49,25 @@ let node = dom.get(NodeId(5));
 
 ### Why this matters
 
-| Aspect | Pointer-based DOM | Arena DOM |
-|---|---|---|
-| **Node size** | 8+ bytes per pointer | 4 bytes per `NodeId` |
-| **Cache locality** | Nodes scattered in heap | Nodes packed contiguously |
-| **Allocation** | One `malloc` per node | One `Vec::push` per node |
-| **Deallocation** | Per-node destructor | Drop the entire `Vec` |
-| **Reference counting** | Required (Rc/Arc) | Not needed |
-| **Memory safety** | Runtime borrow checks | Compile-time (index bounds) |
+| Aspect                 | Pointer-based DOM       | Arena DOM                                                   |
+| ---------------------- | ----------------------- | ----------------------------------------------------------- |
+| **Node size**          | 8+ bytes per pointer    | 4 bytes per `NodeId`                                        |
+| **Cache locality**     | Nodes scattered in heap | Nodes packed contiguously                                   |
+| **Allocation**         | One `malloc` per node   | One `Vec::push` per node                                    |
+| **Deallocation**       | Per-node destructor     | Drop the entire `Vec`                                       |
+| **Reference counting** | Required (Rc/Arc)       | Not needed                                                  |
+| **Memory safety**      | Runtime borrow checks   | Safe Rust bounds checks (checked at runtime via `Dom::get`) |
 
 For a page with 500 elements, the arena approach means 500 nodes packed tightly in memory, accessed by simple array indexing. The CPU cache can prefetch the next nodes efficiently, and there's no reference-counting overhead on every access.
 
 ### How other engines compare
 
-| Engine | DOM storage | Trade-off |
-|---|---|---|
-| **Blink** | C++ objects with raw pointers, garbage collected | Flexible but complex GC |
-| **Gecko** | C++ objects with cycle-collected pointers | Handles cycles but adds overhead |
-| **Servo** | Rust objects with custom prevent-rc mechanism | Safe but still heap-allocated |
-| **Asteria** | Arena `Vec<Node>` with `NodeId(u32)` handles | Fast access, simple memory model |
+| Engine      | DOM storage                                      | Trade-off                        |
+| ----------- | ------------------------------------------------ | -------------------------------- |
+| **Blink**   | C++ objects with raw pointers, garbage collected | Flexible but complex GC          |
+| **Gecko**   | C++ objects with cycle-collected pointers        | Handles cycles but adds overhead |
+| **Servo**   | Rust objects with custom prevent-rc mechanism    | Safe but still heap-allocated    |
+| **Asteria** | Arena `Vec<Node>` with `NodeId(u32)` handles     | Fast access, simple memory model |
 
 ---
 
@@ -96,12 +96,12 @@ pub enum NodeKind {
 }
 ```
 
-| Kind | Description | Offset meaning |
-|---|---|---|
-| `Document` | The root node — every DOM has exactly one | None |
-| `Element` | An HTML element like `<div>` or `<h1>` | `tag_start..tag_end` → tag name in the source buffer |
-| `Text` | Raw text between tags | `start..end` → text content in the source buffer |
-| `Comment` | An HTML comment | `start..end` → comment content in the source buffer |
+| Kind       | Description                               | Offset meaning                                       |
+| ---------- | ----------------------------------------- | ---------------------------------------------------- |
+| `Document` | The root node — every DOM has exactly one | None                                                 |
+| `Element`  | An HTML element like `<div>` or `<h1>`    | `tag_start..tag_end` → tag name in the source buffer |
+| `Text`     | Raw text between tags                     | `start..end` → text content in the source buffer     |
+| `Comment`  | An HTML comment                           | `start..end` → comment content in the source buffer  |
 
 Notice that `Element`, `Text`, and `Comment` all store byte offset pairs — not strings. This is the zero-copy design from the [tokenizer](04-html-engine.md). To get the actual tag name of an element, you slice into the original HTML byte buffer:
 
@@ -122,6 +122,7 @@ Attributes are stored the same way — as four byte offsets:
 ```
 
 For `<div class="main">`, the attribute would be stored as:
+
 - `name_start..name_end` → points to `"class"` in the source buffer
 - `value_start..value_end` → points to `"main"` in the source buffer
 
@@ -137,7 +138,7 @@ pub struct NodeFlags {
 }
 ```
 
-These flags are used for incremental updates. When something changes — a hover state, a resize — the engine can mark specific nodes as needing re-processing rather than recomputing everything.
+These flags track invalidation status. The DOM is **structurally immutable** after parsing (its hierarchy, node types, attributes, and text boundaries do not change), but metadata flags (`NodeFlags`) can be updated when interactive events (such as window resizing or hover state transitions) mark specific nodes for partial re-processing.
 
 ---
 
@@ -183,12 +184,12 @@ Because nodes are stored contiguously and accessed by index, this traversal has 
 
 ## Ownership model
 
-The DOM is designed to be **immutable after construction**. The parser builds it, and then it's done. No later pipeline stage modifies the DOM.
+The DOM is **structurally immutable after construction**. The parser builds the tree topology, node kinds, and attribute offsets once. Subsequent pipeline stages do not alter the tree structure.
 
 Instead, each stage creates its own parallel data structure:
 
 ```
-DOM (immutable)
+DOM (structurally immutable)
   │
   ├── StyledTree (style resolver creates this)
   │
@@ -199,10 +200,10 @@ DOM (immutable)
 
 This design has several benefits:
 
-- **No borrow conflicts** — the DOM can be shared freely since nothing mutates it
+- **No structural borrow conflicts** — tree hierarchy and node data can be shared safely across read-only pipeline passes
 - **Clean separation** — each stage's output is self-contained
-- **Easy debugging** — you can inspect the DOM at any point without worrying about mid-pipeline mutations
-- **Parallelism potential** — immutable data can be safely shared across threads
+- **Easy debugging** — you can inspect the DOM at any point without worrying about structural mutations
+- **Parallelism potential** — immutable structural data can be safely shared across threads, while invalidation metadata flags (`NodeFlags`) track dirty states for incremental passes
 
 ---
 
@@ -243,13 +244,13 @@ dom.print_tree(source_bytes);
 
 For a page with 500 nodes:
 
-| Metric | Approximate value |
-|---|---|
-| Node storage | ~500 × ~80 bytes = ~40 KB (contiguous) |
-| NodeId overhead | 4 bytes per reference |
-| String allocations | Zero (zero-copy offsets) |
-| Reference counting | None |
-| Deallocation | Instant (drop the Vec) |
+| Metric             | Approximate value                      |
+| ------------------ | -------------------------------------- |
+| Node storage       | ~500 × ~80 bytes = ~40 KB (contiguous) |
+| NodeId overhead    | 4 bytes per reference                  |
+| String allocations | Zero (zero-copy offsets)               |
+| Reference counting | None                                   |
+| Deallocation       | Instant (drop the Vec)                 |
 
 Compare this to a traditional heap-allocated DOM where each node might be a 200+ byte object scattered across the heap, linked by 8-byte pointers, with reference counting on every access.
 

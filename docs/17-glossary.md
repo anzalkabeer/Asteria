@@ -26,7 +26,7 @@ A name-value pair on an HTML element. In `<div class="main">`, `class="main"` is
 The practice of combining multiple GPU draw calls into a single call by packing vertex data into shared buffers. Reduces GPU state transitions. See [GPU Renderer](09-gpu-renderer.md).
 
 **Block formatting context (BFC)**
-A layout mode where children stack vertically. Each child occupies the full width of its container by default. Created by elements with `display: block`. See [Layout Engine](07-layout-engine.md).
+The layout environment in which block boxes are laid out and formatted. In CSS, a BFC is established by the document root, floats, positioned elements, inline-blocks, flex items, or `display: flow-root` (and managed via block formatting contexts in Asteria's layout solver). See [Layout Engine](07-layout-engine.md).
 
 **Border box**
 The rectangle enclosing an element's content, padding, and border. See [Layout Engine](07-layout-engine.md).
@@ -54,7 +54,7 @@ In CSS, the symbol connecting parts of a complex selector. Descendant (space), c
 The process of combining independently rendered layers into a final image. Enables efficient scrolling and animations by re-compositing layers without re-rendering. Not yet implemented in Asteria.
 
 **Computed style**
-The final, fully resolved set of CSS property values for an element. All relative values (em, %) have been converted to absolute values (px). See [CSS Engine](06-css-engine.md).
+The set of resolved CSS property values for an element used by the layout engine. Absolute units (such as `px` or resolved `em` values) are computed into concrete values, while relative percentages and keywords are resolved against their respective layout bases. See [CSS Engine](06-css-engine.md).
 
 **Content box**
 The innermost rectangle of the CSS box model — the area containing the element's actual content (text, images, children). Width and height CSS properties set the content box size by default.

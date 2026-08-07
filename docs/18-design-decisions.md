@@ -120,7 +120,7 @@ The Rust API is safe — no `unsafe` needed for basic rendering. And the wgpu ec
 
 ## Why a custom networking stack?
 
-**Decision:** Build HTTP/1.1, DNS, TCP, and TLS handling from scratch instead of using `reqwest` or `hyper`.
+**Decision:** Build custom HTTP/1.1 client, DNS resolver, TCP connection pool, and streaming resource integration while delegating TLS encryption and PKI validation to `rustls` and `webpki-roots`.
 
 **Alternatives considered:** `reqwest` (high-level HTTP client), `hyper` (low-level HTTP library)
 
@@ -128,13 +128,13 @@ The Rust API is safe — no `unsafe` needed for basic rendering. And the wgpu ec
 
 Asteria's philosophy is to understand every layer. The networking stack is a core part of a browser engine — connection pooling, DNS caching, streaming responses, and TLS negotiation all directly affect page load performance.
 
-Building it ourselves gives us:
+Building custom TCP, DNS, and HTTP handling gives us:
 - Full control over connection lifecycle and reuse
 - Custom DNS caching with TTL management
 - Streaming integration with the HTML parser (chunks arriving progressively)
 - Understanding of the HTTP protocol at the byte level
 
-We still use `rustls` for TLS and `webpki-roots` for certificate verification — cryptography is one area where using a well-audited library is the responsible choice.
+We delegate TLS and certificate verification to `rustls` and `webpki-roots` — cryptography is one area where using a well-audited library is the responsible choice.
 
 **Trade-offs:**
 - Our HTTP client is HTTP/1.1 only (no HTTP/2 or HTTP/3 yet)
@@ -202,10 +202,10 @@ GPU rendering is fastest when you minimise state changes. Each render pass uses 
 - Vertex data is packed into contiguous type-specific buffers
 - The GPU can process each batch without pipeline switching
 
-The three-pass architecture (`rects → images → text`) also matches the visual layering: backgrounds behind images behind text.
+The three-pass architecture (`rects → images → text`) matches common visual layering (backgrounds behind images behind text).
 
 **Trade-offs:**
-- Correct z-ordering across types requires the passes to be ordered correctly. Currently, all rects render behind all images, which render behind all text. Per-element z-index interleaving across types is not yet supported.
+- Global pass execution (`rects → images → text`) groups draw calls by shader pipeline, but simplifies visual stacking. When different element types overlap in document flow (such as text overlapping an image or container background in complex layouts), rendering all rects before images and images before text can violate normal-flow paint order across primitive types. Preserving exact per-element paint order across interleaved primitive types is an area for future pass scheduler work.
 
 ---
 

@@ -71,7 +71,7 @@ The tokenizer is **zero-copy**: it stores byte offset pairs into the original in
 
 The parser consumes these tokens and constructs a DOM tree. When it sees a start tag, it creates a new node. When it sees text, it adds a text child. When it sees an end tag, it closes the current node. The parser handles implicit tag closing (like `<p>` followed by another `<p>`) and other HTML quirks.
 
-For network-loaded pages, Asteria uses a **streaming parser** that can process HTML chunks as they arrive, building the DOM incrementally rather than waiting for the full download.
+For network-loaded pages, Asteria uses a **streaming parser** (`StreamingHtmlProcessor`) that processes HTML chunks progressively into a growing DOM arena. Each incremental render pass treats the DOM constructed up to that point as an immutable snapshot for that frame, running style resolution, layout, and painting over the currently accumulated tree without in-place subtree mutation.
 
 > **Deep dives:** [HTML Engine](04-html-engine.md) · [DOM](05-dom.md)
 

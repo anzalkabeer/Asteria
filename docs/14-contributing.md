@@ -191,17 +191,19 @@ Integration tests live in `tests/`:
 
 ```
 tests/
-├── fixtures/              ← HTML/CSS test pages
-│   ├── blog.html          ← Article layout test
-│   ├── gallery.html       ← Flex + image card test
-│   └── hello.html         ← Minimal test
-├── style_integration.rs   ← CSS cascade and selector tests
-├── layout_integration.rs  ← Box model and positioning tests
-├── paint_integration.rs   ← Display list generation tests
-├── image_integration.rs   ← Image format detection tests
-├── network_integration.rs ← HTTP/DNS tests
-├── renderer_integration.rs ← GPU pipeline tests
-└── observability_trace.rs ← Devtools trace tests
+├── fixtures/                    ← HTML/CSS test pages
+│   ├── blog.html                ← Article layout test
+│   ├── gallery.html             ← Flex + image card test
+│   └── hello.html               ← Minimal test
+├── style_integration.rs         ← CSS cascade and selector tests
+├── layout_integration.rs        ← Box model and positioning tests
+├── paint_integration.rs         ← Display list generation tests
+├── image_integration.rs         ← Image format detection tests
+├── network_integration.rs       ← HTTP/DNS tests
+├── renderer_integration.rs       ← GPU pipeline tests
+├── observability_trace.rs       ← Devtools trace tests
+├── comprehensive_edge_cases.rs  ← Edge case integration tests
+└── snapshot_tests.rs            ← Engine snapshot tests
 ```
 
 ### Visual testing

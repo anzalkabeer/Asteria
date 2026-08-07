@@ -34,16 +34,16 @@ TabManager
   │     ├── DOM
   │     └── Stylesheet
   ├── Tab 1
-  │     ├── URL: "file:///blog.html"
+  │     ├── URL: "tests/fixtures/blog.html"
   │     └── ...
   └── Tab 2
-        ├── URL: "about:blank"
+        ├── URL: "<sample>"
         └── ...
 ```
 
 ### Tab
 
-Each `Tab` stores its complete engine state:
+Each `Tab` owns its page-level state:
 
 ```rust
 pub struct Tab {
@@ -57,7 +57,7 @@ pub struct Tab {
 }
 ```
 
-When you switch tabs, the engine switches to that tab's DOM, stylesheet, and rendering state.
+Viewport-level state (such as `scroll_offset`, window size, GPU pipelines, and the render graph) is managed by `AsteriaWindow`. When switching active tabs, the window binds to the active tab's DOM and stylesheet, while viewport scrolling and GPU surfaces are maintained by the window loop.
 
 ### Navigation history
 
@@ -87,7 +87,7 @@ The browser shell communicates through a `ShellEvent` system:
 | `SwitchTab(id)` | Make a different tab active |
 | `GoBack` | Navigate back in the active tab's history |
 | `GoForward` | Navigate forward in the active tab's history |
-| `Reload` | Re-fetch and re-render the current page |
+| `Reload` | Re-fetch page resources (bypassing cached resources) and re-run the pipeline |
 
 ---
 
@@ -182,7 +182,7 @@ The scroll offset is applied when building GPU vertex buffers — each element's
 
 ## Navigation flow
 
-When a user navigates to a new URL (by clicking a link or entering a URL):
+When a navigation event occurs (via link click, keyboard shortcut, or programmatic `NavigateTo` call):
 
 ```
 User action → ShellEvent::NavigateTo(url)
