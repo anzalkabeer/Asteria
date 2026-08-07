@@ -45,6 +45,11 @@ impl Color {
     pub const BLACK: Color = Color::rgb(0, 0, 0);
     /// Default background: transparent
     pub const TRANSPARENT: Color = Color::new(0, 0, 0, 0);
+
+    /// Return (r, g, b, a) tuple for GPU color conversion
+    pub const fn to_rgba(self) -> (u8, u8, u8, u8) {
+        (self.r, self.g, self.b, self.a)
+    }
 }
 
 impl std::fmt::Display for Color {
@@ -64,6 +69,8 @@ pub enum Display {
     Block,
     Inline,
     InlineBlock,
+    Flex,
+    Grid,
     None,
 }
 
@@ -73,9 +80,47 @@ impl std::fmt::Display for Display {
             Display::Block => write!(f, "block"),
             Display::Inline => write!(f, "inline"),
             Display::InlineBlock => write!(f, "inline-block"),
+            Display::Flex => write!(f, "flex"),
+            Display::Grid => write!(f, "grid"),
             Display::None => write!(f, "none"),
         }
     }
+}
+
+// ─── Grid Types ──────────────────────────────────────────────────
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum GridTrack {
+    Auto,
+    Fr(f32),
+    Px(f32),
+    Percent(f32),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum GridPlacement {
+    Auto,
+    Line(i32),
+    Span(i32),
+}
+
+// ─── Animation Types ─────────────────────────────────────────────
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum AnimationTimingFunction {
+    Linear,
+    Ease,
+    EaseIn,
+    EaseOut,
+    EaseInOut,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct AnimationSpec {
+    pub name: String,
+    pub duration: f32, // seconds
+    pub timing_function: AnimationTimingFunction,
+    pub iteration_count: f32, // f32::INFINITY for infinite
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -185,6 +230,22 @@ pub struct ComputedStyle {
     pub font_weight: f32, // 400 = normal, 700 = bold
     pub text_align: TextAlign,
     pub line_height: f32, // px
+
+    // Grid
+    pub grid_template_columns: Vec<GridTrack>,
+    pub grid_template_rows: Vec<GridTrack>,
+    pub grid_column: GridPlacement,
+    pub grid_row: GridPlacement,
+    pub grid_gap: Edges,
+
+    // Animation
+    pub animation_name: String,
+    pub animation_duration: f32,
+    pub animation_timing_function: AnimationTimingFunction,
+    pub animation_iteration_count: f32,
+
+    // CSS Variables
+    pub variables: std::collections::HashMap<String, String>,
 }
 
 impl Default for ComputedStyle {
@@ -206,6 +267,16 @@ impl Default for ComputedStyle {
             font_weight: 400.0, // normal
             text_align: TextAlign::Left,
             line_height: 19.2, // 1.2 * 16px default
+            grid_template_columns: Vec::new(),
+            grid_template_rows: Vec::new(),
+            grid_column: GridPlacement::Auto,
+            grid_row: GridPlacement::Auto,
+            grid_gap: Edges::ZERO,
+            animation_name: "none".to_string(),
+            animation_duration: 0.0,
+            animation_timing_function: AnimationTimingFunction::Ease,
+            animation_iteration_count: 1.0,
+            variables: std::collections::HashMap::new(),
         }
     }
 }
@@ -245,6 +316,15 @@ impl ComputedStyle {
             PropertyId::FontWeight => format!("{}", self.font_weight),
             PropertyId::TextAlign => format!("{}", self.text_align),
             PropertyId::LineHeight => format!("{}px", self.line_height),
+            PropertyId::GridTemplateColumns => "<grid-tracks>".to_string(),
+            PropertyId::GridTemplateRows => "<grid-tracks>".to_string(),
+            PropertyId::GridColumn => "<grid-placement>".to_string(),
+            PropertyId::GridRow => "<grid-placement>".to_string(),
+            PropertyId::GridGap => format!("{}px", self.grid_gap.top),
+            PropertyId::AnimationName => self.animation_name.clone(),
+            PropertyId::AnimationDuration => format!("{}s", self.animation_duration),
+            PropertyId::AnimationTimingFunction => "<timing-function>".to_string(),
+            PropertyId::AnimationIterationCount => format!("{}", self.animation_iteration_count),
         }
     }
 
@@ -322,6 +402,23 @@ impl ComputedStyle {
             PropertyId::TextAlign => self.text_align = parse_text_align(value),
             PropertyId::LineHeight => {
                 self.line_height = parse_line_height(value, self.font_size, root_font_size)
+            }
+            PropertyId::GridTemplateColumns => {
+                self.grid_template_columns = parse_grid_tracks(value)
+            }
+            PropertyId::GridTemplateRows => self.grid_template_rows = parse_grid_tracks(value),
+            PropertyId::GridColumn => self.grid_column = parse_grid_placement(value),
+            PropertyId::GridRow => self.grid_row = parse_grid_placement(value),
+            PropertyId::GridGap => {
+                self.grid_gap = parse_edges(value, self.font_size, root_font_size)
+            }
+            PropertyId::AnimationName => self.animation_name = value.trim().to_string(),
+            PropertyId::AnimationDuration => self.animation_duration = parse_time(value),
+            PropertyId::AnimationTimingFunction => {
+                self.animation_timing_function = parse_timing_function(value)
+            }
+            PropertyId::AnimationIterationCount => {
+                self.animation_iteration_count = parse_iteration_count(value)
             }
         }
     }
@@ -495,6 +592,8 @@ pub fn parse_display(value: &str) -> Display {
         "block" => Display::Block,
         "inline" => Display::Inline,
         "inline-block" => Display::InlineBlock,
+        "flex" => Display::Flex,
+        "grid" => Display::Grid,
         "none" => Display::None,
         _ => Display::Inline,
     }
@@ -561,6 +660,29 @@ pub fn parse_line_height(value: &str, font_size: f32, rem_base: f32) -> f32 {
         .unwrap_or(font_size * 1.2)
 }
 
+/// Parse a CSS border shorthand value (e.g. "1px solid #bae6fd") into (width, style, color) parts.
+pub fn parse_border_shorthand(value: &str) -> (Option<String>, Option<String>, Option<String>) {
+    let mut width = None;
+    let mut style = None;
+    let mut color = None;
+
+    for part in value.split_whitespace() {
+        let p_lower = part.to_ascii_lowercase();
+        if p_lower.ends_with("px")
+            || p_lower.ends_with("em")
+            || p_lower.ends_with("rem")
+            || p_lower.chars().all(|c| c.is_ascii_digit() || c == '.')
+        {
+            width = Some(part.to_string());
+        } else if matches!(p_lower.as_str(), "none" | "solid" | "dashed" | "dotted") {
+            style = Some(part.to_string());
+        } else {
+            color = Some(part.to_string());
+        }
+    }
+    (width, style, color)
+}
+
 /// Parse a shorthand margin/padding value into 4 edge values.
 /// CSS shorthand rules:
 ///   1 value:  all four edges
@@ -602,6 +724,78 @@ pub fn parse_edges(value: &str, em_base: f32, rem_base: f32) -> Edges {
             left: parse_length(parts[3], em_base, rem_base),
         },
         _ => Edges::ZERO,
+    }
+}
+
+pub fn parse_grid_tracks(value: &str) -> Vec<GridTrack> {
+    let mut tracks = Vec::new();
+    for part in value.split_whitespace() {
+        if part == "auto" {
+            tracks.push(GridTrack::Auto);
+        } else if let Some(num) = part.strip_suffix("fr") {
+            if let Ok(val) = num.parse::<f32>() {
+                tracks.push(GridTrack::Fr(val));
+            }
+        } else if let Some(num) = part.strip_suffix("px") {
+            if let Ok(val) = num.parse::<f32>() {
+                tracks.push(GridTrack::Px(val));
+            }
+        } else if let Some(num) = part.strip_suffix("%") {
+            if let Ok(val) = num.parse::<f32>() {
+                tracks.push(GridTrack::Percent(val));
+            }
+        } else if part.parse::<f32>().is_ok_and(|val| val == 0.0) {
+            tracks.push(GridTrack::Px(0.0));
+        }
+    }
+    tracks
+}
+
+pub fn parse_grid_placement(value: &str) -> GridPlacement {
+    let s = value.trim();
+    if s == "auto" {
+        return GridPlacement::Auto;
+    }
+    if let Some(val) = s
+        .strip_prefix("span ")
+        .and_then(|span| span.trim().parse::<i32>().ok())
+    {
+        return GridPlacement::Span(val);
+    }
+    if let Ok(val) = s.parse::<i32>() {
+        return GridPlacement::Line(val);
+    }
+    GridPlacement::Auto
+}
+
+pub fn parse_time(value: &str) -> f32 {
+    let s = value.trim();
+    if let Some(num) = s.strip_suffix("ms") {
+        num.parse::<f32>().unwrap_or(0.0) / 1000.0
+    } else if let Some(num) = s.strip_suffix("s") {
+        num.parse::<f32>().unwrap_or(0.0)
+    } else {
+        0.0
+    }
+}
+
+pub fn parse_timing_function(value: &str) -> AnimationTimingFunction {
+    match value.trim() {
+        "linear" => AnimationTimingFunction::Linear,
+        "ease" => AnimationTimingFunction::Ease,
+        "ease-in" => AnimationTimingFunction::EaseIn,
+        "ease-out" => AnimationTimingFunction::EaseOut,
+        "ease-in-out" => AnimationTimingFunction::EaseInOut,
+        _ => AnimationTimingFunction::Ease,
+    }
+}
+
+pub fn parse_iteration_count(value: &str) -> f32 {
+    let s = value.trim();
+    if s == "infinite" {
+        f32::INFINITY
+    } else {
+        s.parse::<f32>().unwrap_or(1.0)
     }
 }
 

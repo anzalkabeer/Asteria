@@ -1,6 +1,25 @@
 [package]
-name = "asteria"
+name = "asteria_project"
 version = "0.1.0"
 edition = "2024"
 
+[lib]
+name = "asteria"
+path = "src/lib.rs"
+
+[[bin]]
+name = "asteria"
+path = "src/main.rs"
+
 [dependencies]
+wgpu = "22.1"
+winit = "0.29"
+pollster = "0.3"
+bytemuck = { version = "1.16", features = ["derive"] }
+glyphon = "0.6"
+log = "0.4"
+env_logger = "0.11"
+rustls = { version = "0.23", default-features = false, features = ["ring", "logging", "std", "tls12"] }
+webpki-roots = "0.26"
+rustls-pki-types = "1.7"
+lru = "0.12"

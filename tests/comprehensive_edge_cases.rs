@@ -25,10 +25,9 @@ fn parse_and_layout_full<'a>(
     styled_store: &'a mut Option<StyledNode>,
 ) -> LayoutBox<'a> {
     *bytes_store = html.as_bytes().to_vec();
-    let mut tokenizer = Tokenizer::new(bytes_store);
-    let tokens = tokenizer.tokenize();
-    let parser = Parser::new(&tokens, bytes_store);
-    *dom_store = Some(parser.parse());
+    let mut processor = asteria::streaming_parser::StreamingHtmlProcessor::new();
+    let _ = processor.receive_network_chunk(bytes_store, true);
+    *dom_store = Some(processor.finish());
 
     let stylesheet = Stylesheet::parse(css.as_bytes());
     *styled_store = Some(resolve_styles(
@@ -55,10 +54,9 @@ fn parse_and_layout_full<'a>(
 fn test_html_void_and_self_closing_elements() {
     let html = r#"<html><body><img src="logo.png" alt="logo" /><br><input disabled type=text><hr/></body></html>"#;
     let bytes = html.as_bytes();
-    let mut tokenizer = Tokenizer::new(bytes);
-    let tokens = tokenizer.tokenize();
-    let parser = Parser::new(&tokens, bytes);
-    let dom = parser.parse();
+    let mut processor = asteria::streaming_parser::StreamingHtmlProcessor::new();
+    let _ = processor.receive_network_chunk(bytes, true);
+    let dom = processor.finish();
 
     // Check DOM tree node count and structure: Document -> html -> body
     let html_id = dom.nodes[0].children[0];
@@ -82,10 +80,9 @@ fn test_html_void_and_self_closing_elements() {
 fn test_html_unquoted_single_quoted_boolean_attributes() {
     let html = r#"<div id=main class='card active' disabled data-ref="123">Content</div>"#;
     let bytes = html.as_bytes();
-    let mut tokenizer = Tokenizer::new(bytes);
-    let tokens = tokenizer.tokenize();
-    let parser = Parser::new(&tokens, bytes);
-    let dom = parser.parse();
+    let mut processor = asteria::streaming_parser::StreamingHtmlProcessor::new();
+    let _ = processor.receive_network_chunk(bytes, true);
+    let dom = processor.finish();
 
     let div = dom.get(dom.nodes[0].children[0]);
     assert_eq!(div.attributes.len(), 4);
@@ -122,10 +119,9 @@ fn test_html_unquoted_single_quoted_boolean_attributes() {
 fn test_html_comments_with_dashes() {
     let html = r#"<div><!-- comment - with - dashes inside --></div>"#;
     let bytes = html.as_bytes();
-    let mut tokenizer = Tokenizer::new(bytes);
-    let tokens = tokenizer.tokenize();
-    let parser = Parser::new(&tokens, bytes);
-    let dom = parser.parse();
+    let mut processor = asteria::streaming_parser::StreamingHtmlProcessor::new();
+    let _ = processor.receive_network_chunk(bytes, true);
+    let dom = processor.finish();
 
     let div = dom.get(dom.nodes[0].children[0]);
     assert_eq!(div.children.len(), 1);
@@ -142,10 +138,9 @@ fn test_html_comments_with_dashes() {
 fn test_html_deeply_nested_structure() {
     let html = "<div><div><div><div><div><span>Deep</span></div></div></div></div></div>";
     let bytes = html.as_bytes();
-    let mut tokenizer = Tokenizer::new(bytes);
-    let tokens = tokenizer.tokenize();
-    let parser = Parser::new(&tokens, bytes);
-    let dom = parser.parse();
+    let mut processor = asteria::streaming_parser::StreamingHtmlProcessor::new();
+    let _ = processor.receive_network_chunk(bytes, true);
+    let dom = processor.finish();
 
     // Verify 6 nested element levels + Document root
     let mut current_id = dom.root();
@@ -225,9 +220,9 @@ fn test_style_inline_attribute_override() {
         div { color: black; }
     "#;
     let bytes = html.as_bytes();
-    let _tokenizer = Tokenizer::new(bytes);
-    let tokens = Tokenizer::new(bytes).tokenize();
-    let dom = Parser::new(&tokens, bytes).parse();
+    let mut processor = asteria::streaming_parser::StreamingHtmlProcessor::new();
+    let _ = processor.receive_network_chunk(bytes, true);
+    let dom = processor.finish();
     let stylesheet = Stylesheet::parse(css.as_bytes());
 
     let styled = resolve_styles(&dom, &stylesheet, bytes);
@@ -244,8 +239,9 @@ fn test_style_inline_attribute_override() {
 fn test_style_em_rem_percent_cascade() {
     let html = r#"<html><body style="font-size: 20px;"><div style="font-size: 1.5em;"><p style="font-size: 0.5em;">Nested</p></div></body></html>"#;
     let bytes = html.as_bytes();
-    let tokens = Tokenizer::new(bytes).tokenize();
-    let dom = Parser::new(&tokens, bytes).parse();
+    let mut processor = asteria::streaming_parser::StreamingHtmlProcessor::new();
+    let _ = processor.receive_network_chunk(bytes, true);
+    let dom = processor.finish();
     let stylesheet = Stylesheet::parse(b"");
 
     let styled = resolve_styles(&dom, &stylesheet, bytes);
@@ -272,7 +268,7 @@ fn test_layout_margin_auto_horizontal_centering() {
     let mut styled_store = None;
 
     let html = r#"<html><body><div id="centered"></div></body></html>"#;
-    let css = r#"#centered { width: 400px; margin-left: auto; margin-right: auto; }"#;
+    let css = r#"body { margin: 0; } #centered { width: 400px; margin-left: auto; margin-right: auto; padding: 0; border: 0px; }"#;
 
     let layout = parse_and_layout_full(
         html,
@@ -305,8 +301,8 @@ fn test_layout_nested_coordinate_accumulation() {
     let html = r#"<html><body><div id="parent"><div id="child"></div></div></body></html>"#;
     let css = r#"
         body { margin: 0; padding: 0; }
-        #parent { margin-left: 50px; margin-top: 30px; padding-left: 20px; padding-top: 10px; border-left-width: 5px; border-top-width: 5px; }
-        #child { margin-left: 15px; margin-top: 15px; width: 100px; height: 50px; }
+        #parent { margin-left: 50px; margin-top: 30px; padding-left: 20px; padding-top: 10px; border-left-width: 5px; border-top-width: 5px; border-right-width: 0px; border-bottom-width: 0px; }
+        #child { margin-left: 15px; margin-top: 15px; width: 100px; height: 50px; border-left-width: 0px; border-top-width: 0px; border-right-width: 0px; border-bottom-width: 0px; padding: 0px; }
     "#;
 
     let layout = parse_and_layout_full(

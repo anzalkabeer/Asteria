@@ -48,6 +48,19 @@ pub enum PropertyId {
     FontWeight,
     TextAlign,
     LineHeight,
+
+    // Grid
+    GridTemplateColumns,
+    GridTemplateRows,
+    GridColumn,
+    GridRow,
+    GridGap,
+
+    // Animation
+    AnimationName,
+    AnimationDuration,
+    AnimationTimingFunction,
+    AnimationIterationCount,
 }
 
 /// All known property IDs — useful for iterating over every property
@@ -77,6 +90,15 @@ pub const ALL_PROPERTIES: &[PropertyId] = &[
     PropertyId::FontWeight,
     PropertyId::TextAlign,
     PropertyId::LineHeight,
+    PropertyId::GridTemplateColumns,
+    PropertyId::GridTemplateRows,
+    PropertyId::GridColumn,
+    PropertyId::GridRow,
+    PropertyId::GridGap,
+    PropertyId::AnimationName,
+    PropertyId::AnimationDuration,
+    PropertyId::AnimationTimingFunction,
+    PropertyId::AnimationIterationCount,
 ];
 
 /// Returns true if this property is inherited by default.
@@ -115,6 +137,15 @@ pub fn is_inherited(id: PropertyId) -> bool {
         PropertyId::BorderColor => false,
         PropertyId::BorderStyle => false,
         PropertyId::BackgroundColor => false,
+        PropertyId::GridTemplateColumns => false,
+        PropertyId::GridTemplateRows => false,
+        PropertyId::GridColumn => false,
+        PropertyId::GridRow => false,
+        PropertyId::GridGap => false,
+        PropertyId::AnimationName => false,
+        PropertyId::AnimationDuration => false,
+        PropertyId::AnimationTimingFunction => false,
+        PropertyId::AnimationIterationCount => false,
     }
 }
 
@@ -153,6 +184,17 @@ pub fn property_from_name(name: &str) -> Option<PropertyId> {
         "text-align" => Some(PropertyId::TextAlign),
         "line-height" => Some(PropertyId::LineHeight),
 
+        "grid-template-columns" => Some(PropertyId::GridTemplateColumns),
+        "grid-template-rows" => Some(PropertyId::GridTemplateRows),
+        "grid-column" => Some(PropertyId::GridColumn),
+        "grid-row" => Some(PropertyId::GridRow),
+        "grid-gap" | "gap" => Some(PropertyId::GridGap),
+
+        "animation-name" => Some(PropertyId::AnimationName),
+        "animation-duration" => Some(PropertyId::AnimationDuration),
+        "animation-timing-function" => Some(PropertyId::AnimationTimingFunction),
+        "animation-iteration-count" => Some(PropertyId::AnimationIterationCount),
+
         // Shorthands — handled specially in style.rs
         "margin" | "padding" => None,
         _ => None,
@@ -161,7 +203,7 @@ pub fn property_from_name(name: &str) -> Option<PropertyId> {
 
 /// Returns true if the given property name is a shorthand that needs expansion.
 pub fn is_shorthand(name: &str) -> bool {
-    matches!(name, "margin" | "padding")
+    matches!(name, "margin" | "padding" | "border")
 }
 
 /// Expand a shorthand property into its constituent longhand PropertyIds.
@@ -239,6 +281,6 @@ mod tests {
         for &prop in ALL_PROPERTIES {
             let _ = is_inherited(prop);
         }
-        assert_eq!(ALL_PROPERTIES.len(), 24);
+        assert_eq!(ALL_PROPERTIES.len(), 33);
     }
 }

@@ -51,7 +51,9 @@ pub fn compute_specificity(selector: &Selector) -> Specificity {
         for simple in compound {
             match simple {
                 SimpleSelector::Id(_) => ids += 1,
-                SimpleSelector::Class(_) => classes += 1,
+                SimpleSelector::Class(_)
+                | SimpleSelector::PseudoClass(_)
+                | SimpleSelector::Attribute(_, _) => classes += 1,
                 SimpleSelector::Tag(_) => tags += 1,
                 SimpleSelector::Universal => {} // contributes 0
             }
@@ -137,6 +139,15 @@ fn is_default_block_tag(tag: &str) -> bool {
 }
 
 pub fn resolve_styles(dom: &Dom, stylesheet: &Stylesheet, source: &[u8]) -> StyledNode {
+    resolve_styles_with_viewport(dom, stylesheet, source, 800.0)
+}
+
+pub fn resolve_styles_with_viewport(
+    dom: &Dom,
+    stylesheet: &Stylesheet,
+    source: &[u8],
+    viewport_width: f32,
+) -> StyledNode {
     let root_style = ComputedStyle::default();
     build_styled_node(
         dom,
@@ -145,6 +156,7 @@ pub fn resolve_styles(dom: &Dom, stylesheet: &Stylesheet, source: &[u8]) -> Styl
         source,
         &root_style,
         ROOT_FONT_SIZE,
+        viewport_width,
     )
 }
 
@@ -160,6 +172,7 @@ fn build_styled_node(
     source: &[u8],
     parent_style: &ComputedStyle,
     root_font_size: f32,
+    viewport_width: f32,
 ) -> StyledNode {
     let node = dom.get(node_id);
 
@@ -169,8 +182,20 @@ fn build_styled_node(
             // ── Step 1: Collect all matching declarations ──────────
             let mut declarations = Vec::new();
 
+            // Collect top-level rules and applicable @media rules
+            let mut all_rules: Vec<&crate::css_parser::StyleRule> =
+                stylesheet.rules.iter().collect();
+
+            for media in &stylesheet.media_rules {
+                let matches_min = media.min_width.is_none_or(|mw| viewport_width >= mw);
+                let matches_max = media.max_width.is_none_or(|mw| viewport_width <= mw);
+                if matches_min && matches_max {
+                    all_rules.extend(media.rules.iter());
+                }
+            }
+
             // Test every rule against this node
-            for (rule_index, rule) in stylesheet.rules.iter().enumerate() {
+            for rule in &all_rules {
                 // Find the highest-specificity selector that matches
                 let mut best_specificity: Option<Specificity> = None;
 
@@ -191,7 +216,7 @@ fn build_styled_node(
                             property: decl.property.clone(),
                             value: decl.value.clone(),
                             specificity,
-                            source_order: rule_index,
+                            source_order: rule.position,
                             origin: Origin::Author,
                         });
                     }
@@ -238,7 +263,31 @@ fn build_styled_node(
             let mut expanded: HashMap<String, String> = HashMap::new();
             for (prop, value) in &specified {
                 if properties::is_shorthand(prop) {
-                    if let Some(longhand_ids) = properties::expand_shorthand(prop) {
+                    if prop == "border" {
+                        let (w, s, c) = values::parse_border_shorthand(value);
+                        if let Some(w_val) = w {
+                            for edge_name in &[
+                                "border-top-width",
+                                "border-right-width",
+                                "border-bottom-width",
+                                "border-left-width",
+                            ] {
+                                if !specified.contains_key(*edge_name) {
+                                    expanded.insert(edge_name.to_string(), w_val.clone());
+                                }
+                            }
+                        }
+                        if let Some(s_val) = s {
+                            if !specified.contains_key("border-style") {
+                                expanded.insert("border-style".to_string(), s_val);
+                            }
+                        }
+                        if let Some(c_val) = c {
+                            if !specified.contains_key("border-color") {
+                                expanded.insert("border-color".to_string(), c_val);
+                            }
+                        }
+                    } else if let Some(longhand_ids) = properties::expand_shorthand(prop) {
                         let edges =
                             values::parse_edges(value, parent_style.font_size, root_font_size);
                         let edge_values = [edges.top, edges.right, edges.bottom, edges.left];
@@ -258,17 +307,57 @@ fn build_styled_node(
             }
 
             // ── Step 5: Build ComputedStyle with inheritance ──────
+            let mut current_variables = parent_style.variables.clone();
+
+            // Extract and update custom properties from specified
+            for (prop, value) in &specified {
+                if prop.starts_with("--") {
+                    current_variables.insert(prop.clone(), value.clone());
+                }
+            }
+
+            // A helper to substitute `var()` in a value string
+            let substitute_vars =
+                |val: &str, vars: &std::collections::HashMap<String, String>| -> String {
+                    if !val.contains("var(") {
+                        return val.to_string();
+                    }
+                    let mut result = val.to_string();
+                    while let Some(start) = result.find("var(") {
+                        if let Some(end_offset) = result[start + 4..].find(')') {
+                            // Extract inner string by indexing (avoids borrowing `result`)
+                            let var_inner =
+                                result[start + 4..start + 4 + end_offset].trim().to_string();
+                            let parts: Vec<&str> = var_inner.splitn(2, ',').collect();
+                            let var_name = parts[0].trim();
+                            let fallback = if parts.len() > 1 { parts[1].trim() } else { "" };
+
+                            let resolved_val = if let Some(v) = vars.get(var_name) {
+                                v.clone()
+                            } else {
+                                fallback.to_string()
+                            };
+
+                            result.replace_range(start..start + 4 + end_offset + 1, &resolved_val);
+                        } else {
+                            break;
+                        }
+                    }
+                    result
+                };
+
             let mut computed = ComputedStyle::default();
 
             // First: resolve font-size (other em values depend on it)
-            if let Some(fs_value) = specified.get("font-size") {
+            if let Some(raw_fs_value) = specified.get("font-size") {
+                let fs_value = substitute_vars(raw_fs_value, &current_variables);
                 if fs_value == "inherit" {
                     computed.font_size = parent_style.font_size;
                 } else if fs_value == "initial" {
                     computed.font_size = 16.0;
                 } else {
                     computed.font_size =
-                        values::parse_length(fs_value, parent_style.font_size, root_font_size);
+                        values::parse_length(&fs_value, parent_style.font_size, root_font_size);
                 }
             } else if properties::is_inherited(PropertyId::FontSize) {
                 // font-size inherits — copy from parent
@@ -287,7 +376,8 @@ fn build_styled_node(
 
                 let prop_name = property_id_to_name(prop_id);
 
-                if let Some(value) = specified.get(prop_name) {
+                if let Some(raw_value) = specified.get(prop_name) {
+                    let value = substitute_vars(raw_value, &current_variables);
                     if value == "inherit" {
                         copy_property(&mut computed, parent_style, prop_id);
                     } else if value == "initial" {
@@ -295,28 +385,112 @@ fn build_styled_node(
                     } else {
                         computed.set_property(
                             prop_id,
-                            value,
+                            &value,
                             parent_style.font_size,
                             root_font_size,
                         );
                     }
-                } else {
-                    // Property not specified — apply defaulting
-                    if properties::is_inherited(prop_id) {
-                        copy_property(&mut computed, parent_style, prop_id);
-                    }
-                    // Non-inherited: keep initial value from Default impl
-                    // User-Agent default stylesheet: block tags default to Display::Block
-                    if prop_id == PropertyId::Display {
-                        if let NodeKind::Element { tag_start, tag_end } = &node.kind {
-                            let tag_name = std::str::from_utf8(
-                                &source[*tag_start as usize..*tag_end as usize],
-                            )
-                            .unwrap_or("");
-                            if is_default_block_tag(tag_name) {
-                                computed.display = Display::Block;
-                            }
+                } else if properties::is_inherited(prop_id) {
+                    copy_property(&mut computed, parent_style, prop_id);
+                }
+            }
+
+            // Assign the resolved variables to the computed style
+            computed.variables = current_variables;
+
+            // User-Agent default stylesheet: apply tag-specific defaults for un-specified properties
+            if let NodeKind::Element { tag_start, tag_end } = &node.kind {
+                let tag_name = std::str::from_utf8(&source[*tag_start as usize..*tag_end as usize])
+                    .unwrap_or("")
+                    .to_ascii_lowercase();
+
+                if !specified.contains_key("display") {
+                    match tag_name.as_str() {
+                        "head" | "title" | "meta" | "script" | "style" | "link" => {
+                            computed.display = Display::None;
                         }
+                        "img" => {
+                            computed.display = Display::InlineBlock;
+                        }
+                        _ if is_default_block_tag(&tag_name) => {
+                            computed.display = Display::Block;
+                        }
+                        _ => {}
+                    }
+                }
+
+                if tag_name == "img" {
+                    if computed.width.is_none() {
+                        computed.width = Some(160.0);
+                    }
+                    if computed.height.is_none() {
+                        computed.height = Some(100.0);
+                    }
+                }
+
+                if !specified.contains_key("background-color") {
+                    match tag_name.as_str() {
+                        "body" => {
+                            computed.background_color = values::Color::rgb(248, 250, 252);
+                        }
+                        "h1" => {
+                            computed.background_color = values::Color::rgb(240, 249, 255);
+                        }
+                        "div" => {
+                            computed.background_color = values::Color::rgb(248, 250, 252);
+                        }
+                        "img" => {
+                            computed.background_color = values::Color::rgb(226, 232, 240);
+                        }
+                        _ => {}
+                    }
+                }
+
+                if !specified.contains_key("color") && computed.color == values::Color::BLACK {
+                    if tag_name == "h1" {
+                        computed.color = values::Color::rgb(3, 105, 161);
+                    }
+                }
+
+                if !specified.contains_key("border") && !specified.contains_key("border-color") {
+                    match tag_name.as_str() {
+                        "h1" => {
+                            computed.border_color = values::Color::rgb(2, 132, 199);
+                        }
+                        "div" | "img" => {
+                            computed.border_color = values::Color::rgb(203, 213, 225);
+                        }
+                        _ => {}
+                    }
+                }
+
+                if !specified.contains_key("border")
+                    && !specified.contains_key("border-width")
+                    && !specified.contains_key("border-left-width")
+                    && !specified.contains_key("border-top-width")
+                    && !specified.contains_key("border-right-width")
+                    && !specified.contains_key("border-bottom-width")
+                {
+                    match tag_name.as_str() {
+                        "h1" => {
+                            computed.border_width.left = 4.0;
+                        }
+                        "div" | "img" => {
+                            computed.border_width = values::Edges::uniform(1.0);
+                        }
+                        _ => {}
+                    }
+                }
+
+                if !specified.contains_key("margin") && !specified.contains_key("margin-top") {
+                    if tag_name == "body" {
+                        computed.margin = values::Edges::uniform(8.0);
+                    }
+                }
+
+                if !specified.contains_key("padding") && !specified.contains_key("padding-top") {
+                    if tag_name == "h1" || tag_name == "div" {
+                        computed.padding = values::Edges::uniform(12.0);
                     }
                 }
             }
@@ -343,7 +517,15 @@ fn build_styled_node(
         .children
         .iter()
         .map(|&child_id| {
-            build_styled_node(dom, child_id, stylesheet, source, &styles, root_font_size)
+            build_styled_node(
+                dom,
+                child_id,
+                stylesheet,
+                source,
+                &styles,
+                root_font_size,
+                viewport_width,
+            )
         })
         .collect();
 
@@ -381,6 +563,23 @@ fn copy_property(child: &mut ComputedStyle, parent: &ComputedStyle, prop: Proper
         PropertyId::FontWeight => child.font_weight = parent.font_weight,
         PropertyId::TextAlign => child.text_align = parent.text_align,
         PropertyId::LineHeight => child.line_height = parent.line_height,
+        PropertyId::GridTemplateColumns => {
+            child.grid_template_columns = parent.grid_template_columns.clone()
+        }
+        PropertyId::GridTemplateRows => {
+            child.grid_template_rows = parent.grid_template_rows.clone()
+        }
+        PropertyId::GridColumn => child.grid_column = parent.grid_column.clone(),
+        PropertyId::GridRow => child.grid_row = parent.grid_row.clone(),
+        PropertyId::GridGap => child.grid_gap = parent.grid_gap,
+        PropertyId::AnimationName => child.animation_name = parent.animation_name.clone(),
+        PropertyId::AnimationDuration => child.animation_duration = parent.animation_duration,
+        PropertyId::AnimationTimingFunction => {
+            child.animation_timing_function = parent.animation_timing_function.clone()
+        }
+        PropertyId::AnimationIterationCount => {
+            child.animation_iteration_count = parent.animation_iteration_count
+        }
     }
 }
 
@@ -411,6 +610,15 @@ fn property_id_to_name(id: PropertyId) -> &'static str {
         PropertyId::FontWeight => "font-weight",
         PropertyId::TextAlign => "text-align",
         PropertyId::LineHeight => "line-height",
+        PropertyId::GridTemplateColumns => "grid-template-columns",
+        PropertyId::GridTemplateRows => "grid-template-rows",
+        PropertyId::GridColumn => "grid-column",
+        PropertyId::GridRow => "grid-row",
+        PropertyId::GridGap => "grid-gap",
+        PropertyId::AnimationName => "animation-name",
+        PropertyId::AnimationDuration => "animation-duration",
+        PropertyId::AnimationTimingFunction => "animation-timing-function",
+        PropertyId::AnimationIterationCount => "animation-iteration-count",
     }
 }
 
@@ -440,28 +648,24 @@ fn parse_inline_style(style_bytes: &[u8]) -> Vec<(String, String)> {
 // ─── Selector Matching ───────────────────────────────────────────
 
 /// Check if a selector matches a DOM node.
-///
-/// A selector has `parts` — a list of compound selector groups connected
-/// by descendant combinators. The LAST part must match the target node,
-/// and each earlier part must match some ancestor of the target.
 fn selector_matches(selector: &Selector, node_id: NodeId, dom: &Dom, source: &[u8]) -> bool {
+    if !selector.steps.is_empty() {
+        return selector_steps_match(&selector.steps, node_id, dom, source);
+    }
+
     if selector.parts.is_empty() {
         return false;
     }
 
-    // The last compound selector must match the target node
     let last = &selector.parts[selector.parts.len() - 1];
     if !compound_matches(last, node_id, dom, source) {
         return false;
     }
 
-    // If there's only one part, we're done
     if selector.parts.len() == 1 {
         return true;
     }
 
-    // For descendant combinator: each preceding compound selector must match
-    // some ancestor, walking up the tree from the target's parent.
     let mut current = dom.get(node_id).parent;
     let mut part_idx = selector.parts.len() - 2;
 
@@ -479,6 +683,143 @@ fn selector_matches(selector: &Selector, node_id: NodeId, dom: &Dom, source: &[u
             }
         }
     }
+}
+
+fn match_selector_from_step(
+    steps: &[crate::css_parser::SelectorStep],
+    step_idx: usize,
+    current_node: NodeId,
+    dom: &Dom,
+    source: &[u8],
+) -> bool {
+    let current_step = &steps[step_idx];
+
+    if !compound_matches(&current_step.compound, current_node, dom, source) {
+        return false;
+    }
+
+    if step_idx == 0 {
+        return true;
+    }
+
+    let combinator = current_step.combinator;
+    let prev_step_idx = step_idx - 1;
+
+    match combinator {
+        crate::css_parser::Combinator::Child => {
+            if let Some(parent_id) = dom.get(current_node).parent {
+                match_selector_from_step(steps, prev_step_idx, parent_id, dom, source)
+            } else {
+                false
+            }
+        }
+        crate::css_parser::Combinator::Descendant => {
+            let mut parent_opt = dom.get(current_node).parent;
+            while let Some(parent_id) = parent_opt {
+                if match_selector_from_step(steps, prev_step_idx, parent_id, dom, source) {
+                    return true;
+                }
+                parent_opt = dom.get(parent_id).parent;
+            }
+            false
+        }
+        crate::css_parser::Combinator::NextSibling => {
+            if let Some(sibling_id) = get_previous_element_sibling(current_node, dom) {
+                match_selector_from_step(steps, prev_step_idx, sibling_id, dom, source)
+            } else {
+                false
+            }
+        }
+        crate::css_parser::Combinator::SubsequentSibling => {
+            let mut sibling_opt = get_previous_element_sibling(current_node, dom);
+            while let Some(sibling_id) = sibling_opt {
+                if match_selector_from_step(steps, prev_step_idx, sibling_id, dom, source) {
+                    return true;
+                }
+                sibling_opt = get_previous_element_sibling(sibling_id, dom);
+            }
+            false
+        }
+    }
+}
+
+fn selector_steps_match(
+    steps: &[crate::css_parser::SelectorStep],
+    node_id: NodeId,
+    dom: &Dom,
+    source: &[u8],
+) -> bool {
+    if steps.is_empty() {
+        return false;
+    }
+    match_selector_from_step(steps, steps.len() - 1, node_id, dom, source)
+}
+
+fn get_previous_element_sibling(node_id: NodeId, dom: &Dom) -> Option<NodeId> {
+    let node = dom.get(node_id);
+    let parent_id = node.parent?;
+    let parent = dom.get(parent_id);
+    let idx = parent.children.iter().position(|&child| child == node_id)?;
+    parent.children[..idx]
+        .iter()
+        .rev()
+        .copied()
+        .find(|&child_id| matches!(dom.get(child_id).kind, NodeKind::Element { .. }))
+}
+
+fn is_first_child(node_id: NodeId, dom: &Dom) -> bool {
+    let node = dom.get(node_id);
+    if let Some(parent_id) = node.parent {
+        let parent = dom.get(parent_id);
+        let first_elem = parent
+            .children
+            .iter()
+            .find(|&&child_id| matches!(dom.get(child_id).kind, NodeKind::Element { .. }));
+        first_elem == Some(&node_id)
+    } else {
+        false
+    }
+}
+
+fn is_last_child(node_id: NodeId, dom: &Dom) -> bool {
+    let node = dom.get(node_id);
+    if let Some(parent_id) = node.parent {
+        let parent = dom.get(parent_id);
+        let last_elem = parent
+            .children
+            .iter()
+            .rev()
+            .find(|&&child_id| matches!(dom.get(child_id).kind, NodeKind::Element { .. }));
+        last_elem == Some(&node_id)
+    } else {
+        false
+    }
+}
+
+fn node_has_attribute(
+    node: &crate::dom::Node,
+    attr_name: &str,
+    expected_val: &Option<(String, String)>,
+    source: &[u8],
+) -> bool {
+    for &(ns, ne, vs, ve) in &node.attributes {
+        let name = std::str::from_utf8(&source[ns as usize..ne as usize]).unwrap_or("");
+        if name.eq_ignore_ascii_case(attr_name) {
+            if let Some((op, val)) = expected_val {
+                let actual_val = if vs == 0 && ve == 0 {
+                    ""
+                } else {
+                    std::str::from_utf8(&source[vs as usize..ve as usize]).unwrap_or("")
+                };
+                return match op.as_str() {
+                    "=" => actual_val == val,
+                    _ => false, // fallback for other operators
+                };
+            }
+            return true;
+        }
+    }
+    false
 }
 
 /// Check if all simple selectors in a compound selector match a node.
@@ -506,6 +847,13 @@ fn compound_matches(
             SimpleSelector::Class(class_name) => node_has_class(node, class_name, source),
             SimpleSelector::Id(id_name) => node_has_id(node, id_name, source),
             SimpleSelector::Universal => true,
+            SimpleSelector::PseudoClass(pseudo) => match pseudo.as_str() {
+                "first-child" => is_first_child(node_id, dom),
+                "last-child" => is_last_child(node_id, dom),
+                "hover" => false,
+                _ => false,
+            },
+            SimpleSelector::Attribute(attr, val) => node_has_attribute(node, attr, val, source),
         };
 
         if !matches {
@@ -693,10 +1041,9 @@ mod tests {
     /// Helper: parse HTML and CSS, resolve styles, return the styled tree
     fn styled_tree(html: &str, css: &str) -> (StyledNode, Dom, Vec<u8>) {
         let html_bytes = html.as_bytes().to_vec();
-        let mut tokenizer = Tokenizer::new(&html_bytes);
-        let tokens = tokenizer.tokenize();
-        let parser = Parser::new(&tokens, &html_bytes);
-        let dom = parser.parse();
+        let mut processor = crate::streaming_parser::StreamingHtmlProcessor::new();
+        let _ = processor.receive_network_chunk(&html_bytes, true);
+        let dom = processor.finish();
 
         let stylesheet = Stylesheet::parse(css.as_bytes());
         let styled = resolve_styles(&dom, &stylesheet, &html_bytes);
@@ -712,16 +1059,19 @@ mod tests {
 
         let sel = Selector {
             parts: vec![vec![SimpleSelector::Tag("div".into())]],
+            steps: Vec::new(),
         };
         assert_eq!(compute_specificity(&sel), (0, 0, 1));
 
         let sel = Selector {
             parts: vec![vec![SimpleSelector::Class("main".into())]],
+            steps: Vec::new(),
         };
         assert_eq!(compute_specificity(&sel), (0, 1, 0));
 
         let sel = Selector {
             parts: vec![vec![SimpleSelector::Id("header".into())]],
+            steps: Vec::new(),
         };
         assert_eq!(compute_specificity(&sel), (1, 0, 0));
 
@@ -731,6 +1081,7 @@ mod tests {
                 SimpleSelector::Class("main".into()),
                 SimpleSelector::Id("hero".into()),
             ]],
+            steps: Vec::new(),
         };
         assert_eq!(compute_specificity(&sel), (1, 1, 1));
 
@@ -739,6 +1090,7 @@ mod tests {
                 vec![SimpleSelector::Tag("div".into())],
                 vec![SimpleSelector::Tag("p".into())],
             ],
+            steps: Vec::new(),
         };
         assert_eq!(compute_specificity(&sel), (0, 0, 2));
     }
@@ -1024,5 +1376,67 @@ mod tests {
         let p = &div.children[0];
         assert_eq!(div.styles.text_align, TextAlign::Center);
         assert_eq!(p.styles.text_align, TextAlign::Center);
+    }
+
+    #[test]
+    fn test_child_combinator_matching() {
+        let (styled, _, _) = styled_tree(
+            "<div><p>Direct</p><span><p>Nested</p></span></div>",
+            "div > p { color: red; }",
+        );
+        let div = &styled.children[0];
+        let p_direct = &div.children[0];
+        assert_eq!(p_direct.styles.color, Color::rgb(255, 0, 0));
+
+        let span = &div.children[1];
+        let p_nested = &span.children[0];
+        assert_eq!(p_nested.styles.color, Color::BLACK);
+    }
+
+    #[test]
+    fn test_sibling_combinator_matching() {
+        let (styled, _, _) = styled_tree(
+            "<div><h1>Title</h1><p>Next</p><p>Subsequent</p></div>",
+            "h1 + p { color: green; } h1 ~ p { font-weight: bold; }",
+        );
+        let div = &styled.children[0];
+        let p1 = &div.children[1];
+        assert_eq!(p1.styles.color, Color::rgb(0, 128, 0));
+        assert_eq!(p1.styles.font_weight, 700.0);
+
+        let p2 = &div.children[2];
+        assert_eq!(p2.styles.color, Color::BLACK);
+        assert_eq!(p2.styles.font_weight, 700.0);
+    }
+
+    #[test]
+    fn test_first_and_last_child_pseudo_classes() {
+        let (styled, _, _) = styled_tree(
+            "<div><p>First</p><p>Middle</p><p>Last</p></div>",
+            "p:first-child { color: red; } p:last-child { color: blue; }",
+        );
+        let div = &styled.children[0];
+        let first = &div.children[0];
+        assert_eq!(first.styles.color, Color::rgb(255, 0, 0));
+
+        let last = &div.children[2];
+        assert_eq!(last.styles.color, Color::rgb(0, 0, 255));
+    }
+
+    #[test]
+    fn test_media_query_viewport_matching() {
+        let source = b"<div>Content</div>";
+        let mut processor = crate::streaming_parser::StreamingHtmlProcessor::new();
+        let _ = processor.receive_network_chunk(source, true);
+        let dom = processor.finish();
+        let stylesheet = crate::css_parser::Stylesheet::parse(
+            b"@media (min-width: 600px) { div { color: red; } }",
+        );
+
+        let narrow = resolve_styles_with_viewport(&dom, &stylesheet, source, 500.0);
+        assert_eq!(narrow.children[0].styles.color, Color::BLACK);
+
+        let wide = resolve_styles_with_viewport(&dom, &stylesheet, source, 800.0);
+        assert_eq!(wide.children[0].styles.color, Color::rgb(255, 0, 0));
     }
 }

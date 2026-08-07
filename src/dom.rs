@@ -55,6 +55,13 @@ pub enum NodeKind {
 // - Its children (as a list of NodeIds)
 // - Its attributes (offset pairs, only relevant for elements)
 
+#[derive(Debug, Clone, Copy, Default)]
+pub struct NodeFlags {
+    pub needs_style: bool,
+    pub needs_layout: bool,
+    pub needs_paint: bool,
+}
+
 #[derive(Debug)]
 pub struct Node {
     pub kind: NodeKind,
@@ -63,6 +70,7 @@ pub struct Node {
     /// Attributes stored as offset pairs: (name_start, name_end, value_start, value_end)
     /// Only populated for Element nodes. Zero-copy — references the source buffer.
     pub attributes: Vec<(u32, u32, u32, u32)>,
+    pub flags: NodeFlags,
 }
 
 // ─── The DOM Arena ───────────────────────────────────────────────
@@ -97,6 +105,11 @@ impl Dom {
             parent: None,
             children: Vec::new(),
             attributes: Vec::new(),
+            flags: NodeFlags {
+                needs_style: true,
+                needs_layout: true,
+                needs_paint: true,
+            },
         };
         Dom { nodes: vec![root] }
     }
@@ -139,6 +152,11 @@ impl Dom {
             parent: Some(parent),
             children: Vec::new(),
             attributes,
+            flags: NodeFlags {
+                needs_style: true,
+                needs_layout: true,
+                needs_paint: true,
+            },
         };
 
         self.nodes.push(node);
@@ -160,6 +178,11 @@ impl Dom {
             parent: Some(parent),
             children: Vec::new(),
             attributes: Vec::new(),
+            flags: NodeFlags {
+                needs_style: true,
+                needs_layout: true,
+                needs_paint: true,
+            },
         };
 
         self.nodes.push(node);
@@ -179,6 +202,11 @@ impl Dom {
             parent: Some(parent),
             children: Vec::new(),
             attributes: Vec::new(),
+            flags: NodeFlags {
+                needs_style: true,
+                needs_layout: true,
+                needs_paint: true,
+            },
         };
 
         self.nodes.push(node);

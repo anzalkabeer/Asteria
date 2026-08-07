@@ -23,8 +23,7 @@ enum State {
 
 /// The HTML tokenizer. Consumes a byte slice and produces a vector of zero-copy tokens.
 /// Tokens reference offsets into the original input buffer — no string allocations.
-pub struct Tokenizer<'a> {
-    input: &'a [u8],
+pub struct Tokenizer {
     pos: usize,
     state: State,
     tokens: Vec<Token>,
@@ -49,10 +48,16 @@ pub struct Tokenizer<'a> {
     current_attrs: Vec<Attribute>,
 }
 
-impl<'a> Tokenizer<'a> {
-    pub fn new(input: &'a [u8]) -> Self {
+impl Default for Tokenizer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[allow(unused_variables)]
+impl Tokenizer {
+    pub fn new() -> Self {
         Tokenizer {
-            input,
             pos: 0,
             state: State::Data,
             tokens: Vec::new(),
@@ -69,40 +74,46 @@ impl<'a> Tokenizer<'a> {
     }
 
     /// Run the tokenizer and return all produced tokens.
-    pub fn tokenize(&mut self) -> Vec<Token> {
-        while self.pos <= self.input.len() {
-            // If we've consumed every byte, flush any remaining text and emit Eof
-            if self.pos == self.input.len() {
-                if self.state == State::Data && self.pos > self.token_start {
-                    self.emit_text();
+    pub fn process_chunk(&mut self, input: &[u8], is_eof: bool) -> Vec<Token> {
+        while self.pos <= input.len() {
+            // If we are at the end of the current buffer
+            if self.pos == input.len() {
+                if is_eof {
+                    if self.state == State::Data && self.pos > self.token_start {
+                        self.emit_text();
+                    }
+                    self.tokens.push(Token {
+                        kind: TokenKind::Eof,
+                        start: self.pos as u32,
+                        end: self.pos as u32,
+                        attributes: Vec::new(),
+                    });
                 }
-                self.tokens.push(Token {
-                    kind: TokenKind::Eof,
-                    start: self.pos as u32,
-                    end: self.pos as u32,
-                    attributes: Vec::new(),
-                });
-                break;
+                break; // Pause and wait for next chunk
             }
 
-            let byte = self.input[self.pos];
+            let byte = input[self.pos];
 
             match self.state {
-                State::Data => self.handle_data(byte),
-                State::TagOpen => self.handle_tag_open(byte),
-                State::TagName => self.handle_tag_name(byte),
-                State::EndTagOpen => self.handle_end_tag_open(byte),
-                State::SelfClosingStartTag => self.handle_self_closing_start_tag(byte),
-                State::BeforeAttributeName => self.handle_before_attribute_name(byte),
-                State::AttributeName => self.handle_attribute_name(byte),
-                State::AfterAttributeName => self.handle_after_attribute_name(byte),
-                State::BeforeAttributeValue => self.handle_before_attribute_value(byte),
-                State::AttributeValueDoubleQuoted => self.handle_attr_value_double_quoted(byte),
-                State::AttributeValueSingleQuoted => self.handle_attr_value_single_quoted(byte),
-                State::AttributeValueUnquoted => self.handle_attr_value_unquoted(byte),
-                State::AfterAttributeValue => self.handle_after_attribute_value(byte),
-                State::Comment => self.handle_comment(byte),
-                State::Doctype => self.handle_doctype(byte),
+                State::Data => self.handle_data(input, byte),
+                State::TagOpen => self.handle_tag_open(input, byte),
+                State::TagName => self.handle_tag_name(input, byte),
+                State::EndTagOpen => self.handle_end_tag_open(input, byte),
+                State::SelfClosingStartTag => self.handle_self_closing_start_tag(input, byte),
+                State::BeforeAttributeName => self.handle_before_attribute_name(input, byte),
+                State::AttributeName => self.handle_attribute_name(input, byte),
+                State::AfterAttributeName => self.handle_after_attribute_name(input, byte),
+                State::BeforeAttributeValue => self.handle_before_attribute_value(input, byte),
+                State::AttributeValueDoubleQuoted => {
+                    self.handle_attr_value_double_quoted(input, byte)
+                }
+                State::AttributeValueSingleQuoted => {
+                    self.handle_attr_value_single_quoted(input, byte)
+                }
+                State::AttributeValueUnquoted => self.handle_attr_value_unquoted(input, byte),
+                State::AfterAttributeValue => self.handle_after_attribute_value(input, byte),
+                State::Comment => self.handle_comment(input, byte),
+                State::Doctype => self.handle_doctype(input, byte),
             }
 
             self.pos += 1;
@@ -114,7 +125,7 @@ impl<'a> Tokenizer<'a> {
     // ─── State Handlers ──────────────────────────────────────────────
 
     /// Data state: default state, accumulates text until we hit '<'
-    fn handle_data(&mut self, byte: u8) {
+    fn handle_data(&mut self, input: &[u8], byte: u8) {
         if byte == b'<' {
             // Flush any accumulated text before the '<'
             if self.pos > self.token_start {
@@ -127,7 +138,7 @@ impl<'a> Tokenizer<'a> {
     }
 
     /// TagOpen state: we just saw '<', figure out what kind of tag this is
-    fn handle_tag_open(&mut self, byte: u8) {
+    fn handle_tag_open(&mut self, input: &[u8], byte: u8) {
         match byte {
             b'/' => {
                 self.is_end_tag = true;
@@ -136,11 +147,11 @@ impl<'a> Tokenizer<'a> {
             b'!' => {
                 // Could be a comment (<!--) or doctype (<!DOCTYPE)
                 // Peek ahead to decide
-                if self.starts_with_at(self.pos, b"!--") {
+                if self.starts_with_at(input, self.pos, b"!--") {
                     // Skip past "!--" (we're currently on '!', advance past '--')
                     self.pos += 2; // will be incremented once more by the main loop
                     self.state = State::Comment;
-                } else if self.starts_with_at_case_insensitive(self.pos, b"!doctype") {
+                } else if self.starts_with_at_case_insensitive(input, self.pos, b"!doctype") {
                     self.state = State::Doctype;
                 } else {
                     // Unknown <! construct — treat '<!' as text
@@ -161,7 +172,7 @@ impl<'a> Tokenizer<'a> {
     }
 
     /// EndTagOpen state: we saw '</', now read the tag name
-    fn handle_end_tag_open(&mut self, byte: u8) {
+    fn handle_end_tag_open(&mut self, input: &[u8], byte: u8) {
         match byte {
             b'a'..=b'z' | b'A'..=b'Z' => {
                 self.tag_name_start = self.pos;
@@ -181,7 +192,7 @@ impl<'a> Tokenizer<'a> {
     }
 
     /// TagName state: reading the tag name character by character
-    fn handle_tag_name(&mut self, byte: u8) {
+    fn handle_tag_name(&mut self, input: &[u8], byte: u8) {
         match byte {
             b' ' | b'\t' | b'\n' | b'\r' => {
                 self.tag_name_end = self.pos;
@@ -204,7 +215,7 @@ impl<'a> Tokenizer<'a> {
     }
 
     /// SelfClosingStartTag state: we saw '/' inside a tag, expecting '>'
-    fn handle_self_closing_start_tag(&mut self, byte: u8) {
+    fn handle_self_closing_start_tag(&mut self, input: &[u8], byte: u8) {
         if byte == b'>' {
             self.is_end_tag = false; // self-closing tags are not end tags
             self.emit_self_closing_tag();
@@ -218,7 +229,7 @@ impl<'a> Tokenizer<'a> {
     }
 
     /// BeforeAttributeName state: whitespace between tag name and attributes, or between attributes
-    fn handle_before_attribute_name(&mut self, byte: u8) {
+    fn handle_before_attribute_name(&mut self, input: &[u8], byte: u8) {
         match byte {
             b' ' | b'\t' | b'\n' | b'\r' => {
                 // Skip whitespace
@@ -240,7 +251,7 @@ impl<'a> Tokenizer<'a> {
     }
 
     /// AttributeName state: reading an attribute name
-    fn handle_attribute_name(&mut self, byte: u8) {
+    fn handle_attribute_name(&mut self, input: &[u8], byte: u8) {
         match byte {
             b'=' => {
                 self.attr_name_end = self.pos;
@@ -271,7 +282,7 @@ impl<'a> Tokenizer<'a> {
     }
 
     /// AfterAttributeName state: saw whitespace after attribute name, could be `=` or another attribute
-    fn handle_after_attribute_name(&mut self, byte: u8) {
+    fn handle_after_attribute_name(&mut self, input: &[u8], byte: u8) {
         match byte {
             b' ' | b'\t' | b'\n' | b'\r' => {
                 // Skip whitespace
@@ -299,7 +310,7 @@ impl<'a> Tokenizer<'a> {
     }
 
     /// BeforeAttributeValue state: just saw '=', expecting the value
-    fn handle_before_attribute_value(&mut self, byte: u8) {
+    fn handle_before_attribute_value(&mut self, input: &[u8], byte: u8) {
         match byte {
             b' ' | b'\t' | b'\n' | b'\r' => {
                 // Skip whitespace between '=' and value
@@ -330,7 +341,7 @@ impl<'a> Tokenizer<'a> {
     }
 
     /// AttributeValueDoubleQuoted state: reading value inside "..."
-    fn handle_attr_value_double_quoted(&mut self, byte: u8) {
+    fn handle_attr_value_double_quoted(&mut self, input: &[u8], byte: u8) {
         if byte == b'"' {
             self.attr_value_end = self.pos; // value ends before the closing quote
             self.push_attribute();
@@ -340,7 +351,7 @@ impl<'a> Tokenizer<'a> {
     }
 
     /// AttributeValueSingleQuoted state: reading value inside '...'
-    fn handle_attr_value_single_quoted(&mut self, byte: u8) {
+    fn handle_attr_value_single_quoted(&mut self, input: &[u8], byte: u8) {
         if byte == b'\'' {
             self.attr_value_end = self.pos;
             self.push_attribute();
@@ -349,7 +360,7 @@ impl<'a> Tokenizer<'a> {
     }
 
     /// AttributeValueUnquoted state: reading a bare value (no quotes)
-    fn handle_attr_value_unquoted(&mut self, byte: u8) {
+    fn handle_attr_value_unquoted(&mut self, input: &[u8], byte: u8) {
         match byte {
             b' ' | b'\t' | b'\n' | b'\r' => {
                 self.attr_value_end = self.pos;
@@ -376,7 +387,7 @@ impl<'a> Tokenizer<'a> {
     }
 
     /// AfterAttributeValue state: just finished a quoted attribute value
-    fn handle_after_attribute_value(&mut self, byte: u8) {
+    fn handle_after_attribute_value(&mut self, input: &[u8], byte: u8) {
         match byte {
             b' ' | b'\t' | b'\n' | b'\r' => {
                 self.state = State::BeforeAttributeName;
@@ -398,8 +409,8 @@ impl<'a> Tokenizer<'a> {
     }
 
     /// Comment state: inside <!-- ... -->, scanning for the closing -->
-    fn handle_comment(&mut self, byte: u8) {
-        if byte == b'-' && self.starts_with_at(self.pos, b"-->") {
+    fn handle_comment(&mut self, input: &[u8], byte: u8) {
+        if byte == b'-' && self.starts_with_at(input, self.pos, b"-->") {
             // Found the closing '-->'
             // token_start points to '<', comment content is between '<!--' and '-->'
             let comment_content_start = self.token_start + 4; // skip past '<!--'
@@ -418,7 +429,7 @@ impl<'a> Tokenizer<'a> {
     }
 
     /// Doctype state: inside <!DOCTYPE ...>, scanning for '>'
-    fn handle_doctype(&mut self, byte: u8) {
+    fn handle_doctype(&mut self, input: &[u8], byte: u8) {
         if byte == b'>' {
             self.tokens.push(Token {
                 kind: TokenKind::Doctype,
@@ -495,20 +506,20 @@ impl<'a> Tokenizer<'a> {
     // ─── Utility Helpers ─────────────────────────────────────────────
 
     /// Check if input starting at `pos` matches the given byte sequence
-    fn starts_with_at(&self, pos: usize, needle: &[u8]) -> bool {
-        if pos + needle.len() > self.input.len() {
+    fn starts_with_at(&self, input: &[u8], pos: usize, needle: &[u8]) -> bool {
+        if pos + needle.len() > input.len() {
             return false;
         }
-        &self.input[pos..pos + needle.len()] == needle
+        &input[pos..pos + needle.len()] == needle
     }
 
     /// Case-insensitive version of starts_with_at
-    fn starts_with_at_case_insensitive(&self, pos: usize, needle: &[u8]) -> bool {
-        if pos + needle.len() > self.input.len() {
+    fn starts_with_at_case_insensitive(&self, input: &[u8], pos: usize, needle: &[u8]) -> bool {
+        if pos + needle.len() > input.len() {
             return false;
         }
         for (i, &b) in needle.iter().enumerate() {
-            if !self.input[pos + i].eq_ignore_ascii_case(&b) {
+            if !input[pos + i].eq_ignore_ascii_case(&b) {
                 return false;
             }
         }
@@ -524,8 +535,8 @@ mod tests {
 
     /// Helper: tokenize an HTML string and return the tokens
     fn tokenize(html: &str) -> Vec<Token> {
-        let mut tokenizer = Tokenizer::new(html.as_bytes());
-        tokenizer.tokenize()
+        let mut tokenizer = Tokenizer::new();
+        tokenizer.process_chunk(html.as_bytes(), true)
     }
 
     /// Helper: extract the text slice a token points to
