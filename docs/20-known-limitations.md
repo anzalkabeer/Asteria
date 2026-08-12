@@ -40,14 +40,14 @@
 | Inheritance | ✅ | `color`, `font-size`, and other inherited properties |
 | Shorthand expansion (`margin`, `padding`, `border`) | ✅ | Supported |
 | `@media` viewport queries | ✅ | `min-width`, `max-width` |
+| Attribute selectors (`[type="text"]`) | ✅ | Attribute name and value matching (`[attr]`, `[attr="val"]`) |
+| `@keyframes` / CSS animations | Partial | `@keyframes` rules parsed into `KeyframeRule` & animation tracks (`animation.rs`) |
 | `!important` | ❌ | Not yet implemented |
 | `@import` | ❌ | External stylesheet inclusion not supported |
-| `@keyframes` / CSS animations | ❌ | Not supported |
 | CSS transitions | ❌ | Not supported |
 | `var()` / custom properties | ❌ | Not supported |
 | `::before` / `::after` pseudo-elements | ❌ | Not supported |
 | `:nth-child()`, `:not()` pseudo-classes | ❌ | Not supported |
-| Attribute selectors (`[type="text"]`) | ❌ | Not supported |
 | `calc()` | ❌ | Not supported |
 | CSS Grid | ❌ | Not supported |
 | `opacity` | ❌ | Not supported |

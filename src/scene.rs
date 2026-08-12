@@ -437,6 +437,792 @@ pub fn build_scene_graph(display_list: &DisplayList, segment_height: f32) -> Sce
     scene
 }
 
+use crate::ui_theme::LabTheme;
+
+/// Build a flat SceneGraph containing the Laboratory Design System Browser Shell UI (Top Bar,
+/// Tab Strip, Command Line / Address Bar, Telemetry Footer, and Window Control HUD)
+/// layered above the page viewport content.
+pub fn build_browser_ui_scene_graph(
+    display_list: &DisplayList,
+    segment_height: f32,
+    viewport_width: f32,
+    viewport_height: f32,
+    theme: &LabTheme,
+    active_url: &str,
+    tab_titles: &[&str],
+    active_tab_index: usize,
+    fps: u32,
+    latency_ms: u32,
+) -> SceneGraph {
+    let mut scene = SceneGraph::with_capacity(display_list.commands.len() + 60);
+    let mut z_order: u32 = 0;
+
+    // ─── 1. Viewport Page Content (Offset down by y = 84px) ─────────
+    let y_offset = 84.0;
+
+    for cmd in &display_list.commands {
+        match cmd {
+            DisplayCommand::SolidColor {
+                color,
+                rect,
+                link_url,
+            } => {
+                let shifted_rect = Rect {
+                    x: rect.x,
+                    y: rect.y + y_offset,
+                    width: rect.width,
+                    height: rect.height,
+                };
+                let seg = assign_segment(shifted_rect.y, segment_height);
+                scene.push(
+                    SceneNode {
+                        rect: shifted_rect,
+                        kind: SceneNodeKind::SolidRect,
+                        parent: None,
+                        z_order,
+                        segment_id: seg,
+                        dirty: true,
+                        state: NodeState::Normal,
+                        link_url: link_url.clone(),
+                    },
+                    color_to_rgba(color),
+                    None,
+                );
+                z_order += 1;
+            }
+            DisplayCommand::Border {
+                color,
+                rect,
+                border_width,
+                link_url,
+            } => {
+                let shifted_rect = Rect {
+                    x: rect.x,
+                    y: rect.y + y_offset,
+                    width: rect.width,
+                    height: rect.height,
+                };
+                let seg = assign_segment(shifted_rect.y, segment_height);
+                scene.push(
+                    SceneNode {
+                        rect: shifted_rect,
+                        kind: SceneNodeKind::Border {
+                            widths: *border_width,
+                        },
+                        parent: None,
+                        z_order,
+                        segment_id: seg,
+                        dirty: true,
+                        state: NodeState::Normal,
+                        link_url: link_url.clone(),
+                    },
+                    color_to_rgba(color),
+                    None,
+                );
+                z_order += 1;
+            }
+            DisplayCommand::Text {
+                text,
+                x,
+                y,
+                target_width,
+                font_size,
+                color,
+                link_url,
+            } => {
+                let rect = Rect {
+                    x: *x,
+                    y: *y + y_offset,
+                    width: *target_width,
+                    height: *font_size * 1.2,
+                };
+                let seg = assign_segment(rect.y, segment_height);
+                scene.push(
+                    SceneNode {
+                        rect,
+                        kind: SceneNodeKind::Text {
+                            font_size: *font_size,
+                        },
+                        parent: None,
+                        z_order,
+                        segment_id: seg,
+                        dirty: true,
+                        state: NodeState::Normal,
+                        link_url: link_url.clone(),
+                    },
+                    color_to_rgba(color),
+                    Some(TextRun {
+                        text: text.clone(),
+                        font_size: *font_size,
+                    }),
+                );
+                z_order += 1;
+            }
+            DisplayCommand::Image {
+                image_id,
+                x,
+                y,
+                width,
+                height,
+                link_url,
+            } => {
+                let rect = Rect {
+                    x: *x,
+                    y: *y + y_offset,
+                    width: *width,
+                    height: *height,
+                };
+                let seg = assign_segment(rect.y, segment_height);
+                scene.push(
+                    SceneNode {
+                        rect,
+                        kind: SceneNodeKind::Image,
+                        parent: None,
+                        z_order,
+                        segment_id: seg,
+                        dirty: true,
+                        state: NodeState::Normal,
+                        link_url: link_url.clone(),
+                    },
+                    [1.0, 1.0, 1.0, 1.0],
+                    Some(TextRun {
+                        text: image_id.clone(),
+                        font_size: 0.0,
+                    }),
+                );
+                z_order += 1;
+            }
+        }
+    }
+
+    // ─── 2. Browser Chrome (Z-Order >= 1000) ────────────────────────
+    let mut ui_z = 1000;
+
+    let bg_color = color_to_rgba(&theme.background);
+    let surface_color = color_to_rgba(&theme.surface);
+    let border_color = color_to_rgba(&theme.border);
+    let text_color = color_to_rgba(&theme.text);
+    let muted_color = color_to_rgba(&theme.muted);
+    let accent_color = color_to_rgba(&theme.accent);
+    let alert_color = color_to_rgba(&theme.alert);
+
+    // Top Navigation Bar Container (h = 44px)
+    scene.push(
+        SceneNode {
+            rect: Rect {
+                x: 0.0,
+                y: 0.0,
+                width: viewport_width,
+                height: 44.0,
+            },
+            kind: SceneNodeKind::SolidRect,
+            parent: None,
+            z_order: ui_z,
+            segment_id: 0,
+            dirty: true,
+            state: NodeState::Normal,
+            link_url: None,
+        },
+        surface_color,
+        None,
+    );
+    ui_z += 1;
+
+    // Top Bar Bottom Border Line
+    scene.push(
+        SceneNode {
+            rect: Rect {
+                x: 0.0,
+                y: 43.0,
+                width: viewport_width,
+                height: 1.0,
+            },
+            kind: SceneNodeKind::SolidRect,
+            parent: None,
+            z_order: ui_z,
+            segment_id: 0,
+            dirty: true,
+            state: NodeState::Normal,
+            link_url: None,
+        },
+        border_color,
+        None,
+    );
+    ui_z += 1;
+
+    // Brand Header: ASTERIA // DIAGNOSTICS
+    scene.push(
+        SceneNode {
+            rect: Rect {
+                x: 16.0,
+                y: 12.0,
+                width: 200.0,
+                height: 20.0,
+            },
+            kind: SceneNodeKind::Text { font_size: 14.0 },
+            parent: None,
+            z_order: ui_z,
+            segment_id: 0,
+            dirty: true,
+            state: NodeState::Normal,
+            link_url: None,
+        },
+        text_color,
+        Some(TextRun {
+            text: "ASTERIA // DIAGNOSTICS".to_string(),
+            font_size: 14.0,
+        }),
+    );
+    ui_z += 1;
+
+    // Tab Strip (Starts at x = 230)
+    let mut tab_x = 230.0;
+    for (i, &title) in tab_titles.iter().enumerate() {
+        let is_active = i == active_tab_index;
+        let tab_w = 120.0;
+        let tab_h = 36.0;
+
+        let tab_bg = if is_active { bg_color } else { surface_color };
+        let tab_text_color = if is_active { accent_color } else { muted_color };
+
+        // Tab Pill Rect
+        scene.push(
+            SceneNode {
+                rect: Rect {
+                    x: tab_x,
+                    y: 8.0,
+                    width: tab_w,
+                    height: tab_h,
+                },
+                kind: SceneNodeKind::SolidRect,
+                parent: None,
+                z_order: ui_z,
+                segment_id: 0,
+                dirty: true,
+                state: NodeState::Normal,
+                link_url: Some(format!("asteria://tab/switch/{}", i)),
+            },
+            tab_bg,
+            None,
+        );
+        ui_z += 1;
+
+        // Active Tab Top Accent Bar
+        if is_active {
+            scene.push(
+                SceneNode {
+                    rect: Rect {
+                        x: tab_x,
+                        y: 8.0,
+                        width: tab_w,
+                        height: 2.0,
+                    },
+                    kind: SceneNodeKind::SolidRect,
+                    parent: None,
+                    z_order: ui_z,
+                    segment_id: 0,
+                    dirty: true,
+                    state: NodeState::Normal,
+                    link_url: None,
+                },
+                accent_color,
+                None,
+            );
+            ui_z += 1;
+        }
+
+        // Tab Title Text
+        let label = if title.is_empty() { "Tab" } else { title };
+        scene.push(
+            SceneNode {
+                rect: Rect {
+                    x: tab_x + 12.0,
+                    y: 18.0,
+                    width: tab_w - 24.0,
+                    height: 16.0,
+                },
+                kind: SceneNodeKind::Text { font_size: 11.0 },
+                parent: None,
+                z_order: ui_z,
+                segment_id: 0,
+                dirty: true,
+                state: NodeState::Normal,
+                link_url: Some(format!("asteria://tab/switch/{}", i)),
+            },
+            tab_text_color,
+            Some(TextRun {
+                text: label.to_string(),
+                font_size: 11.0,
+            }),
+        );
+        ui_z += 1;
+
+        tab_x += tab_w + 4.0;
+    }
+
+    // '+' New Tab Button
+    scene.push(
+        SceneNode {
+            rect: Rect {
+                x: tab_x,
+                y: 12.0,
+                width: 24.0,
+                height: 24.0,
+            },
+            kind: SceneNodeKind::SolidRect,
+            parent: None,
+            z_order: ui_z,
+            segment_id: 0,
+            dirty: true,
+            state: NodeState::Normal,
+            link_url: Some("asteria://tab/new".to_string()),
+        },
+        surface_color,
+        None,
+    );
+    ui_z += 1;
+
+    scene.push(
+        SceneNode {
+            rect: Rect {
+                x: tab_x + 7.0,
+                y: 16.0,
+                width: 10.0,
+                height: 14.0,
+            },
+            kind: SceneNodeKind::Text { font_size: 13.0 },
+            parent: None,
+            z_order: ui_z,
+            segment_id: 0,
+            dirty: true,
+            state: NodeState::Normal,
+            link_url: Some("asteria://tab/new".to_string()),
+        },
+        muted_color,
+        Some(TextRun {
+            text: "+".to_string(),
+            font_size: 13.0,
+        }),
+    );
+    ui_z += 1;
+
+    // Theme Mode Toggle Switch (Dark / Light)
+    let theme_btn_x = viewport_width - 170.0;
+    scene.push(
+        SceneNode {
+            rect: Rect {
+                x: theme_btn_x,
+                y: 10.0,
+                width: 54.0,
+                height: 24.0,
+            },
+            kind: SceneNodeKind::SolidRect,
+            parent: None,
+            z_order: ui_z,
+            segment_id: 0,
+            dirty: true,
+            state: NodeState::Normal,
+            link_url: Some("asteria://theme/toggle".to_string()),
+        },
+        bg_color,
+        None,
+    );
+    ui_z += 1;
+
+    let theme_label = match theme.mode {
+        crate::ui_theme::ThemeMode::Dark => "DARK",
+        crate::ui_theme::ThemeMode::Light => "LIGHT",
+    };
+    scene.push(
+        SceneNode {
+            rect: Rect {
+                x: theme_btn_x + 8.0,
+                y: 15.0,
+                width: 40.0,
+                height: 14.0,
+            },
+            kind: SceneNodeKind::Text { font_size: 10.0 },
+            parent: None,
+            z_order: ui_z,
+            segment_id: 0,
+            dirty: true,
+            state: NodeState::Normal,
+            link_url: Some("asteria://theme/toggle".to_string()),
+        },
+        accent_color,
+        Some(TextRun {
+            text: theme_label.to_string(),
+            font_size: 10.0,
+        }),
+    );
+    ui_z += 1;
+
+    // Window HUD Controls (Top Right): Minimize [-], Maximize [□], Close [×]
+    let win_controls_x = viewport_width - 100.0;
+
+    // Minimize [-]
+    scene.push(
+        SceneNode {
+            rect: Rect {
+                x: win_controls_x,
+                y: 8.0,
+                width: 28.0,
+                height: 28.0,
+            },
+            kind: SceneNodeKind::SolidRect,
+            parent: None,
+            z_order: ui_z,
+            segment_id: 0,
+            dirty: true,
+            state: NodeState::Normal,
+            link_url: Some("asteria://window/minimize".to_string()),
+        },
+        surface_color,
+        None,
+    );
+    ui_z += 1;
+
+    scene.push(
+        SceneNode {
+            rect: Rect {
+                x: win_controls_x + 10.0,
+                y: 13.0,
+                width: 10.0,
+                height: 14.0,
+            },
+            kind: SceneNodeKind::Text { font_size: 12.0 },
+            parent: None,
+            z_order: ui_z,
+            segment_id: 0,
+            dirty: true,
+            state: NodeState::Normal,
+            link_url: Some("asteria://window/minimize".to_string()),
+        },
+        muted_color,
+        Some(TextRun {
+            text: "-".to_string(),
+            font_size: 12.0,
+        }),
+    );
+    ui_z += 1;
+
+    // Maximize [□]
+    scene.push(
+        SceneNode {
+            rect: Rect {
+                x: win_controls_x + 32.0,
+                y: 8.0,
+                width: 28.0,
+                height: 28.0,
+            },
+            kind: SceneNodeKind::SolidRect,
+            parent: None,
+            z_order: ui_z,
+            segment_id: 0,
+            dirty: true,
+            state: NodeState::Normal,
+            link_url: Some("asteria://window/maximize".to_string()),
+        },
+        surface_color,
+        None,
+    );
+    ui_z += 1;
+
+    scene.push(
+        SceneNode {
+            rect: Rect {
+                x: win_controls_x + 40.0,
+                y: 13.0,
+                width: 10.0,
+                height: 14.0,
+            },
+            kind: SceneNodeKind::Text { font_size: 11.0 },
+            parent: None,
+            z_order: ui_z,
+            segment_id: 0,
+            dirty: true,
+            state: NodeState::Normal,
+            link_url: Some("asteria://window/maximize".to_string()),
+        },
+        muted_color,
+        Some(TextRun {
+            text: "[]".to_string(),
+            font_size: 11.0,
+        }),
+    );
+    ui_z += 1;
+
+    // Close [×]
+    scene.push(
+        SceneNode {
+            rect: Rect {
+                x: win_controls_x + 64.0,
+                y: 8.0,
+                width: 28.0,
+                height: 28.0,
+            },
+            kind: SceneNodeKind::SolidRect,
+            parent: None,
+            z_order: ui_z,
+            segment_id: 0,
+            dirty: true,
+            state: NodeState::Normal,
+            link_url: Some("asteria://window/close".to_string()),
+        },
+        surface_color,
+        None,
+    );
+    ui_z += 1;
+
+    scene.push(
+        SceneNode {
+            rect: Rect {
+                x: win_controls_x + 73.0,
+                y: 13.0,
+                width: 10.0,
+                height: 14.0,
+            },
+            kind: SceneNodeKind::Text { font_size: 12.0 },
+            parent: None,
+            z_order: ui_z,
+            segment_id: 0,
+            dirty: true,
+            state: NodeState::Normal,
+            link_url: Some("asteria://window/close".to_string()),
+        },
+        alert_color,
+        Some(TextRun {
+            text: "x".to_string(),
+            font_size: 12.0,
+        }),
+    );
+    ui_z += 1;
+
+    // ─── 3. Command Line / Address Bar (y = 44px, h = 40px) ───────────
+    scene.push(
+        SceneNode {
+            rect: Rect {
+                x: 0.0,
+                y: 44.0,
+                width: viewport_width,
+                height: 40.0,
+            },
+            kind: SceneNodeKind::SolidRect,
+            parent: None,
+            z_order: ui_z,
+            segment_id: 0,
+            dirty: true,
+            state: NodeState::Normal,
+            link_url: None,
+        },
+        bg_color,
+        None,
+    );
+    ui_z += 1;
+
+    // Address Bar Input Box
+    let cmd_box_w = viewport_width - 32.0;
+    scene.push(
+        SceneNode {
+            rect: Rect {
+                x: 16.0,
+                y: 48.0,
+                width: cmd_box_w,
+                height: 32.0,
+            },
+            kind: SceneNodeKind::SolidRect,
+            parent: None,
+            z_order: ui_z,
+            segment_id: 0,
+            dirty: true,
+            state: NodeState::Normal,
+            link_url: Some("asteria://addressbar/focus".to_string()),
+        },
+        surface_color,
+        None,
+    );
+    ui_z += 1;
+
+    // Terminal icon badge `[>]`
+    scene.push(
+        SceneNode {
+            rect: Rect {
+                x: 26.0,
+                y: 56.0,
+                width: 20.0,
+                height: 16.0,
+            },
+            kind: SceneNodeKind::Text { font_size: 12.0 },
+            parent: None,
+            z_order: ui_z,
+            segment_id: 0,
+            dirty: true,
+            state: NodeState::Normal,
+            link_url: Some("asteria://addressbar/focus".to_string()),
+        },
+        accent_color,
+        Some(TextRun {
+            text: ">".to_string(),
+            font_size: 12.0,
+        }),
+    );
+    ui_z += 1;
+
+    // Active URL Text
+    let url_display = if active_url.is_empty() {
+        "Execute diagnostic command or enter URL..."
+    } else {
+        active_url
+    };
+    scene.push(
+        SceneNode {
+            rect: Rect {
+                x: 46.0,
+                y: 56.0,
+                width: cmd_box_w - 90.0,
+                height: 16.0,
+            },
+            kind: SceneNodeKind::Text { font_size: 12.0 },
+            parent: None,
+            z_order: ui_z,
+            segment_id: 0,
+            dirty: true,
+            state: NodeState::Normal,
+            link_url: Some("asteria://addressbar/focus".to_string()),
+        },
+        text_color,
+        Some(TextRun {
+            text: url_display.to_string(),
+            font_size: 12.0,
+        }),
+    );
+    ui_z += 1;
+
+    // Shortcut badge `[K]`
+    let k_x = viewport_width - 56.0;
+    scene.push(
+        SceneNode {
+            rect: Rect {
+                x: k_x,
+                y: 53.0,
+                width: 22.0,
+                height: 22.0,
+            },
+            kind: SceneNodeKind::SolidRect,
+            parent: None,
+            z_order: ui_z,
+            segment_id: 0,
+            dirty: true,
+            state: NodeState::Normal,
+            link_url: None,
+        },
+        bg_color,
+        None,
+    );
+    ui_z += 1;
+
+    scene.push(
+        SceneNode {
+            rect: Rect {
+                x: k_x + 6.0,
+                y: 58.0,
+                width: 12.0,
+                height: 12.0,
+            },
+            kind: SceneNodeKind::Text { font_size: 10.0 },
+            parent: None,
+            z_order: ui_z,
+            segment_id: 0,
+            dirty: true,
+            state: NodeState::Normal,
+            link_url: None,
+        },
+        muted_color,
+        Some(TextRun {
+            text: "K".to_string(),
+            font_size: 10.0,
+        }),
+    );
+    ui_z += 1;
+
+    // ─── 4. Telemetry Footer Status Bar (y = viewport_height - 32px) ───
+    let footer_y = (viewport_height - 32.0).max(84.0);
+
+    scene.push(
+        SceneNode {
+            rect: Rect {
+                x: 0.0,
+                y: footer_y,
+                width: viewport_width,
+                height: 32.0,
+            },
+            kind: SceneNodeKind::SolidRect,
+            parent: None,
+            z_order: ui_z,
+            segment_id: 0,
+            dirty: true,
+            state: NodeState::Normal,
+            link_url: None,
+        },
+        surface_color,
+        None,
+    );
+    ui_z += 1;
+
+    // Telemetry Footer Top Border
+    scene.push(
+        SceneNode {
+            rect: Rect {
+                x: 0.0,
+                y: footer_y,
+                width: viewport_width,
+                height: 1.0,
+            },
+            kind: SceneNodeKind::SolidRect,
+            parent: None,
+            z_order: ui_z,
+            segment_id: 0,
+            dirty: true,
+            state: NodeState::Normal,
+            link_url: None,
+        },
+        border_color,
+        None,
+    );
+    ui_z += 1;
+
+    // Telemetry Ticker Text
+    let ticker_text = format!(
+        "FPS: {}  |  LATENCY: {}ms  |  ENGINE: v0.1.0  |  KERNEL: AST-902  |  THEME: {:?}",
+        fps, latency_ms, theme.mode
+    );
+
+    scene.push(
+        SceneNode {
+            rect: Rect {
+                x: 16.0,
+                y: footer_y + 10.0,
+                width: viewport_width - 32.0,
+                height: 16.0,
+            },
+            kind: SceneNodeKind::Text { font_size: 11.0 },
+            parent: None,
+            z_order: ui_z,
+            segment_id: 0,
+            dirty: true,
+            state: NodeState::Normal,
+            link_url: None,
+        },
+        muted_color,
+        Some(TextRun {
+            text: ticker_text,
+            font_size: 11.0,
+        }),
+    );
+
+    scene
+}
+
 // ─── Scene Graph Inspector ───────────────────────────────────────
 
 impl std::fmt::Display for SceneGraph {

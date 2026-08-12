@@ -79,6 +79,7 @@ Asteria's selector model supports:
 | Tag | `tagname` | `div` | All `<div>` elements |
 | Class | `.classname` | `.main` | Elements with `class="main"` |
 | ID | `#idname` | `#header` | The element with `id="header"` |
+| Attribute | `[attr]` / `[attr="val"]` | `[type="text"]` | Elements with matching attribute name/value |
 | Universal | `*` | `*` | Every element |
 | Pseudo-class | `:name` | `:first-child` | Structural/state pseudo-classes |
 
@@ -117,21 +118,22 @@ Currently supported pseudo-classes:
 | `:last-child` | Element is the last child of its parent |
 | `:hover` | Element is under the mouse cursor |
 
-### Media queries
+### Media queries & @keyframes
 
-Asteria supports `@media` rules with viewport-based conditions:
+Asteria supports `@media` rules with viewport-based conditions and `@keyframes` animation blocks:
 
 ```css
 @media (min-width: 768px) {
     .sidebar { display: flex; }
 }
 
-@media (max-width: 480px) {
-    .nav { display: none; }
+@keyframes pulse {
+    from { opacity: 1; }
+    to { opacity: 0; }
 }
 ```
 
-Media queries are evaluated against the current viewport dimensions. When the window is resized, applicable `@media` rules are re-evaluated.
+Media queries are evaluated against the current viewport dimensions. `@keyframes` rules are parsed into `KeyframeRule` structures with keyframe blocks and percentage/from/to selectors for the animation engine.
 
 ### Declarations and properties
 
@@ -313,10 +315,10 @@ This tree is what the layout engine consumes to compute geometry.
 |---|---|
 | `!important` declarations | 🔜 |
 | `@import` external stylesheets | 🔜 |
-| `@keyframes` animations | 🔜 |
+| `@keyframes` parsing | ✅ |
+| Attribute selectors (`[type="text"]`) | ✅ |
 | CSS custom properties (`var()`) | 🔜 |
 | `::before` / `::after` pseudo-elements | 🔜 |
-| Attribute selectors (`[type="text"]`) | 🔜 |
 | `:nth-child()` pseudo-class | 🔜 |
 
 ---

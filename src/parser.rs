@@ -206,7 +206,6 @@ fn tag_names_match(a: &[u8], b: &[u8]) -> bool {
 #[cfg(test)]
 mod tests {
     use crate::dom::NodeKind;
-    use crate::tokenizer::Tokenizer;
 
     use super::*;
 

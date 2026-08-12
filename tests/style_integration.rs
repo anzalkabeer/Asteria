@@ -11,9 +11,7 @@
 
 use asteria::css_parser::Stylesheet;
 use asteria::dom::Dom;
-use asteria::parser::Parser;
 use asteria::style::{StyledNode, resolve_styles};
-use asteria::tokenizer::Tokenizer;
 use asteria::values::{Color, Display, Edges, TextAlign};
 
 /// Helper: parse HTML + CSS → styled tree

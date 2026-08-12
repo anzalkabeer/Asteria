@@ -1034,8 +1034,6 @@ impl StyledNode {
 mod tests {
     use super::*;
     use crate::css_parser::Stylesheet;
-    use crate::parser::Parser;
-    use crate::tokenizer::Tokenizer;
     use crate::values::{Color, Display, Edges, TextAlign};
 
     /// Helper: parse HTML and CSS, resolve styles, return the styled tree

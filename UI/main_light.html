@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="en" class="overflow-x-hidden w-full max-w-full">
+<head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>ASTERIA // DIAGNOSTICS</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Geist+Mono:wght@400;500;600&amp;family=Inter:wght@400;500;600;700&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+          theme: {
+            extend: {
+              colors: {
+                "lab-white": "#ffffff",
+                "lab-text": "#0f172a",
+                "lab-accent": "#2563eb",
+                "lab-border": "#e2e8f0",
+                "lab-surface": "#f8fafc",
+                "lab-muted": "#64748b",
+                "lab-alert": "#dc2626",
+                "lab-success": "#059669"
+              },
+              fontFamily: {
+                "ui": ["Inter", "sans-serif"],
+                "tech": ["Geist Mono", "monospace"]
+              }
+            }
+          }
+        }
+    </script>
+<style>
+        *, *::before, *::after {
+            box-sizing: border-box;
+        }
+        html, body {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            max-width: 100vw;
+            overflow-x: hidden !important;
+        }
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 500, 'GRAD' 0, 'opsz' 24;
+        }
+        .ticker-wrap {
+            width: 100%;
+            overflow: hidden;
+            box-sizing: border-box;
+            white-space: nowrap;
+        }
+        .ticker {
+            display: inline-block;
+            white-space: nowrap;
+            padding-right: 100%;
+            box-sizing: content-box;
+            animation: ticker-scroll 20s linear infinite;
+        }
+        @keyframes ticker-scroll {
+            0% { transform: translateX(100%); }
+            100% { transform: translateX(-100%); }
+        }
+    </style>
+<script src="app.js"></script>
+</head>
+<body class="bg-lab-white text-lab-text min-h-screen w-full max-w-full flex flex-col relative font-ui text-sm selection:bg-lab-accent selection:text-white overflow-x-hidden">
+
+<!-- TopNavBar -->
+<nav data-tauri-drag-region class="fixed top-0 w-full max-w-full z-50 border-b border-lab-border bg-lab-surface flex justify-between items-center h-12 px-4 shadow-sm select-none box-border">
+<!-- Brand -->
+<div data-tauri-drag-region class="font-ui text-lg tracking-tight font-bold text-lab-text cursor-default flex-shrink-0">
+    ASTERIA // DIAGNOSTICS
+</div>
+
+<!-- Navigation Tabs -->
+<div class="hidden md:flex h-full items-end gap-1 px-4 flex-shrink overflow-hidden">
+<div class="nav-tab h-10 px-4 lg:px-6 flex items-center justify-center border-t-2 border-l border-r border-lab-border border-t-lab-accent bg-lab-white text-lab-accent font-ui font-semibold text-xs uppercase tracking-wider rounded-t-md cursor-pointer flex-shrink-0">
+    Console
+</div>
+<div class="nav-tab h-9 px-4 lg:px-6 flex items-center justify-center border-t border-l border-r border-lab-border bg-lab-surface text-lab-muted hover:bg-gray-100 hover:text-lab-text transition-colors cursor-pointer font-ui font-medium text-xs uppercase tracking-wider rounded-t-md flex-shrink-0">
+    Performance
+</div>
+<div class="nav-tab h-9 px-4 lg:px-6 flex items-center justify-center border-t border-l border-r border-lab-border bg-lab-surface text-lab-muted hover:bg-gray-100 hover:text-lab-text transition-colors cursor-pointer font-ui font-medium text-xs uppercase tracking-wider rounded-t-md flex-shrink-0">
+    Security
+</div>
+<div class="nav-tab h-9 px-4 lg:px-6 flex items-center justify-center border-t border-l border-r border-lab-border bg-lab-surface text-lab-muted hover:bg-gray-100 hover:text-lab-text transition-colors cursor-pointer font-ui font-medium text-xs uppercase tracking-wider rounded-t-md flex-shrink-0">
+    Builds
+</div>
+</div>
+
+<!-- Trailing Controls & Window Controls -->
+<div class="flex items-center gap-3 text-lab-muted flex-shrink-0">
+<button id="theme-toggle-btn" class="text-xs font-tech px-2 py-1 bg border border-lab-border rounded hover:text-lab-accent hover:border-lab-accent transition-colors">DARK MODE</button>
+<div class="flex items-center gap-1 border-l border-lab-border pl-3">
+<button id="win-min" class="w-6 h-6 flex items-center justify-center hover:bg-lab-border hover:text-lab-text rounded text-xs font-tech cursor-pointer">-</button>
+<button id="win-max" class="w-6 h-6 flex items-center justify-center hover:bg-lab-border hover:text-lab-text rounded text-xs font-tech cursor-pointer">[]</button>
+<button id="win-close" class="w-6 h-6 flex items-center justify-center hover:bg-red-900 hover:text-white rounded text-xs font-tech cursor-pointer">x</button>
+</div>
+</div>
+</nav>
+
+<!-- Main Content Canvas -->
+<main class="flex-1 w-full max-w-full pt-16 pb-12 z-10 flex flex-col items-center justify-start px-4 relative overflow-x-hidden box-border">
+<!-- Center Command Area -->
+<div class="w-full max-w-2xl flex flex-col items-center my-6 relative">
+<h1 class="font-ui font-bold text-lab-text mb-4 uppercase tracking-widest flex items-center gap-3 text-2xl lg:text-3xl">
+<span class="w-3 h-3 bg-lab-accent inline-block"></span>
+    Engine Core Ready
+</h1>
+<div class="w-full relative border border-lab-border bg-lab-surface h-12 flex items-center px-4 group focus-within:border-lab-accent focus-within:ring-1 focus-within:ring-lab-accent transition-all shadow-sm">
+<span class="material-symbols-outlined text-lab-muted mr-3 group-focus-within:text-lab-accent transition-colors text-[18px]" data-icon="terminal">terminal</span>
+<input class="w-full bg-transparent border-none text-lab-text font-tech text-sm focus:ring-0 placeholder:text-lab-muted outline-none" placeholder="Execute diagnostic command or search node..." type="text"/>
+<div class="flex-shrink-0 ml-3 flex items-center justify-center border border-lab-border bg-gray-200 rounded w-6 h-6 text-lab-muted font-tech text-[10px]">K</div>
+<div class="absolute top-0 left-0 px-2 py-1 bg-lab-white border-b border-r border-lab-border font-ui font-semibold text-lab-muted text-[10px] uppercase leading-none transform -translate-y-full">Command Line Interface</div>
+</div>
+</div>
+
+<!-- Engine Viewport Container (Appears on 'navigate <url>') -->
+<div id="viewport-title" class="w-full max-w-5xl font-tech text-xs text-lab-accent uppercase tracking-wider mb-1 hidden"></div>
+<iframe id="engine-viewport-frame" class="w-full max-w-5xl h-[450px] border border-lab-border bg-white rounded shadow-md mb-6 hidden" sandbox="allow-scripts allow-same-origin"></iframe>
+
+<!-- Node Grid (Fluid Responsive Layout, No Horizontal Scroll) -->
+<div class="w-full max-w-full lg:max-w-5xl grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-0 border border-lab-border bg-lab-border my-4 box-border">
+<!-- Card 1 -->
+<div class="bg-lab-surface p-4 flex flex-col hover:bg-gray-50 transition-colors border-r border-b border-lab-border">
+<div class="flex justify-between items-center mb-4 border-b border-lab-border pb-3">
+<span class="font-ui font-semibold text-[11px] text-lab-text uppercase tracking-widest">Core DB</span>
+<div class="w-2 h-2 bg-lab-success"></div>
+</div>
+<div class="flex flex-col gap-2 mb-6 text-[12px] font-tech">
+<div class="flex justify-between"><span class="text-lab-muted">CPU Usage</span><span class="text-lab-text font-medium">12%</span></div>
+<div class="flex justify-between"><span class="text-lab-muted">Memory</span><span class="text-lab-text font-medium">4.2 TB</span></div>
+<div class="flex justify-between"><span class="text-lab-muted">Uptime</span><span class="text-lab-text font-medium">94d 12h</span></div>
+<div class="flex justify-between"><span class="text-lab-muted">Thread ID</span><span class="text-lab-text font-medium">0x00A1</span></div>
+</div>
+<div class="flex items-center justify-between mt-auto pt-3 border-t border-lab-border">
+<span class="font-tech text-lab-text text-lg font-semibold">99.99%</span>
+<span class="material-symbols-outlined text-lab-muted" data-icon="database">database</span>
+</div>
+</div>
+<!-- Card 2 -->
+<div class="bg-lab-surface p-4 flex flex-col hover:bg-gray-50 transition-colors border-r border-b border-lab-border">
+<div class="flex justify-between items-center mb-4 border-b border-lab-border pb-3">
+<span class="font-ui font-semibold text-[11px] text-lab-text uppercase tracking-widest">Asset Server</span>
+<div class="w-2 h-2 bg-lab-success"></div>
+</div>
+<div class="flex flex-col gap-2 mb-6 text-[12px] font-tech">
+<div class="flex justify-between"><span class="text-lab-muted">CPU Usage</span><span class="text-lab-text font-medium">4%</span></div>
+<div class="flex justify-between"><span class="text-lab-muted">Memory</span><span class="text-lab-text font-medium">1.2 PB</span></div>
+<div class="flex justify-between"><span class="text-lab-muted">Uptime</span><span class="text-lab-text font-medium">300d 2h</span></div>
+<div class="flex justify-between"><span class="text-lab-muted">Thread ID</span><span class="text-lab-text font-medium">0x88CC</span></div>
+</div>
+<div class="flex items-center justify-between mt-auto pt-3 border-t border-lab-border">
+<span class="font-tech text-lab-text text-lg font-semibold">100.0%</span>
+<span class="material-symbols-outlined text-lab-muted" data-icon="cloud_done">cloud_done</span>
+</div>
+</div>
+<!-- Card 3 -->
+<div class="bg-lab-surface p-4 flex flex-col hover:bg-gray-50 transition-colors border-r border-b border-lab-border relative">
+<div class="flex justify-between items-center mb-4 border-b border-lab-border pb-3">
+<span class="font-ui font-semibold text-[11px] text-lab-text uppercase tracking-widest">Auth Node</span>
+<div class="w-2 h-2 bg-lab-alert"></div>
+</div>
+<div class="flex flex-col gap-2 mb-6 text-[12px] font-tech">
+<div class="flex justify-between"><span class="text-lab-muted">CPU Usage</span><span class="text-lab-text font-medium">89%</span></div>
+<div class="flex justify-between"><span class="text-lab-muted">Memory</span><span class="text-lab-alert font-bold">16.1 GB</span></div>
+<div class="flex justify-between"><span class="text-lab-muted">Uptime</span><span class="text-lab-text font-medium">12d 4h</span></div>
+<div class="flex justify-between"><span class="text-lab-muted">Thread ID</span><span class="text-lab-text font-medium">0x0F4B</span></div>
+</div>
+<div class="flex items-center justify-between mt-auto pt-3 border-t border-lab-border">
+<span class="font-tech text-lab-alert text-lg font-bold">98.45%</span>
+<span class="material-symbols-outlined text-lab-alert" data-icon="lock_open">lock_open</span>
+</div>
+<div class="absolute top-4 right-10 font-ui font-bold text-[9px] text-lab-alert bg-red-100 px-1 py-0.5 rounded border border-red-200">ALERT</div>
+</div>
+<!-- Card 4 -->
+<div class="bg-lab-surface p-4 flex flex-col hover:bg-gray-50 transition-colors border-b border-lab-border">
+<div class="flex justify-between items-center mb-4 border-b border-lab-border pb-3">
+<span class="font-ui font-semibold text-[11px] text-lab-text uppercase tracking-widest">Local Host</span>
+<div class="w-2 h-2 bg-lab-accent"></div>
+</div>
+<div class="flex flex-col gap-2 mb-6 text-[12px] font-tech">
+<div class="flex justify-between"><span class="text-lab-muted">CPU Usage</span><span class="text-lab-text font-medium">1%</span></div>
+<div class="flex justify-between"><span class="text-lab-muted">Memory</span><span class="text-lab-text font-medium">16.0 GB</span></div>
+<div class="flex justify-between"><span class="text-lab-muted">Uptime</span><span class="text-lab-text font-medium">1d 0h</span></div>
+<div class="flex justify-between"><span class="text-lab-muted">Thread ID</span><span class="text-lab-text font-medium">0x0001</span></div>
+</div>
+<div class="flex items-center justify-between mt-auto pt-3 border-t border-lab-border">
+<span class="font-tech text-lab-accent text-lg font-semibold">ONLINE</span>
+<span class="material-symbols-outlined text-lab-muted" data-icon="desktop_windows">desktop_windows</span>
+</div>
+</div>
+</div>
+</main>
+
+<!-- Footer Telemetry -->
+<footer class="fixed bottom-0 w-full h-8 z-50 border-t border-lab-border bg-lab-surface flex items-center justify-between px-4 whitespace-nowrap overflow-hidden">
+<div class="ticker-wrap flex h-full items-center font-tech text-[11px] text-lab-text font-medium">
+<div class="ticker flex gap-8 items-center h-full">
+<span>FPS: 144</span>
+<span class="text-lab-border">|</span>
+<span class="text-lab-text">LATENCY: 12ms</span>
+<span class="text-lab-border">|</span>
+<span>ENGINE: v0.1.0</span>
+<span class="text-lab-border">|</span>
+<span class="text-lab-accent font-bold">KERNEL: AST-902</span>
+<span class="text-lab-border">|</span>
+<span>Docs</span>
+<span class="text-lab-border">|</span>
+<span>Logs</span>
+</div>
+</div>
+</footer>
+</body>
+</html>

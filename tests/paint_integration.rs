@@ -8,9 +8,7 @@
 use asteria::css_parser::Stylesheet;
 use asteria::layout::layout_document;
 use asteria::paint::{DisplayCommand, build_display_list};
-use asteria::parser::Parser;
 use asteria::style::resolve_styles;
-use asteria::tokenizer::Tokenizer;
 use asteria::values::Color;
 
 #[test]

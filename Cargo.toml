@@ -1,5 +1,8 @@
+[workspace]
+members = [".", "src-tauri"]
+
 [package]
-name = "asteria_project"
+name = "asteria"
 version = "0.1.0"
 edition = "2024"
 

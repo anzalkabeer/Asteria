@@ -76,6 +76,7 @@ These modules support the pipeline but don't directly participate in it:
 
 | Module | File | Role |
 |---|---|---|
+| **Animation Manager** | `animation.rs` | Keyframe interpolation, easing functions (`lerp`, `ease`), and animation tracks |
 | **Resource Loader** | `loader.rs` | Discovers and loads HTML, CSS from disk and network. `PageResources` bundling, `ResourceCache` |
 | **String Interner** | `interner.rs` | Maps strings to `Symbol(u32)` handles. Pre-seeded with 67 common HTML tags, attributes, CSS properties |
 | **Task Scheduler** | `scheduler.rs` | Priority task queue + multi-threaded worker pool with `std::thread` and `mpsc` channels |

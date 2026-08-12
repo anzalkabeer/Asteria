@@ -10,9 +10,7 @@
 use asteria::css_parser::Stylesheet;
 use asteria::dom::Dom;
 use asteria::layout::{BoxType, LayoutBox, layout_document};
-use asteria::parser::Parser;
 use asteria::style::{StyledNode, resolve_styles};
-use asteria::tokenizer::Tokenizer;
 
 fn parse_and_layout<'a>(
     html: &'a str,

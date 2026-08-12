@@ -50,6 +50,35 @@ impl Color {
     pub const fn to_rgba(self) -> (u8, u8, u8, u8) {
         (self.r, self.g, self.b, self.a)
     }
+
+    /// Return [r, g, b, a] normalized f32 array for GPU shaders
+    pub fn to_rgba_f32(self) -> [f32; 4] {
+        [
+            self.r as f32 / 255.0,
+            self.g as f32 / 255.0,
+            self.b as f32 / 255.0,
+            self.a as f32 / 255.0,
+        ]
+    }
+
+    /// Parse hex color string (e.g. "#0b1326" or "#ffffff")
+    pub fn from_hex(s: &str) -> Option<Self> {
+        let hex = s.strip_prefix('#')?;
+        if hex.len() == 6 {
+            let r = u8::from_str_radix(&hex[0..2], 16).ok()?;
+            let g = u8::from_str_radix(&hex[2..4], 16).ok()?;
+            let b = u8::from_str_radix(&hex[4..6], 16).ok()?;
+            Some(Color::rgb(r, g, b))
+        } else if hex.len() == 8 {
+            let r = u8::from_str_radix(&hex[0..2], 16).ok()?;
+            let g = u8::from_str_radix(&hex[2..4], 16).ok()?;
+            let b = u8::from_str_radix(&hex[4..6], 16).ok()?;
+            let a = u8::from_str_radix(&hex[6..8], 16).ok()?;
+            Some(Color::new(r, g, b, a))
+        } else {
+            None
+        }
+    }
 }
 
 impl std::fmt::Display for Color {

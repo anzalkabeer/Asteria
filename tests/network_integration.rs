@@ -4,6 +4,7 @@ use std::sync::mpsc;
 use std::thread;
 
 #[test]
+#[ignore = "Requires live external network connectivity"]
 fn test_fetch_wikipedia_integration() {
     let mut client = HttpClient::new();
     let url = "https://en.wikipedia.org/wiki/Main_Page";

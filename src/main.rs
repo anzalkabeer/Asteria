@@ -230,7 +230,10 @@ fn main() {
 
         if !args.contains(&"--cli".to_string()) {
             println!("\n── Launching Hardware Renderer (wgpu) & OS Window Loop ─────────");
-            asteria::renderer::window::window::run_window_loop(scene, tab_manager);
+            asteria::renderer::window::window::run_window_loop(
+                asteria::scene::SceneGraph::new(),
+                tab_manager,
+            );
             return;
         }
     } else {

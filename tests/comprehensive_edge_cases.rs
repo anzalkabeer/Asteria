@@ -9,9 +9,7 @@
 use asteria::css_parser::Stylesheet;
 use asteria::dom::{Dom, NodeKind};
 use asteria::layout::{BoxType, LayoutBox, layout_document};
-use asteria::parser::Parser;
 use asteria::style::{StyledNode, resolve_styles};
-use asteria::tokenizer::Tokenizer;
 use asteria::values::Color;
 
 /// Helper: parse HTML + CSS → (LayoutBox, Dom, bytes, StyledNode)
