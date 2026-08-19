@@ -307,11 +307,26 @@ fn assign_segment(y: f32, segment_height: f32) -> u16 {
 ///
 /// This is the core bridge between the Paint Engine output (logical commands)
 /// and the GPU Renderer input (flat, contiguous, segment-tagged scene nodes).
+///
+/// Parent assignment uses a positional heuristic: SolidColor rectangles
+/// (element backgrounds) that fully contain a subsequent node's rect are
+/// treated as its parent. The deepest (most recently pushed) match wins.
 pub fn build_scene_graph(display_list: &DisplayList, segment_height: f32) -> SceneGraph {
     let mut scene = SceneGraph::with_capacity(display_list.commands.len());
     let mut z_order: u32 = 0;
 
+    // Stack of (SceneNodeId, Rect) for positional parent assignment.
+    // Only SolidColor nodes (backgrounds) act as potential parents.
+    let mut parent_stack: Vec<(SceneNodeId, Rect)> = Vec::new();
+
     for cmd in &display_list.commands {
+        // Determine parent: find the deepest stacked rect that contains this node
+        let node_rect = cmd_bounding_rect(cmd);
+        let parent_id = parent_stack
+            .iter()
+            .rev()
+            .find_map(|(id, r)| if rect_contains(r, &node_rect) { Some(*id) } else { None });
+
         match cmd {
             DisplayCommand::SolidColor {
                 color,
@@ -319,11 +334,11 @@ pub fn build_scene_graph(display_list: &DisplayList, segment_height: f32) -> Sce
                 link_url,
             } => {
                 let seg = assign_segment(rect.y, segment_height);
-                scene.push(
+                let id = scene.push(
                     SceneNode {
                         rect: *rect,
                         kind: SceneNodeKind::SolidRect,
-                        parent: None,
+                        parent: parent_id,
                         z_order,
                         segment_id: seg,
                         dirty: true,
@@ -333,6 +348,8 @@ pub fn build_scene_graph(display_list: &DisplayList, segment_height: f32) -> Sce
                     color_to_rgba(color),
                     None,
                 );
+                // SolidColor nodes (backgrounds) can be parents of subsequent nodes
+                parent_stack.push((id, *rect));
                 z_order += 1;
             }
             DisplayCommand::Border {
@@ -348,7 +365,7 @@ pub fn build_scene_graph(display_list: &DisplayList, segment_height: f32) -> Sce
                         kind: SceneNodeKind::Border {
                             widths: *border_width,
                         },
-                        parent: None,
+                        parent: parent_id,
                         z_order,
                         segment_id: seg,
                         dirty: true,
@@ -382,7 +399,7 @@ pub fn build_scene_graph(display_list: &DisplayList, segment_height: f32) -> Sce
                         kind: SceneNodeKind::Text {
                             font_size: *font_size,
                         },
-                        parent: None,
+                        parent: parent_id,
                         z_order,
                         segment_id: seg,
                         dirty: true,
@@ -416,7 +433,7 @@ pub fn build_scene_graph(display_list: &DisplayList, segment_height: f32) -> Sce
                     SceneNode {
                         rect,
                         kind: SceneNodeKind::Image,
-                        parent: None,
+                        parent: parent_id,
                         z_order,
                         segment_id: seg,
                         dirty: true,
@@ -435,6 +452,47 @@ pub fn build_scene_graph(display_list: &DisplayList, segment_height: f32) -> Sce
     }
 
     scene
+}
+
+/// Extract the bounding rect from a DisplayCommand.
+fn cmd_bounding_rect(cmd: &DisplayCommand) -> Rect {
+    match cmd {
+        DisplayCommand::SolidColor { rect, .. } => *rect,
+        DisplayCommand::Border { rect, .. } => *rect,
+        DisplayCommand::Text {
+            x,
+            y,
+            target_width,
+            font_size,
+            ..
+        } => Rect {
+            x: *x,
+            y: *y,
+            width: *target_width,
+            height: *font_size * 1.2,
+        },
+        DisplayCommand::Image {
+            x,
+            y,
+            width,
+            height,
+            ..
+        } => Rect {
+            x: *x,
+            y: *y,
+            width: *width,
+            height: *height,
+        },
+    }
+}
+
+/// Check if `outer` fully contains `inner` (with a small epsilon tolerance).
+fn rect_contains(outer: &Rect, inner: &Rect) -> bool {
+    const EPS: f32 = 0.5;
+    inner.x >= outer.x - EPS
+        && inner.y >= outer.y - EPS
+        && inner.x + inner.width <= outer.x + outer.width + EPS
+        && inner.y + inner.height <= outer.y + outer.height + EPS
 }
 
 // ─── Scene Graph Inspector ───────────────────────────────────────

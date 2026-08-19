@@ -95,16 +95,16 @@ fn render_layout_box(
     source: &[u8],
     display_list: &mut DisplayList,
 ) {
-    if layout_box.styled_node.is_none() {
-        return;
-    }
+    // Anonymous blocks (styled_node = None) skip their own rendering
+    // but MUST still recurse into children to paint wrapped inline content.
+    if layout_box.styled_node.is_some() {
+        render_background(layout_box, display_list, dom, source);
+        render_borders(layout_box, display_list, dom, source);
 
-    render_background(layout_box, display_list, dom, source);
-    render_borders(layout_box, display_list, dom, source);
-
-    if layout_box.children.is_empty() {
-        render_text(layout_box, dom, source, display_list);
-        render_image(layout_box, dom, source, display_list);
+        if layout_box.children.is_empty() {
+            render_text(layout_box, dom, source, display_list);
+            render_image(layout_box, dom, source, display_list);
+        }
     }
 
     for child in &layout_box.children {

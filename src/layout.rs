@@ -559,9 +559,69 @@ impl<'a> LayoutBox<'a> {
 
     // ─── Inline Layout Handling ────────────────────────────────────
 
-    fn layout_inline(&mut self, _containing_block: Dimensions, dom: &Dom, source: &[u8]) {
-        // Inner inline children layout logic
+    fn layout_inline(&mut self, containing_block: Dimensions, dom: &Dom, source: &[u8]) {
+        let style = self.styled_node.map(|n| &n.styles);
+
+        // Compute edge sizes from style
+        let margin_left = style.map_or(0.0, |s| s.margin.left);
+        let margin_right = style.map_or(0.0, |s| s.margin.right);
+        let margin_top = style.map_or(0.0, |s| s.margin.top);
+        let margin_bottom = style.map_or(0.0, |s| s.margin.bottom);
+
+        let padding_left = style.map_or(0.0, |s| s.padding.left);
+        let padding_right = style.map_or(0.0, |s| s.padding.right);
+        let padding_top = style.map_or(0.0, |s| s.padding.top);
+        let padding_bottom = style.map_or(0.0, |s| s.padding.bottom);
+
+        let border_left = style.map_or(0.0, |s| s.border_width.left);
+        let border_right = style.map_or(0.0, |s| s.border_width.right);
+        let border_top = style.map_or(0.0, |s| s.border_width.top);
+        let border_bottom = style.map_or(0.0, |s| s.border_width.bottom);
+
+        self.dimensions.margin = EdgeSizes {
+            top: margin_top,
+            right: margin_right,
+            bottom: margin_bottom,
+            left: margin_left,
+        };
+        self.dimensions.padding = EdgeSizes {
+            top: padding_top,
+            right: padding_right,
+            bottom: padding_bottom,
+            left: padding_left,
+        };
+        self.dimensions.border = EdgeSizes {
+            top: border_top,
+            right: border_right,
+            bottom: border_bottom,
+            left: border_left,
+        };
+
+        // Position content area relative to containing block
+        self.dimensions.content.x = containing_block.content.x
+            + margin_left
+            + border_left
+            + padding_left;
+        self.dimensions.content.y = containing_block.content.y
+            + containing_block.content.height
+            + margin_top
+            + border_top
+            + padding_top;
+
+        // Content width: explicit or fill remaining space
+        let horizontal_edges =
+            margin_left + margin_right + padding_left + padding_right + border_left + border_right;
+        self.dimensions.content.width = style
+            .and_then(|s| s.width)
+            .unwrap_or((containing_block.content.width - horizontal_edges).max(0.0));
+
+        // Layout children
         self.layout_block_children(dom, source);
+
+        // Height: explicit or content-driven (set by layout_block_children)
+        if let Some(h) = style.and_then(|s| s.height) {
+            self.dimensions.content.height = h;
+        }
     }
 }
 
