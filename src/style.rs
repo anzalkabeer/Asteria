@@ -135,6 +135,7 @@ fn is_default_block_tag(tag: &str) -> bool {
             | "ol"
             | "li"
             | "form"
+            | "hr"
     )
 }
 
@@ -457,7 +458,7 @@ fn build_styled_node(
                         "h1" => {
                             computed.border_color = values::Color::rgb(2, 132, 199);
                         }
-                        "div" | "img" => {
+                        "div" | "img" | "hr" => {
                             computed.border_color = values::Color::rgb(203, 213, 225);
                         }
                         _ => {}
@@ -475,7 +476,7 @@ fn build_styled_node(
                         "h1" => {
                             computed.border_width.left = 4.0;
                         }
-                        "div" | "img" => {
+                        "div" | "img" | "hr" => {
                             computed.border_width = values::Edges::uniform(1.0);
                         }
                         _ => {}

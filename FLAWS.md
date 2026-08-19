@@ -28,33 +28,30 @@ if let Some(num) = s.strip_suffix('%') {
 }
 ```
 
-**Bug:** Percentage lengths are resolved against `em_base` (the element's font-size), but CSS `%` on `width`, `height`, `margin`, and `padding` should resolve against the **containing block's width** (or height for vertical properties). Only `font-size: 50%` should resolve against the parent font-size. This means `width: 50%` computes to `50% of font-size`, not `50% of parent width` — a fundamental layout calculation error that will make every percentage-based layout wrong.
+**Bug:** Percentage lengths are resolved against `em_base` (the element's font-size). Per CSS specifications:
+- `width` resolves against the containing block's width.
+- `height` resolves against the containing block's height.
+- `margin` and `padding` (including vertical sides in horizontal writing modes) resolve against the containing block's inline width (width of the containing block).
+Only `font-size: 50%` should resolve against the parent font-size. Currently `parse_length()` resolves all percentages against `em_base`.
 
 **Impact:** All percentage-based widths, heights, margins, and paddings are computed incorrectly. A `width: 50%` on a child inside a 800px container computes to `8px` (50% of 16px font-size) instead of `400px`.
 
 ---
 
-### 1.2 Shorthand expansion loses cascade priority (`style.rs:263–307`)
+### 1.2 Shorthand expansion font-size dependency ordering (`style.rs:263–307`)
 
 ```rust
 let mut expanded: HashMap<String, String> = HashMap::new();
 for (prop, value) in &specified {
     if properties::is_shorthand(prop) {
         // ... expand ...
-        if !specified.contains_key(longhand_name) {
-            expanded.insert(longhand_name.to_string(), format!("{}px", px_val));
-        }
     }
-}
-// Merge expanded shorthands (longhands take priority)
-for (prop, value) in expanded {
-    specified.entry(prop).or_insert(value);
 }
 ```
 
-**Bug:** The `specified` HashMap is iterated while building `expanded`, but `HashMap` iteration order is **non-deterministic**. If multiple shorthands or a shorthand and its longhands appear, the result depends on iteration order — which is undefined. Furthermore, the shorthand expansion pre-computes px values using `parent_style.font_size` before the element's own font-size has been resolved, creating a dependency ordering bug for `em`/`%`-based shorthand values.
+**Bug:** Shorthand expansion pre-computes px values using `parent_style.font_size` before the element's own `font-size` has been resolved, creating a dependency ordering bug for `em`/`%`-based shorthand values.
 
-**Impact:** Styles can resolve differently across runs. A `margin: 2em` declaration will be expanded using the parent's font-size instead of the element's (which hasn't been computed yet at expansion time).
+**Impact:** A `margin: 2em` declaration is expanded using the parent's font-size instead of the element's own font-size.
 
 ---
 
@@ -88,32 +85,15 @@ This means shorthand `margin` and `padding` declarations pass through the cascad
 
 ---
 
-### 1.5 `render_layout_box` skips anonymous blocks (`paint.rs:98–99`)
+### 1.5 [RESOLVED] `render_layout_box` skips anonymous blocks (`paint.rs:98–99`)
 
-```rust
-fn render_layout_box(...) {
-    if layout_box.styled_node.is_none() {
-        return;  // <-- This early-returns for AnonymousBlock boxes
-    }
-    ...
-}
-```
-
-**Bug:** Anonymous blocks (which wrap inline content inside block containers per CSS spec) have `styled_node = None`. The paint function returns immediately, meaning **all inline content wrapped in anonymous blocks is invisible** — it never generates display commands. This includes most text content in mixed inline/block layouts.
-
-**Impact:** Text inside `<div><span>Hello</span><div>World</div></div>` — the "Hello" span gets wrapped in an anonymous block by `build_layout_tree`, which then gets skipped by the paint phase.
+> **Status:** Resolved in Batch 1. `render_layout_box` now skips self-rendering for `styled_node = None` but recurses into children to paint wrapped inline content.
 
 ---
 
-### 1.6 `layout_inline` ignores the containing block (`layout.rs:562–565`)
+### 1.6 [RESOLVED] `layout_inline` ignores the containing block (`layout.rs:562–565`)
 
-```rust
-fn layout_inline(&mut self, _containing_block: Dimensions, dom: &Dom, source: &[u8]) {
-    self.layout_block_children(dom, source);
-}
-```
-
-**Bug:** The containing block is ignored (`_containing_block`). The inline node never computes its own width, position, margins, padding, or borders — it just recursively lays out children. This means inline elements have `Dimensions::default()` (all zeros) for their own box model, making them zero-width/zero-height invisible containers.
+> **Status:** Resolved in Batch 1. `layout_inline` now retains and computes dimensions relative to `containing_block`.
 
 ---
 
@@ -130,13 +110,11 @@ Inside the inline formatting context loop, each child is first manually position
 
 ## 2. Logic Flaws
 
-### 2.1 `ComputedStyle::default()` sets `display: Inline` (`values.rs:255`)
+### 2.1 Incomplete User-Agent stylesheet coverage (`style.rs:401–496`)
 
-```rust
-display: Display::Inline,
-```
+**Context:** The CSS specification's initial value for `display` is `inline`. However, browser engines rely on a User-Agent default stylesheet to set `display: block`, `display: table`, etc., on HTML tags.
 
-**Flaw:** The CSS specification's initial value for `display` is indeed `inline`, but this means every element starts as inline and must be explicitly overridden. The UA stylesheet defaults in `style.rs` handle common block tags, but if a custom element or any unrecognized tag is used, it defaults to `inline` — which is correct per spec but leads to confusing behavior because the UA defaults are incomplete (missing `<blockquote>`, `<pre>`, `<figure>`, `<figcaption>`, `<details>`, `<summary>`, `<dl>`, `<dt>`, `<dd>`, `<table>`, `<thead>`, `<tbody>`, `<tfoot>`, `<caption>`, `<colgroup>`, `<col>`, `<address>`, `<fieldset>`, `<legend>`, `<hr>`, etc.).
+**Flaw:** The UA stylesheet rules in `style.rs` cover only a basic set of HTML tags. Unrecognized or unhandled HTML tags (including `<blockquote>`, `<pre>`, `<figure>`, `<figcaption>`, `<details>`, `<summary>`, `<dl>`, `<dt>`, `<dd>`, `<table>`, `<thead>`, `<tbody>`, `<tfoot>`, `<caption>`, `<colgroup>`, `<col>`, `<address>`, `<fieldset>`, `<legend>`, etc.) default to `inline`, resulting in broken rendering for unhandled HTML elements.
 
 ---
 
@@ -146,9 +124,9 @@ Table elements are missing from the UA stylesheet defaults. `<table>` should def
 
 ---
 
-### 2.3 `hr` and `br` are not in `is_default_block_tag()` — `<hr>` should be block (`style.rs`)
+### 2.3 `hr` default styling in `is_default_block_tag()` (`style.rs:115–139`)
 
-`<hr>` should default to `display: block` with a default border. Currently defaults to inline.
+`<hr>` requires a dedicated User-Agent rule for `display: block` and its default border. Conversely, `<br>` remains excluded from block-level defaults and requires separate line-break handling during inline formatting context layout.
 
 ---
 
@@ -175,22 +153,7 @@ Per CSS spec, `lighter` and `bolder` are **relative** to the inherited font-weig
 
 ---
 
-### 2.6 `copy_property` copies non-inherited properties (`style.rs:542–545`)
-
-```rust
-PropertyId::Display => child.display = parent.display,
-PropertyId::Position => child.position = parent.position,
-PropertyId::Width => child.width = parent.width,
-PropertyId::Height => child.height = parent.height,
-```
-
-**Flaw:** `copy_property` can copy `display`, `position`, `width`, `height`, `margin`, `padding`, and other non-inherited properties from parent to child. While this function is *called* only for properties where `is_inherited()` returns true, the `inherit` keyword case (line 382) calls it for ANY property. The function doesn't guard against misuse — and the `inherit` keyword on `margin-top` would incorrectly copy the parent's margin to the child.
-
-Actually, `inherit` on non-inherited properties IS supposed to copy from parent per CSS spec. So the function is correct here — but the unconditional match arms for non-inherited properties could be confusing. This is a minor maintainability concern, not a bug.
-
----
-
-### 2.7 Selector matching walks ancestors only for descendant combinators — `parts`-based path ignores child combinators (`style.rs:669–685`)
+### 2.6 Selector matching walks ancestors only for descendant combinators — `parts`-based path ignores child combinators (`style.rs:669–685`)
 
 ```rust
 let mut current = dom.get(node_id).parent;
@@ -216,7 +179,7 @@ loop {
 
 ---
 
-### 2.8 Flex gap is hardcoded to 16px (`layout.rs:385`)
+### 2.7 Flex gap is hardcoded to 16px (`layout.rs:385`)
 
 ```rust
 let gap = 16.0;
@@ -226,7 +189,7 @@ The flex container's gap ignores the actual `grid_gap` style value and always us
 
 ---
 
-### 2.9 Flex child default width is hardcoded to 200px (`layout.rs:391`)
+### 2.8 Flex child default width is hardcoded to 200px (`layout.rs:391`)
 
 ```rust
 let child_w = child.styled_node.and_then(|n| n.styles.width).unwrap_or(200.0);
@@ -236,7 +199,7 @@ let child_w = child.styled_node.and_then(|n| n.styles.width).unwrap_or(200.0);
 
 ---
 
-### 2.10 `var()` substitution can infinite-loop (`style.rs:326–346`)
+### 2.9 `var()` substitution can infinite-loop (`style.rs:326–346`)
 
 ```rust
 while let Some(start) = result.find("var(") {
@@ -248,7 +211,7 @@ If a CSS custom property value itself contains the literal string `var(` (e.g., 
 
 ---
 
-### 2.11 Scene graph `parent` is always `None` (`scene.rs:326, 385, etc.`)
+### 2.10 Scene graph `parent` is always `None` (`scene.rs:326, 385, etc.`)
 
 ```rust
 parent: None,
@@ -258,7 +221,7 @@ Every scene node is created with `parent: None`. The `invalidate()` method walks
 
 ---
 
-### 2.12 Host header omits port for HTTPS/443 (`http.rs:167–172`)
+### 2.11 Host header port formatting compatibility note (`http.rs:167–172`)
 
 ```rust
 let host_header = if self.url.port == 80 {
@@ -268,7 +231,7 @@ let host_header = if self.url.port == 80 {
 };
 ```
 
-This only omits the port for HTTP/80. For HTTPS/443 (the default), the Host header will be `example.com:443` instead of just `example.com`. While technically valid, some servers reject this.
+**Compatibility Note:** The client appends `:port` for all non-80 ports, resulting in `Host: example.com:443` for HTTPS connections on port 443. While compliant with RFC 9110 (which allows explicit port numbers in Host headers), standard web browsers omit default ports for HTTPS (443) as well as HTTP (80).
 
 ---
 
@@ -491,6 +454,12 @@ For a page with 500 rules × 5 declarations × hundreds of elements, this create
 
 ---
 
+### 5.7 `copy_property` match arms contain entries for non-inherited properties (`style.rs:540–584`)
+
+`copy_property` contains match arms for non-inherited properties (e.g. `Display`, `Position`, `Width`, `Height`). While `copy_property` is called correctly during `inherit` keyword resolution, having unconditional match arms for all non-inherited properties without explicit documentation creates a maintainability concern.
+
+---
+
 ## 6. Performance Issues
 
 ### 6.1 O(elements × rules) selector matching with no indexing
@@ -540,7 +509,7 @@ This produces wildly incorrect widths for non-Latin characters, proportional fon
 
 ---
 
-### 6.5 `read_response_headers` reads one byte at a time (`http.rs:468–476`)
+### 6.5 `read_response_headers` byte-wise header parsing on unbuffered streams (`http.rs:468–476`)
 
 ```rust
 loop {
@@ -550,7 +519,7 @@ loop {
 }
 ```
 
-Reading HTTP headers byte-by-byte is extremely slow — each `read_exact` is a syscall (or TLS record read). Should use a buffered reader with `BufRead::read_until` or at least read into a larger buffer.
+Reading HTTP headers byte-by-byte via repeated `read_exact(&mut [u8; 1])` calls creates high overhead per header byte on unbuffered `Stream` wrappers (`Stream::Plain(TcpStream)` or `Stream::Tls(...)`). A buffered reader (`BufReader` or chunked buffer reads) should be used instead to minimize read invocations.
 
 ---
 
@@ -566,7 +535,7 @@ This doesn't account for multi-line text, line-height settings, or actual text m
 
 ## 7. Security Concerns
 
-### 7.1 No URL sanitization on `<a href="">` link extraction (`paint.rs:127–131`)
+### 7.1 URL-validation requirement on `<a href="">` link extraction (`paint.rs:127–131`)
 
 ```rust
 if attr_name.eq_ignore_ascii_case("href") {
@@ -577,7 +546,7 @@ if attr_name.eq_ignore_ascii_case("href") {
 }
 ```
 
-Link URLs are extracted and propagated without any sanitization. `javascript:`, `data:`, and `file:///` URLs are passed through unchanged. When clicked, these could execute arbitrary code or access local files.
+Link URLs are extracted from `href` attributes without scheme or origin validation prior to downstream navigation or event dispatching. Custom or hazardous schemes (`javascript:`, `data:`) are propagated unvalidated.
 
 ---
 
@@ -606,9 +575,16 @@ The `TlsConnector` uses `rustls` which should handle this, but the connection fl
 
 ---
 
-### 7.5 `<img src>` URLs extracted without origin check (`paint.rs:227–231`)
+### 7.5 URL-validation requirement on `<img src>` attribute extraction (`paint.rs:227–231`)
 
-Image `src` attributes are extracted and passed as `image_id` strings without URL validation. `file:///etc/passwd` or cross-origin URLs could be used to probe local files or track users.
+```rust
+if attr_name.eq_ignore_ascii_case("src") {
+    src = Some(std::str::from_utf8(&source[vs as usize..ve as usize]).unwrap_or(""));
+    break;
+}
+```
+
+Image `src` attribute values are extracted and assigned as `image_id` strings without URL scheme validation or origin checking before resource loading.
 
 ---
 
@@ -670,21 +646,20 @@ The HTML tokenizer is a complex state machine processing arbitrary byte input. T
 
 ## Summary
 
-| Category | Count | Severity |
-|----------|-------|----------|
-| Critical Bugs | 7 | 🔴 High |
-| Logic Flaws | 12 | 🟠 Medium-High |
+| Category | Active Count | Severity |
+|----------|--------------|----------|
+| Critical Bugs | 5 *(2 resolved)* | 🔴 High |
+| Logic Flaws | 11 | 🟠 Medium-High |
 | Spec Non-Compliance | 9 | 🟡 Medium |
 | Architecture Flaws | 9 | 🟠 Medium-High |
-| Code Quality | 6 | 🟡 Medium |
+| Code Quality | 7 | 🟡 Medium |
 | Performance Issues | 6 | 🟡 Medium |
 | Security Concerns | 5 | 🔴 High |
 | Test Coverage Gaps | 9 | 🟡 Medium |
-| **Total** | **63** | |
+| **Total Active** | **61** | |
 
-The most impactful issues to fix first are:
+The most impactful active issues to fix next are:
 1. **Percentage length resolution** (#1.1) — breaks all %-based layouts
-2. **Anonymous block paint skipping** (#1.5) — makes text invisible
-3. **Inline layout not computing own dimensions** (#1.6) — zero-size inline elements
-4. **Scene graph parent always None** (#2.11) — breaks incremental rendering
-5. **No margin collapsing** (#3.7) — doubled spacing everywhere
+2. **Inline layout double-layout** (#1.7) — position/size recalculation
+3. **No margin collapsing** (#3.7) — doubled spacing everywhere
+4. **`var()` substitution infinite loop** (#2.9) — potential hangs on cyclic vars

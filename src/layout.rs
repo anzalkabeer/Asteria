@@ -597,28 +597,16 @@ impl<'a> LayoutBox<'a> {
             left: border_left,
         };
 
-        // Position content area relative to containing block
-        self.dimensions.content.x = containing_block.content.x
-            + margin_left
-            + border_left
-            + padding_left;
-        self.dimensions.content.y = containing_block.content.y
-            + containing_block.content.height
-            + margin_top
-            + border_top
-            + padding_top;
-
-        // Content width: explicit or fill remaining space
-        let horizontal_edges =
-            margin_left + margin_right + padding_left + padding_right + border_left + border_right;
-        self.dimensions.content.width = style
-            .and_then(|s| s.width)
-            .unwrap_or((containing_block.content.width - horizontal_edges).max(0.0));
+        // Retain position, width, and height assigned by the inline formatting context
+        self.dimensions.content.x = containing_block.content.x;
+        self.dimensions.content.y = containing_block.content.y;
+        self.dimensions.content.width = containing_block.content.width;
+        self.dimensions.content.height = containing_block.content.height;
 
         // Layout children
         self.layout_block_children(dom, source);
 
-        // Height: explicit or content-driven (set by layout_block_children)
+        // Height: explicit or content-driven
         if let Some(h) = style.and_then(|s| s.height) {
             self.dimensions.content.height = h;
         }
