@@ -24,7 +24,7 @@ pub struct Task {
 
 #[derive(Debug, Clone)]
 pub struct TaskScheduler {
-    queue: VecDeque<Task>,
+    buckets: [VecDeque<Task>; 5],
     active_workers: usize,
     max_workers: usize,
     next_task_id: u64,
@@ -40,40 +40,38 @@ impl TaskScheduler {
     /// Initialize a task scheduler up to `max_workers` limit.
     pub fn new(max_workers: usize) -> Self {
         Self {
-            queue: VecDeque::new(),
+            buckets: [
+                VecDeque::new(),
+                VecDeque::new(),
+                VecDeque::new(),
+                VecDeque::new(),
+                VecDeque::new(),
+            ],
             active_workers: 0,
             max_workers,
             next_task_id: 1,
         }
     }
 
-    /// Submit a task, returning its unique sequential task ID.
+    /// Submit a task, returning its unique sequential task ID (O(1)).
     pub fn submit(&mut self, name: String, priority: TaskPriority) -> u64 {
         let id = self.next_task_id;
         self.next_task_id += 1;
 
-        self.queue.push_back(Task { id, priority, name });
+        let bucket_idx = (priority as usize).min(4);
+        self.buckets[bucket_idx].push_back(Task { id, priority, name });
 
         id
     }
 
-    /// Retrieves and removes the highest priority task available.
+    /// Retrieves and removes the highest priority task available (O(1)).
     pub fn poll(&mut self) -> Option<Task> {
-        if self.queue.is_empty() {
-            return None;
-        }
-
-        let mut best_idx = 0;
-        let mut best_priority = self.queue[0].priority;
-
-        for (i, task) in self.queue.iter().enumerate().skip(1) {
-            if task.priority > best_priority {
-                best_idx = i;
-                best_priority = task.priority;
+        for bucket in self.buckets.iter_mut().rev() {
+            if let Some(task) = bucket.pop_front() {
+                return Some(task);
             }
         }
-
-        self.queue.remove(best_idx)
+        None
     }
 
     /// Adjust active worker count dynamically to save power based on complexity.
@@ -98,9 +96,9 @@ impl TaskScheduler {
         self.active_workers
     }
 
-    /// Number of incomplete tasks sitting in the scheduler queue.
+    /// Number of incomplete tasks sitting in the scheduler queue (O(1)).
     pub fn pending_count(&self) -> usize {
-        self.queue.len()
+        self.buckets.iter().map(|b| b.len()).sum()
     }
 }
 

@@ -631,8 +631,12 @@ fn compute_intrinsic_inline_width(
         NodeKind::Text { .. } => {
             let font_size = styled.styles.font_size;
             let text = node.text_content(source);
-            let trimmed_len = text.trim_matches(|c: char| c == '\r' || c == '\n').len() as f32;
-            (trimmed_len * font_size * 0.55).max(0.0)
+            let trimmed = text.trim_matches(|c: char| c == '\r' || c == '\n');
+            let width: f32 = trimmed
+                .chars()
+                .map(|ch| estimate_char_width_ratio(ch) * font_size)
+                .sum();
+            width.max(0.0)
         }
         NodeKind::Element { .. } => {
             let mut sum = 0.0;
@@ -642,6 +646,42 @@ fn compute_intrinsic_inline_width(
             sum
         }
         _ => 0.0,
+    }
+}
+
+/// Estimate the proportional width ratio of a character relative to the font size.
+///
+/// Returns a multiplier such that `ratio * font_size` approximates the glyph advance width.
+/// Categories:
+///   - Narrow punctuation/thin letters: ~0.28em
+///   - Whitespace: 0.25em
+///   - Normal lowercase: ~0.52em
+///   - Uppercase/digits: ~0.65em
+///   - Wide glyphs (W, M, @, %, etc.): ~0.85em
+///   - CJK ideographs: ~1.05em (fullwidth)
+fn estimate_char_width_ratio(ch: char) -> f32 {
+    match ch {
+        // Thin / narrow glyphs
+        'i' | 'l' | 'j' | '!' | '|' | '\'' | ',' | '.' | ':' | ';' | '`' => 0.28,
+        'f' | 'r' | 't' => 0.35,
+        // Whitespace
+        ' ' => 0.25,
+        // Wide lowercase
+        'm' | 'w' => 0.78,
+        // Normal lowercase (catch-all after specific overrides)
+        'a'..='z' => 0.52,
+        // Digits
+        '0'..='9' => 0.58,
+        // Wide uppercase and symbols
+        'W' | 'M' => 0.88,
+        'A'..='Z' => 0.65,
+        '@' | '#' | '%' | '&' | '$' => 0.85,
+        // CJK Unified Ideographs (fullwidth)
+        '\u{4e00}'..='\u{9fff}' | '\u{3400}'..='\u{4dbf}' | '\u{f900}'..='\u{faff}' => 1.05,
+        // CJK Fullwidth punctuation
+        '\u{3000}'..='\u{303f}' | '\u{ff00}'..='\u{ffef}' => 1.0,
+        // Fallback for other characters
+        _ => 0.55,
     }
 }
 

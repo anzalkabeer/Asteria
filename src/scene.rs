@@ -386,11 +386,13 @@ pub fn build_scene_graph(display_list: &DisplayList, segment_height: f32) -> Sce
                 color,
                 link_url,
             } => {
+                let line_count = text.lines().count().max(1) as f32;
+                let line_height = *font_size * 1.2;
                 let rect = Rect {
                     x: *x,
                     y: *y,
                     width: *target_width,
-                    height: *font_size * 1.2,
+                    height: line_height * line_count,
                 };
                 let seg = assign_segment(*y, segment_height);
                 scene.push(

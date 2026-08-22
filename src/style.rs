@@ -1,10 +1,146 @@
 use std::borrow::Cow;
 use std::collections::HashMap;
 
-use crate::css_parser::{Selector, SimpleSelector, Stylesheet};
+use crate::css_parser::{Selector, SimpleSelector, StyleRule, Stylesheet};
 use crate::dom::{Dom, NodeId, NodeKind};
 use crate::properties::{self, ALL_PROPERTIES, PropertyId};
 use crate::values::{self, ComputedStyle, Display};
+
+// ─── Rule Index ──────────────────────────────────────────────────
+//
+// Pre-indexes stylesheet rules by the "key selector" (the rightmost /
+// subject compound) so that element matching only checks candidate rules
+// instead of scanning the entire stylesheet.
+
+/// A pre-built index that buckets CSS rules by their key selector component.
+///
+/// For a selector like `div.main > p.intro`, the key selector is the rightmost
+/// compound (`p.intro`), and the rule is indexed under both `by_tag["p"]` and
+/// `by_class["intro"]`.  During matching an element only needs to check rules
+/// from buckets that correspond to its own tag name, class list, and ID.
+struct RuleIndex<'a> {
+    by_id: HashMap<String, Vec<&'a StyleRule>>,
+    by_class: HashMap<String, Vec<&'a StyleRule>>,
+    by_tag: HashMap<String, Vec<&'a StyleRule>>,
+    universal: Vec<&'a StyleRule>,
+}
+
+impl<'a> RuleIndex<'a> {
+    /// Build a rule index from a flat list of style rules.
+    ///
+    /// Each rule is examined for its key selector (the last step's compound).
+    /// Rules are filed under the **most specific** simple selector found:
+    ///   ID  >  Class  >  Tag  >  Universal
+    fn build(rules: &[&'a StyleRule]) -> Self {
+        let mut index = RuleIndex {
+            by_id: HashMap::new(),
+            by_class: HashMap::new(),
+            by_tag: HashMap::new(),
+            universal: Vec::new(),
+        };
+
+        for &rule in rules {
+            // Determine buckets from ALL selectors of this rule.
+            // A rule can have multiple selectors (e.g. `h1, .title { ... }`),
+            // so we index it under every key selector it contains.
+            let mut indexed = false;
+
+            for sel in &rule.selectors {
+                // The key selector is the last (rightmost) step's compound.
+                if let Some(last_step) = sel.steps.last() {
+                    for simple in &last_step.compound {
+                        match simple {
+                            SimpleSelector::Id(id) => {
+                                index
+                                    .by_id
+                                    .entry(id.to_ascii_lowercase())
+                                    .or_default()
+                                    .push(rule);
+                                indexed = true;
+                            }
+                            SimpleSelector::Class(cls) => {
+                                index
+                                    .by_class
+                                    .entry(cls.to_ascii_lowercase())
+                                    .or_default()
+                                    .push(rule);
+                                indexed = true;
+                            }
+                            SimpleSelector::Tag(tag) => {
+                                index
+                                    .by_tag
+                                    .entry(tag.to_ascii_lowercase())
+                                    .or_default()
+                                    .push(rule);
+                                indexed = true;
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+            }
+
+            // If no ID/class/tag was found (e.g. `* { ... }`), put in universal.
+            if !indexed {
+                index.universal.push(rule);
+            }
+        }
+
+        index
+    }
+
+    /// Return an iterator of candidate rules for an element with the given
+    /// tag name, list of classes, and optional ID.
+    fn candidates(
+        &self,
+        tag: &str,
+        classes: &[&str],
+        id: Option<&str>,
+    ) -> Vec<&'a StyleRule> {
+        let mut seen = std::collections::HashSet::new();
+        let mut result = Vec::new();
+
+        // Helper: add a rule if not already seen (deduplicate)
+        let mut push = |rule: &'a StyleRule| {
+            let ptr = rule as *const StyleRule as usize;
+            if seen.insert(ptr) {
+                result.push(rule);
+            }
+        };
+
+        // ID bucket
+        if let Some(id_val) = id {
+            if let Some(rules) = self.by_id.get(&id_val.to_ascii_lowercase()) {
+                for &r in rules {
+                    push(r);
+                }
+            }
+        }
+
+        // Class buckets
+        for cls in classes {
+            if let Some(rules) = self.by_class.get(&cls.to_ascii_lowercase()) {
+                for &r in rules {
+                    push(r);
+                }
+            }
+        }
+
+        // Tag bucket
+        if let Some(rules) = self.by_tag.get(&tag.to_ascii_lowercase()) {
+            for &r in rules {
+                push(r);
+            }
+        }
+
+        // Universal rules always apply as candidates
+        for &r in &self.universal {
+            push(r);
+        }
+
+        result
+    }
+}
 
 // ─── Style Resolution ────────────────────────────────────────────
 //
@@ -24,7 +160,6 @@ use crate::values::{self, ComputedStyle, Display};
 //
 // This is V1 — does NOT include:
 //   - Bloom filter optimization (step 2/5 of production engines)
-//   - RuleSet indexing (O(elements*rules) is fine for small pages)
 //   - Style sharing cache
 //   - !important support
 //   - var() / custom properties
@@ -150,11 +285,23 @@ pub fn resolve_styles_with_viewport(
     source: &[u8],
     viewport_width: f32,
 ) -> StyledNode {
+    // ── Build the rule index once for the entire style resolution pass ──
+    // Collect all applicable rules (top-level + matching @media rules)
+    let mut all_rules: Vec<&StyleRule> = stylesheet.rules.iter().collect();
+    for media in &stylesheet.media_rules {
+        let matches_min = media.min_width.is_none_or(|mw| viewport_width >= mw);
+        let matches_max = media.max_width.is_none_or(|mw| viewport_width <= mw);
+        if matches_min && matches_max {
+            all_rules.extend(media.rules.iter());
+        }
+    }
+    let rule_index = RuleIndex::build(&all_rules);
+
     let root_style = ComputedStyle::default();
     build_styled_node(
         dom,
         dom.root(),
-        stylesheet,
+        &rule_index,
         source,
         &root_style,
         ROOT_FONT_SIZE,
@@ -169,7 +316,7 @@ pub fn resolve_styles_with_viewport(
 fn build_styled_node(
     dom: &Dom,
     node_id: NodeId,
-    stylesheet: &Stylesheet,
+    rule_index: &RuleIndex,
     source: &[u8],
     parent_style: &ComputedStyle,
     root_font_size: f32,
@@ -183,20 +330,16 @@ fn build_styled_node(
             // ── Step 1: Collect all matching declarations ──────────
             let mut declarations = Vec::new();
 
-            // Collect top-level rules and applicable @media rules
-            let mut all_rules: Vec<&crate::css_parser::StyleRule> =
-                stylesheet.rules.iter().collect();
+            // Retrieve the element's tag, classes, and ID for indexed lookup
+            let tag = node.tag_name(source).to_ascii_lowercase();
+            let id = node.get_id(source);
+            let class_attr = node.get_attribute("class", source).unwrap_or("");
+            let classes: Vec<&str> = class_attr.split_whitespace().collect();
 
-            for media in &stylesheet.media_rules {
-                let matches_min = media.min_width.is_none_or(|mw| viewport_width >= mw);
-                let matches_max = media.max_width.is_none_or(|mw| viewport_width <= mw);
-                if matches_min && matches_max {
-                    all_rules.extend(media.rules.iter());
-                }
-            }
+            // Query only candidate rules from the index (not the full stylesheet)
+            let candidate_rules = rule_index.candidates(&tag, &classes, id);
 
-            // Test every rule against this node
-            for rule in &all_rules {
+            for rule in &candidate_rules {
                 // Find the highest-specificity selector that matches
                 let mut best_specificity: Option<Specificity> = None;
 
@@ -425,7 +568,7 @@ fn build_styled_node(
             build_styled_node(
                 dom,
                 child_id,
-                stylesheet,
+                rule_index,
                 source,
                 &styles,
                 root_font_size,

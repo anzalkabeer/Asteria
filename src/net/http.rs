@@ -429,16 +429,23 @@ fn read_response_headers<R: std::io::Read>(
     stream: &mut R,
 ) -> Result<(u16, String, Vec<(String, String)>), NetworkError> {
     let mut header_buf = Vec::new();
-    let mut byte = [0u8; 1];
+    let mut chunk = [0u8; 4096];
 
-    // Read headers byte-by-byte until \r\n\r\n
+    // Read headers in 4KB chunks until \r\n\r\n boundary is found
     loop {
-        if stream.read_exact(&mut byte).is_err() {
-            return Err(NetworkError::Io("Connection closed unexpectedly".into()));
+        match stream.read(&mut chunk) {
+            Ok(0) => {
+                return Err(NetworkError::Io("Connection closed unexpectedly".into()));
+            }
+            Ok(n) => {
+                header_buf.extend_from_slice(&chunk[..n]);
+            }
+            Err(_) => {
+                return Err(NetworkError::Io("Connection closed unexpectedly".into()));
+            }
         }
-        header_buf.push(byte[0]);
 
-        if header_buf.ends_with(b"\r\n\r\n") {
+        if header_buf.windows(4).any(|w| w == b"\r\n\r\n") {
             break;
         }
         if header_buf.len() > 1024 * 1024 {
