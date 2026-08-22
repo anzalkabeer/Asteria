@@ -90,12 +90,7 @@ impl<'a> RuleIndex<'a> {
 
     /// Return an iterator of candidate rules for an element with the given
     /// tag name, list of classes, and optional ID.
-    fn candidates(
-        &self,
-        tag: &str,
-        classes: &[&str],
-        id: Option<&str>,
-    ) -> Vec<&'a StyleRule> {
+    fn candidates(&self, tag: &str, classes: &[&str], id: Option<&str>) -> Vec<&'a StyleRule> {
         let mut seen = std::collections::HashSet::new();
         let mut result = Vec::new();
 
@@ -411,7 +406,10 @@ fn build_styled_node(
                                 "border-left-width",
                             ] {
                                 if !specified.contains_key(*edge_name) {
-                                    expanded.insert(Cow::Borrowed(edge_name), Cow::Owned(w_val.clone()));
+                                    expanded.insert(
+                                        Cow::Borrowed(edge_name),
+                                        Cow::Owned(w_val.clone()),
+                                    );
                                 }
                             }
                         }
@@ -426,14 +424,20 @@ fn build_styled_node(
                             }
                         }
                     } else if let Some(longhand_ids) = properties::expand_shorthand(prop.as_ref()) {
-                        let edges =
-                            values::parse_edges(value.as_ref(), parent_style.font_size, root_font_size);
+                        let edges = values::parse_edges(
+                            value.as_ref(),
+                            parent_style.font_size,
+                            root_font_size,
+                        );
                         let edge_values = [edges.top, edges.right, edges.bottom, edges.left];
                         for (id, px_val) in longhand_ids.iter().zip(edge_values.iter()) {
                             let longhand_name = id.name();
                             // Only set if not already explicitly set by a longhand
                             if !specified.contains_key(longhand_name) {
-                                expanded.insert(Cow::Borrowed(longhand_name), Cow::Owned(format!("{}px", px_val)));
+                                expanded.insert(
+                                    Cow::Borrowed(longhand_name),
+                                    Cow::Owned(format!("{}px", px_val)),
+                                );
                             }
                         }
                     }
@@ -628,7 +632,10 @@ fn apply_user_agent_defaults(
         }
     }
 
-    if !specified.contains_key("color") && computed.color == values::Color::BLACK && tag_name == "h1" {
+    if !specified.contains_key("color")
+        && computed.color == values::Color::BLACK
+        && tag_name == "h1"
+    {
         computed.color = values::Color::rgb(3, 105, 161);
     }
 
@@ -662,7 +669,10 @@ fn apply_user_agent_defaults(
         }
     }
 
-    if !specified.contains_key("margin") && !specified.contains_key("margin-top") && tag_name == "body" {
+    if !specified.contains_key("margin")
+        && !specified.contains_key("margin-top")
+        && tag_name == "body"
+    {
         computed.margin = values::Edges::uniform(8.0);
     }
 

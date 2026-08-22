@@ -301,10 +301,7 @@ impl HttpClient {
 
             // 2. Pick the first resolved IP and build a SocketAddr
             let ip = dns_entry.ip_addresses.first().ok_or_else(|| {
-                NetworkError::DnsError(format!(
-                    "No IP addresses resolved for '{}'",
-                    url.host
-                ))
+                NetworkError::DnsError(format!("No IP addresses resolved for '{}'", url.host))
             })?;
             let addr = std::net::SocketAddr::new(*ip, url.port);
 
@@ -341,7 +338,10 @@ impl HttpClient {
 
     /// Sends a prepared `HttpRequest` and returns the `HttpResponse`.
     pub fn send_request(&mut self, request: &HttpRequest) -> Result<HttpResponse, NetworkError> {
-        let pool_key = format!("{}://{}:{}", request.url.scheme, request.url.host, request.url.port);
+        let pool_key = format!(
+            "{}://{}:{}",
+            request.url.scheme, request.url.host, request.url.port
+        );
         let req_bytes = request.to_request_bytes();
         let stream = self.acquire_stream(&request.url)?;
 
@@ -372,7 +372,10 @@ impl HttpClient {
         sender: std::sync::mpsc::Sender<crate::net::bus::ResourceBusEvent>,
     ) -> Result<(), NetworkError> {
         let current_url = Url::parse(url)?;
-        let pool_key = format!("{}://{}:{}", current_url.scheme, current_url.host, current_url.port);
+        let pool_key = format!(
+            "{}://{}:{}",
+            current_url.scheme, current_url.host, current_url.port
+        );
         let request = HttpRequest {
             method: HttpMethod::Get,
             url: current_url.clone(),
@@ -423,9 +426,9 @@ impl HttpClient {
             stream_eof_body(&mut reader, &url_str, &sender)?;
         }
 
-        let is_close = headers
-            .iter()
-            .any(|(k, v)| k.eq_ignore_ascii_case("connection") && v.to_ascii_lowercase().contains("close"));
+        let is_close = headers.iter().any(|(k, v)| {
+            k.eq_ignore_ascii_case("connection") && v.to_ascii_lowercase().contains("close")
+        });
         if is_close {
             self.pool.disconnect(&pool_key);
         }

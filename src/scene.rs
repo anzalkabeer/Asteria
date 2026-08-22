@@ -322,10 +322,13 @@ pub fn build_scene_graph(display_list: &DisplayList, segment_height: f32) -> Sce
     for cmd in &display_list.commands {
         // Determine parent: find the deepest stacked rect that contains this node
         let node_rect = cmd_bounding_rect(cmd);
-        let parent_id = parent_stack
-            .iter()
-            .rev()
-            .find_map(|(id, r)| if rect_contains(r, &node_rect) { Some(*id) } else { None });
+        let parent_id = parent_stack.iter().rev().find_map(|(id, r)| {
+            if rect_contains(r, &node_rect) {
+                Some(*id)
+            } else {
+                None
+            }
+        });
 
         match cmd {
             DisplayCommand::SolidColor {

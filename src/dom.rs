@@ -77,7 +77,10 @@ impl Node {
     pub fn tag_name<'a>(&self, source: &'a [u8]) -> &'a str {
         match self.kind {
             NodeKind::Element { tag_start, tag_end } => {
-                if (tag_start as usize) <= source.len() && (tag_end as usize) <= source.len() && tag_start <= tag_end {
+                if (tag_start as usize) <= source.len()
+                    && (tag_end as usize) <= source.len()
+                    && tag_start <= tag_end
+                {
                     std::str::from_utf8(&source[tag_start as usize..tag_end as usize]).unwrap_or("")
                 } else {
                     ""
@@ -91,7 +94,10 @@ impl Node {
     pub fn text_content<'a>(&self, source: &'a [u8]) -> &'a str {
         match self.kind {
             NodeKind::Text { start, end } => {
-                if (start as usize) <= source.len() && (end as usize) <= source.len() && start <= end {
+                if (start as usize) <= source.len()
+                    && (end as usize) <= source.len()
+                    && start <= end
+                {
                     std::str::from_utf8(&source[start as usize..end as usize]).unwrap_or("")
                 } else {
                     ""
@@ -105,10 +111,13 @@ impl Node {
     pub fn get_attribute<'a>(&self, name: &str, source: &'a [u8]) -> Option<&'a str> {
         for &(ns, ne, vs, ve) in &self.attributes {
             if (ns as usize) <= source.len() && (ne as usize) <= source.len() && ns <= ne {
-                let attr_name = std::str::from_utf8(&source[ns as usize..ne as usize]).unwrap_or("");
+                let attr_name =
+                    std::str::from_utf8(&source[ns as usize..ne as usize]).unwrap_or("");
                 if attr_name.eq_ignore_ascii_case(name) {
                     if (vs as usize) <= source.len() && (ve as usize) <= source.len() && vs <= ve {
-                        return Some(std::str::from_utf8(&source[vs as usize..ve as usize]).unwrap_or(""));
+                        return Some(
+                            std::str::from_utf8(&source[vs as usize..ve as usize]).unwrap_or(""),
+                        );
                     }
                     return Some("");
                 }
