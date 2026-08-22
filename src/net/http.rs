@@ -358,7 +358,7 @@ impl HttpClient {
 
         let is_close = response
             .header("connection")
-            .map_or(false, |v| v.to_ascii_lowercase().contains("close"));
+            .is_some_and(|v| v.to_ascii_lowercase().contains("close"));
         if is_close {
             self.pool.disconnect(&pool_key);
         }

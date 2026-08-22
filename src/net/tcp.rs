@@ -273,11 +273,12 @@ impl ConnectionPool {
 
         self.prune_idle();
 
-        if let Some(conn) = self.connections.get_mut(&key) {
-            if conn.is_alive() && conn.last_used_at.elapsed() <= self.idle_timeout {
-                conn.last_used_at = Instant::now();
-                return Ok(&mut self.connections.get_mut(&key).unwrap().stream);
-            }
+        if let Some(conn) = self.connections.get_mut(&key)
+            && conn.is_alive()
+            && conn.last_used_at.elapsed() <= self.idle_timeout
+        {
+            conn.last_used_at = Instant::now();
+            return Ok(&mut self.connections.get_mut(&key).unwrap().stream);
         }
 
         self.ensure_capacity();
@@ -318,11 +319,12 @@ impl ConnectionPool {
 
         self.prune_idle();
 
-        if let Some(conn) = self.connections.get_mut(&key) {
-            if conn.is_alive() && conn.last_used_at.elapsed() <= self.idle_timeout {
-                conn.last_used_at = Instant::now();
-                return Ok(&mut self.connections.get_mut(&key).unwrap().stream);
-            }
+        if let Some(conn) = self.connections.get_mut(&key)
+            && conn.is_alive()
+            && conn.last_used_at.elapsed() <= self.idle_timeout
+        {
+            conn.last_used_at = Instant::now();
+            return Ok(&mut self.connections.get_mut(&key).unwrap().stream);
         }
 
         self.ensure_capacity();
@@ -362,11 +364,11 @@ impl ConnectionPool {
 
     /// Gets an existing connection if alive and not expired, otherwise returns None.
     pub fn get(&mut self, key: &str) -> Option<&mut Stream> {
-        if let Some(conn) = self.connections.get(key) {
-            if !conn.is_alive() || conn.last_used_at.elapsed() > self.idle_timeout {
-                self.connections.remove(key);
-                return None;
-            }
+        if let Some(conn) = self.connections.get(key)
+            && (!conn.is_alive() || conn.last_used_at.elapsed() > self.idle_timeout)
+        {
+            self.connections.remove(key);
+            return None;
         }
         if let Some(conn) = self.connections.get_mut(key) {
             conn.last_used_at = Instant::now();

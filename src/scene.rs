@@ -530,10 +530,11 @@ impl std::fmt::Display for SceneGraph {
                 color[3],
                 dirty_marker,
             )?;
-            if let Some(text_run) = &self.texts[i] {
-                if !text_run.text.is_empty() && text_run.font_size > 0.0 {
-                    write!(f, " \"{}\"", text_run.text)?;
-                }
+            if let Some(text_run) = &self.texts[i]
+                && !text_run.text.is_empty()
+                && text_run.font_size > 0.0
+            {
+                write!(f, " \"{}\"", text_run.text)?;
             }
             writeln!(f)?;
         }

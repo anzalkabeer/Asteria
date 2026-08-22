@@ -103,11 +103,11 @@ impl<'a> RuleIndex<'a> {
         };
 
         // ID bucket
-        if let Some(id_val) = id {
-            if let Some(rules) = self.by_id.get(&id_val.to_ascii_lowercase()) {
-                for &r in rules {
-                    push(r);
-                }
+        if let Some(id_val) = id
+            && let Some(rules) = self.by_id.get(&id_val.to_ascii_lowercase())
+        {
+            for &r in rules {
+                push(r);
             }
         }
 
@@ -314,7 +314,7 @@ fn build_styled_node(
     source: &[u8],
     parent_style: &ComputedStyle,
     root_font_size: f32,
-    viewport_width: f32,
+    _viewport_width: f32,
 ) -> StyledNode {
     let node = dom.get(node_id);
 
@@ -413,15 +413,15 @@ fn build_styled_node(
                                 }
                             }
                         }
-                        if let Some(s_val) = s {
-                            if !specified.contains_key("border-style") {
-                                expanded.insert(Cow::Borrowed("border-style"), Cow::Owned(s_val));
-                            }
+                        if let Some(s_val) = s
+                            && !specified.contains_key("border-style")
+                        {
+                            expanded.insert(Cow::Borrowed("border-style"), Cow::Owned(s_val));
                         }
-                        if let Some(c_val) = c {
-                            if !specified.contains_key("border-color") {
-                                expanded.insert(Cow::Borrowed("border-color"), Cow::Owned(c_val));
-                            }
+                        if let Some(c_val) = c
+                            && !specified.contains_key("border-color")
+                        {
+                            expanded.insert(Cow::Borrowed("border-color"), Cow::Owned(c_val));
                         }
                     } else if let Some(longhand_ids) = properties::expand_shorthand(prop.as_ref()) {
                         let edges = values::parse_edges(
@@ -575,7 +575,7 @@ fn build_styled_node(
                 source,
                 &styles,
                 root_font_size,
-                viewport_width,
+                _viewport_width,
             )
         })
         .collect();

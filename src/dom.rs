@@ -76,15 +76,12 @@ impl Node {
     /// Safely extract the element's tag name from the source buffer.
     pub fn tag_name<'a>(&self, source: &'a [u8]) -> &'a str {
         match self.kind {
-            NodeKind::Element { tag_start, tag_end } => {
+            NodeKind::Element { tag_start, tag_end }
                 if (tag_start as usize) <= source.len()
                     && (tag_end as usize) <= source.len()
-                    && tag_start <= tag_end
-                {
-                    std::str::from_utf8(&source[tag_start as usize..tag_end as usize]).unwrap_or("")
-                } else {
-                    ""
-                }
+                    && tag_start <= tag_end =>
+            {
+                std::str::from_utf8(&source[tag_start as usize..tag_end as usize]).unwrap_or("")
             }
             _ => "",
         }
@@ -93,15 +90,12 @@ impl Node {
     /// Safely extract the text content from the source buffer.
     pub fn text_content<'a>(&self, source: &'a [u8]) -> &'a str {
         match self.kind {
-            NodeKind::Text { start, end } => {
+            NodeKind::Text { start, end }
                 if (start as usize) <= source.len()
                     && (end as usize) <= source.len()
-                    && start <= end
-                {
-                    std::str::from_utf8(&source[start as usize..end as usize]).unwrap_or("")
-                } else {
-                    ""
-                }
+                    && start <= end =>
+            {
+                std::str::from_utf8(&source[start as usize..end as usize]).unwrap_or("")
             }
             _ => "",
         }

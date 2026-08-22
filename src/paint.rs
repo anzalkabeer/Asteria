@@ -135,10 +135,10 @@ fn find_link_url(dom: &Dom, source: &[u8], node_id: Option<NodeId>) -> Option<St
     let mut curr = node_id;
     while let Some(id) = curr {
         let node = dom.get(id);
-        if node.tag_name(source).eq_ignore_ascii_case("a") {
-            if let Some(href) = node.get_attribute("href", source) {
-                return Some(href.to_string());
-            }
+        if node.tag_name(source).eq_ignore_ascii_case("a")
+            && let Some(href) = node.get_attribute("href", source)
+        {
+            return Some(href.to_string());
         }
         curr = node.parent;
     }
@@ -221,19 +221,19 @@ fn render_image(layout_box: &LayoutBox, dom: &Dom, source: &[u8], display_list: 
     };
 
     let node = dom.get(styled.node_id);
-    if node.tag_name(source).eq_ignore_ascii_case("img") {
-        if let Some(src_val) = node.get_attribute("src", source) {
-            let rect = layout_box.dimensions.content;
-            let link_url = find_link_url(dom, source, Some(styled.node_id));
-            display_list.push(DisplayCommand::Image {
-                image_id: src_val.to_string(),
-                x: rect.x,
-                y: rect.y,
-                width: rect.width,
-                height: rect.height,
-                link_url,
-            });
-        }
+    if node.tag_name(source).eq_ignore_ascii_case("img")
+        && let Some(src_val) = node.get_attribute("src", source)
+    {
+        let rect = layout_box.dimensions.content;
+        let link_url = find_link_url(dom, source, Some(styled.node_id));
+        display_list.push(DisplayCommand::Image {
+            image_id: src_val.to_string(),
+            x: rect.x,
+            y: rect.y,
+            width: rect.width,
+            height: rect.height,
+            link_url,
+        });
     }
 }
 
