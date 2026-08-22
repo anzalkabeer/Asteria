@@ -38,6 +38,9 @@ impl<K: Eq + Hash + Clone, V> LruCache<K, V> {
 
     /// Insert a value into the cache, evicting the LRU item in O(1) if full.
     pub fn insert(&mut self, key: K, value: V) {
+        if self.max_entries == 0 {
+            return;
+        }
         self.clock += 1;
 
         // If the key already exists, update it and move to back of order.

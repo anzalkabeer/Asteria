@@ -106,6 +106,17 @@ impl Stream {
         }
     }
 
+    pub fn peek_nonblocking(&self, buf: &mut [u8]) -> io::Result<usize> {
+        let sock = match self {
+            Stream::Plain(s) => s,
+            Stream::Tls(t) => &t.get_ref().sock,
+        };
+        sock.set_nonblocking(true)?;
+        let res = sock.peek(buf);
+        let _ = sock.set_nonblocking(false);
+        res
+    }
+
     pub fn set_read_timeout(&self, dur: Option<Duration>) -> io::Result<()> {
         match self {
             Stream::Plain(s) => s.set_read_timeout(dur),
@@ -181,11 +192,16 @@ impl fmt::Debug for TcpConnection {
 
 impl TcpConnection {
     /// Checks if the connection is still alive by performing a non-blocking
-    /// zero-byte peek. If the remote end has closed the connection, or if
-    /// an error occurs during the peek, the connection is considered dead.
+    /// 1-byte peek. If the remote end has closed the connection (Ok(0)) or
+    /// an unexpected error occurs, the connection is considered dead.
     pub fn is_alive(&self) -> bool {
-        let mut buf = [0; 0];
-        self.stream.peek(&mut buf).is_ok()
+        let mut buf = [0u8; 1];
+        match self.stream.peek_nonblocking(&mut buf) {
+            Ok(0) => false,
+            Ok(_) => true,
+            Err(e) if e.kind() == io::ErrorKind::WouldBlock => true,
+            Err(_) => false,
+        }
     }
 }
 
@@ -234,6 +250,7 @@ impl ConnectionPool {
     }
 
     /// Creates a new connection pool with custom timeouts, idle expiration, and capacity limits.
+    /// A `max_total` of 0 indicates unlimited connections.
     pub fn with_timeouts_and_limits(
         connect: Duration,
         read: Duration,
@@ -391,7 +408,11 @@ impl ConnectionPool {
 
     /// Ensures that pool size is strictly below `max_total_connections`.
     /// Evicts the connection with the oldest `last_used_at` timestamp if capacity is reached.
+    /// If `max_total_connections` is 0, capacity is treated as unlimited.
     fn ensure_capacity(&mut self) {
+        if self.max_total_connections == 0 {
+            return;
+        }
         while self.connections.len() >= self.max_total_connections {
             if let Some(oldest_key) = self
                 .connections
@@ -546,5 +567,79 @@ mod tests {
         );
         assert_eq!(pool.idle_timeout, Duration::from_secs(1));
         assert_eq!(pool.max_total_connections, 10);
+    }
+
+    #[test]
+    fn test_closed_peer_not_reused() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let handle = thread::spawn(move || {
+            let (stream, _) = listener.accept().unwrap();
+            // Close connection immediately by dropping stream
+            drop(stream);
+        });
+
+        let mut pool = ConnectionPool::new();
+        let _ = pool.connect(addr);
+        handle.join().unwrap();
+
+        // Give the OS network stack a tiny moment to complete FIN handshake
+        thread::sleep(Duration::from_millis(50));
+
+        // Attempting to get the connection from the pool should recognize it as closed (dead)
+        assert!(pool.get(&addr.to_string()).is_none());
+        assert_eq!(pool.pool_size(), 0);
+    }
+
+    #[test]
+    fn test_pool_zero_capacity_unlimited() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let handle = thread::spawn(move || {
+            let mut streams = Vec::new();
+            for _ in 0..2 {
+                let (stream, _) = listener.accept().unwrap();
+                streams.push(stream);
+            }
+            // Keep streams open until thread is done
+            thread::sleep(Duration::from_millis(100));
+        });
+
+        let mut pool = ConnectionPool::with_timeouts_and_limits(
+            Duration::from_secs(5),
+            Duration::from_secs(5),
+            Duration::from_secs(60),
+            0, // zero capacity means unlimited
+        );
+
+        let tcp1 = TcpStream::connect(addr).unwrap();
+        let tcp2 = TcpStream::connect(addr).unwrap();
+
+        let now = Instant::now();
+        pool.insert(
+            "k1".into(),
+            TcpConnection {
+                remote_addr: addr,
+                stream: Stream::Plain(tcp1),
+                connected_at: now,
+                last_used_at: now,
+                key: "k1".into(),
+            },
+        );
+        pool.insert(
+            "k2".into(),
+            TcpConnection {
+                remote_addr: addr,
+                stream: Stream::Plain(tcp2),
+                connected_at: now,
+                last_used_at: now,
+                key: "k2".into(),
+            },
+        );
+
+        assert_eq!(pool.pool_size(), 2);
+        handle.join().unwrap();
     }
 }

@@ -425,7 +425,7 @@ mod tests {
             }) => {
                 assert_eq!(url, "test.html");
                 assert!(dom.nodes.len() > 1);
-                assert!(tokens_count >= 0);
+                let _ = tokens_count;
             }
             _ => panic!("Expected HtmlParsed result"),
         }

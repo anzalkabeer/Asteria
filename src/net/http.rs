@@ -1,6 +1,6 @@
 // ─── Imports ───────────
 use std::fmt;
-use std::io::Write;
+use std::io::{Read, Write};
 use std::net::TcpStream;
 
 use super::dns::DnsResolver;
@@ -290,7 +290,7 @@ impl HttpClient {
 
     /// Resolves DNS and retrieves or establishes a pooled TCP/TLS connection for the target URL.
     pub fn acquire_stream(&mut self, url: &Url) -> Result<&mut Stream, NetworkError> {
-        let key = format!("{}:{}", url.host, url.port);
+        let key = format!("{}://{}:{}", url.scheme, url.host, url.port);
 
         if self.pool.get(&key).is_none() {
             // 1. DNS resolve
@@ -341,6 +341,7 @@ impl HttpClient {
 
     /// Sends a prepared `HttpRequest` and returns the `HttpResponse`.
     pub fn send_request(&mut self, request: &HttpRequest) -> Result<HttpResponse, NetworkError> {
+        let pool_key = format!("{}://{}:{}", request.url.scheme, request.url.host, request.url.port);
         let req_bytes = request.to_request_bytes();
         let stream = self.acquire_stream(&request.url)?;
 
@@ -355,6 +356,13 @@ impl HttpClient {
         let mut response = read_response(stream)?;
         response.url = request.url.raw.clone();
 
+        let is_close = response
+            .header("connection")
+            .map_or(false, |v| v.to_ascii_lowercase().contains("close"));
+        if is_close {
+            self.pool.disconnect(&pool_key);
+        }
+
         Ok(response)
     }
 
@@ -364,6 +372,7 @@ impl HttpClient {
         sender: std::sync::mpsc::Sender<crate::net::bus::ResourceBusEvent>,
     ) -> Result<(), NetworkError> {
         let current_url = Url::parse(url)?;
+        let pool_key = format!("{}://{}:{}", current_url.scheme, current_url.host, current_url.port);
         let request = HttpRequest {
             method: HttpMethod::Get,
             url: current_url.clone(),
@@ -381,7 +390,7 @@ impl HttpClient {
             })?;
 
         // Read headers
-        let (status_code, _, headers) = read_response_headers(stream)?;
+        let (status_code, _, headers, leftover) = read_response_headers(stream)?;
 
         let is_chunked = headers.iter().any(|(k, v)| {
             k.to_lowercase() == "transfer-encoding" && v.to_lowercase().contains("chunked")
@@ -404,12 +413,21 @@ impl HttpClient {
             content_type,
         });
 
+        let mut reader = std::io::Cursor::new(leftover).chain(stream);
+
         if is_chunked {
-            stream_chunked_body(stream, &url_str, &sender)?;
+            stream_chunked_body(&mut reader, &url_str, &sender)?;
         } else if let Some(len) = content_length {
-            stream_exact_body(stream, len, &url_str, &sender)?;
+            stream_exact_body(&mut reader, len, &url_str, &sender)?;
         } else {
-            stream_eof_body(stream, &url_str, &sender)?;
+            stream_eof_body(&mut reader, &url_str, &sender)?;
+        }
+
+        let is_close = headers
+            .iter()
+            .any(|(k, v)| k.eq_ignore_ascii_case("connection") && v.to_ascii_lowercase().contains("close"));
+        if is_close {
+            self.pool.disconnect(&pool_key);
         }
 
         Ok(())
@@ -427,9 +445,10 @@ impl Default for HttpClient {
 #[allow(clippy::type_complexity)]
 fn read_response_headers<R: std::io::Read>(
     stream: &mut R,
-) -> Result<(u16, String, Vec<(String, String)>), NetworkError> {
+) -> Result<(u16, String, Vec<(String, String)>, Vec<u8>), NetworkError> {
     let mut header_buf = Vec::new();
     let mut chunk = [0u8; 4096];
+    let header_end_idx;
 
     // Read headers in 4KB chunks until \r\n\r\n boundary is found
     loop {
@@ -445,7 +464,8 @@ fn read_response_headers<R: std::io::Read>(
             }
         }
 
-        if header_buf.windows(4).any(|w| w == b"\r\n\r\n") {
+        if let Some(pos) = header_buf.windows(4).position(|w| w == b"\r\n\r\n") {
+            header_end_idx = pos;
             break;
         }
         if header_buf.len() > 1024 * 1024 {
@@ -454,7 +474,11 @@ fn read_response_headers<R: std::io::Read>(
         }
     }
 
-    let header_str = String::from_utf8_lossy(&header_buf);
+    let end_idx = header_end_idx;
+    let header_bytes = &header_buf[..end_idx];
+    let body_leftover = header_buf[end_idx + 4..].to_vec();
+
+    let header_str = String::from_utf8_lossy(header_bytes);
     let mut lines = header_str.split("\r\n");
 
     // Parse status line
@@ -484,12 +508,13 @@ fn read_response_headers<R: std::io::Read>(
         }
     }
 
-    Ok((status_code, status_text, headers))
+    Ok((status_code, status_text, headers, body_leftover))
 }
 
 /// Reads and parses an HTTP response from a TCP stream.
 fn read_response<R: std::io::Read>(stream: &mut R) -> Result<HttpResponse, NetworkError> {
-    let (status_code, status_text, headers) = read_response_headers(stream)?;
+    let (status_code, status_text, headers, leftover) = read_response_headers(stream)?;
+    let mut reader = std::io::Cursor::new(leftover).chain(stream);
 
     let is_chunked = headers.iter().any(|(k, v)| {
         k.to_lowercase() == "transfer-encoding" && v.to_lowercase().contains("chunked")
@@ -501,13 +526,13 @@ fn read_response<R: std::io::Read>(stream: &mut R) -> Result<HttpResponse, Netwo
         .and_then(|(_, v)| v.parse::<usize>().ok());
 
     let body = if is_chunked {
-        read_chunked_body(stream)?
+        read_chunked_body(&mut reader)?
     } else if let Some(len) = content_length {
-        read_exact_body(stream, len)?
+        read_exact_body(&mut reader, len)?
     } else {
         // No body length specified, read until EOF
         let mut body = Vec::new();
-        let _ = stream.read_to_end(&mut body);
+        let _ = reader.read_to_end(&mut body);
         body
     };
 

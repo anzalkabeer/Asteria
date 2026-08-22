@@ -204,7 +204,7 @@ fn render_text(layout_box: &LayoutBox, dom: &Dom, source: &[u8], display_list: &
         let rect = layout_box.dimensions.content;
         let link_url = find_link_url(dom, source, Some(styled.node_id));
         display_list.push(DisplayCommand::Text {
-            text: text.to_string(),
+            text: trimmed_text.to_string(),
             x: rect.x,
             y: rect.y,
             target_width: rect.width,

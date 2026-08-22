@@ -386,14 +386,7 @@ pub fn build_scene_graph(display_list: &DisplayList, segment_height: f32) -> Sce
                 color,
                 link_url,
             } => {
-                let line_count = text.lines().count().max(1) as f32;
-                let line_height = *font_size * 1.2;
-                let rect = Rect {
-                    x: *x,
-                    y: *y,
-                    width: *target_width,
-                    height: line_height * line_count,
-                };
+                let rect = compute_text_rect(text, *x, *y, *target_width, *font_size);
                 let seg = assign_segment(*y, segment_height);
                 scene.push(
                     SceneNode {
@@ -456,23 +449,31 @@ pub fn build_scene_graph(display_list: &DisplayList, segment_height: f32) -> Sce
     scene
 }
 
+/// Compute bounding rect for text with line breaks and minimum 1 line height.
+fn compute_text_rect(text: &str, x: f32, y: f32, width: f32, font_size: f32) -> Rect {
+    let line_count = text.lines().count().max(1) as f32;
+    let line_height = font_size * 1.2;
+    Rect {
+        x,
+        y,
+        width,
+        height: line_height * line_count,
+    }
+}
+
 /// Extract the bounding rect from a DisplayCommand.
 fn cmd_bounding_rect(cmd: &DisplayCommand) -> Rect {
     match cmd {
         DisplayCommand::SolidColor { rect, .. } => *rect,
         DisplayCommand::Border { rect, .. } => *rect,
         DisplayCommand::Text {
+            text,
             x,
             y,
             target_width,
             font_size,
             ..
-        } => Rect {
-            x: *x,
-            y: *y,
-            width: *target_width,
-            height: *font_size * 1.2,
-        },
+        } => compute_text_rect(text, *x, *y, *target_width, *font_size),
         DisplayCommand::Image {
             x,
             y,

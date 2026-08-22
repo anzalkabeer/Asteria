@@ -664,8 +664,6 @@ fn estimate_char_width_ratio(ch: char) -> f32 {
         // Thin / narrow glyphs
         'i' | 'l' | 'j' | '!' | '|' | '\'' | ',' | '.' | ':' | ';' | '`' => 0.28,
         'f' | 'r' | 't' => 0.35,
-        // Whitespace
-        ' ' => 0.25,
         // Wide lowercase
         'm' | 'w' => 0.78,
         // Normal lowercase (catch-all after specific overrides)
@@ -680,6 +678,8 @@ fn estimate_char_width_ratio(ch: char) -> f32 {
         '\u{4e00}'..='\u{9fff}' | '\u{3400}'..='\u{4dbf}' | '\u{f900}'..='\u{faff}' => 1.05,
         // CJK Fullwidth punctuation
         '\u{3000}'..='\u{303f}' | '\u{ff00}'..='\u{ffef}' => 1.0,
+        // Whitespace (covers space, tab, newline, CR, NBSP, and all Unicode whitespace)
+        _ if ch.is_whitespace() => 0.25,
         // Fallback for other characters
         _ => 0.55,
     }

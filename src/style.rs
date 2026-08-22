@@ -28,9 +28,11 @@ struct RuleIndex<'a> {
 impl<'a> RuleIndex<'a> {
     /// Build a rule index from a flat list of style rules.
     ///
-    /// Each rule is examined for its key selector (the last step's compound).
-    /// Rules are filed under the **most specific** simple selector found:
-    ///   ID  >  Class  >  Tag  >  Universal
+    /// Each rule's selectors are examined independently for their key selector
+    /// (the last step's compound). A rule is indexed under every ID, class, and tag
+    /// found in each selector's key compound. When a selector contributes no
+    /// indexable simple selector (or has empty steps), the rule is added to the
+    /// universal bucket for that selector.
     fn build(rules: &[&'a StyleRule]) -> Self {
         let mut index = RuleIndex {
             by_id: HashMap::new(),
@@ -40,12 +42,9 @@ impl<'a> RuleIndex<'a> {
         };
 
         for &rule in rules {
-            // Determine buckets from ALL selectors of this rule.
-            // A rule can have multiple selectors (e.g. `h1, .title { ... }`),
-            // so we index it under every key selector it contains.
-            let mut indexed = false;
-
             for sel in &rule.selectors {
+                let mut indexed = false;
+
                 // The key selector is the last (rightmost) step's compound.
                 if let Some(last_step) = sel.steps.last() {
                     for simple in &last_step.compound {
@@ -78,11 +77,11 @@ impl<'a> RuleIndex<'a> {
                         }
                     }
                 }
-            }
 
-            // If no ID/class/tag was found (e.g. `* { ... }`), put in universal.
-            if !indexed {
-                index.universal.push(rule);
+                // If this selector contributed no indexable ID/class/tag, add to universal.
+                if !indexed {
+                    index.universal.push(rule);
+                }
             }
         }
 
@@ -1098,8 +1097,6 @@ impl StyledNode {
 mod tests {
     use super::*;
     use crate::css_parser::Stylesheet;
-    use crate::parser::Parser;
-    use crate::tokenizer::Tokenizer;
     use crate::values::{Color, Display, Edges, TextAlign};
 
     /// Helper: parse HTML and CSS, resolve styles, return the styled tree

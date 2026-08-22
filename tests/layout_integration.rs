@@ -10,9 +10,7 @@
 use asteria::css_parser::Stylesheet;
 use asteria::dom::Dom;
 use asteria::layout::{BoxType, LayoutBox, layout_document};
-use asteria::parser::Parser;
 use asteria::style::{StyledNode, resolve_styles};
-use asteria::tokenizer::Tokenizer;
 
 fn parse_and_layout<'a>(
     html: &'a str,
@@ -171,18 +169,18 @@ fn test_layout_inline_side_by_side_flow() {
     let span1 = &p_box.children[0];
     let span2 = &p_box.children[1];
 
-    // Span 1 width = 5 chars * 16 * 0.55 = 44px
-    assert_eq!(span1.dimensions.content.width, 44.0);
+    // Span 1 width = proportional width of "Hello" (0.65+0.52+0.28+0.28+0.52) * 16 = 36px
+    assert_eq!(span1.dimensions.content.width, 36.0);
 
     // Span 1 and Span 2 are on the SAME line y
     assert_eq!(span1.dimensions.content.y, p_box.dimensions.content.y);
     assert_eq!(span2.dimensions.content.y, p_box.dimensions.content.y);
 
-    // Span 2 x is horizontally offset by Span 1 width (x = p_x + 44px)
+    // Span 2 x is horizontally offset by Span 1 width (x = p_x + 36px)
     assert_eq!(span1.dimensions.content.x, p_box.dimensions.content.x);
     assert_eq!(
         span2.dimensions.content.x,
-        p_box.dimensions.content.x + 44.0
+        p_box.dimensions.content.x + 36.0
     );
 }
 
