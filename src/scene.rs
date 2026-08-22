@@ -69,10 +69,10 @@ pub struct SceneNode {
     /// Incremental invalidation flag (Pillar 3)
     /// When true, this node needs re-rendering
     pub dirty: bool,
-    //this state is from the NOdestate
+    /// Interactive visual state of this node (hovered, active, normal)
     pub state: NodeState,
-    //interactive visuall state of a oarticular node on ehihc the mous e is hovering
-    pub link_url: Option<String>, //target url of the anchor tag if the node is a link, otherwise None
+    /// Target URL of the anchor tag if the node is an interactive link, otherwise None
+    pub link_url: Option<String>,
 }
 
 // ─── Text Run Data ───────────────────────────────────────────────
@@ -498,7 +498,6 @@ fn rect_contains(outer: &Rect, inner: &Rect) -> bool {
 // ─── Scene Graph Inspector ───────────────────────────────────────
 
 impl std::fmt::Display for SceneGraph {
-    #[allow(clippy::collapsible_if)]
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         writeln!(
             f,

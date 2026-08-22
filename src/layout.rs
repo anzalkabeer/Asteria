@@ -147,7 +147,6 @@ impl<'a> LayoutBox<'a> {
 
     /// Calculate width, padding, border, and margins for a block box
     /// using W3C width constraint equations.
-    #[allow(clippy::unnecessary_map_or)]
     fn calculate_block_width(&mut self, containing_block: Dimensions) {
         let style = self.styled_node.map(|n| &n.styles);
 
@@ -629,9 +628,9 @@ fn compute_intrinsic_inline_width(
 
     let node = dom.get(styled.node_id);
     match &node.kind {
-        NodeKind::Text { start, end } => {
+        NodeKind::Text { .. } => {
             let font_size = styled.styles.font_size;
-            let text = std::str::from_utf8(&source[*start as usize..*end as usize]).unwrap_or("");
+            let text = node.text_content(source);
             let trimmed_len = text.trim_matches(|c: char| c == '\r' || c == '\n').len() as f32;
             (trimmed_len * font_size * 0.55).max(0.0)
         }

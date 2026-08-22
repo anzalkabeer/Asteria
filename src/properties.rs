@@ -149,6 +149,23 @@ pub fn is_inherited(id: PropertyId) -> bool {
     }
 }
 
+impl PropertyId {
+    /// Returns the canonical CSS property name string for this PropertyId.
+    pub fn name(self) -> &'static str {
+        property_id_to_name(self)
+    }
+
+    /// Parses a CSS property name string into a PropertyId.
+    pub fn from_name(name: &str) -> Option<PropertyId> {
+        property_from_name(name)
+    }
+
+    /// Checks if this property inherits by default.
+    pub fn is_inherited(self) -> bool {
+        is_inherited(self)
+    }
+}
+
 /// Map a CSS property name string to a PropertyId.
 /// Returns None for unknown properties (which we silently ignore in V1).
 ///
@@ -198,6 +215,45 @@ pub fn property_from_name(name: &str) -> Option<PropertyId> {
         // Shorthands — handled specially in style.rs
         "margin" | "padding" => None,
         _ => None,
+    }
+}
+
+/// Map a PropertyId back to its canonical CSS property name string.
+pub fn property_id_to_name(id: PropertyId) -> &'static str {
+    match id {
+        PropertyId::Display => "display",
+        PropertyId::Position => "position",
+        PropertyId::Width => "width",
+        PropertyId::Height => "height",
+        PropertyId::MarginTop => "margin-top",
+        PropertyId::MarginRight => "margin-right",
+        PropertyId::MarginBottom => "margin-bottom",
+        PropertyId::MarginLeft => "margin-left",
+        PropertyId::PaddingTop => "padding-top",
+        PropertyId::PaddingRight => "padding-right",
+        PropertyId::PaddingBottom => "padding-bottom",
+        PropertyId::PaddingLeft => "padding-left",
+        PropertyId::BorderTopWidth => "border-top-width",
+        PropertyId::BorderRightWidth => "border-right-width",
+        PropertyId::BorderBottomWidth => "border-bottom-width",
+        PropertyId::BorderLeftWidth => "border-left-width",
+        PropertyId::BorderColor => "border-color",
+        PropertyId::BorderStyle => "border-style",
+        PropertyId::Color => "color",
+        PropertyId::BackgroundColor => "background-color",
+        PropertyId::FontSize => "font-size",
+        PropertyId::FontWeight => "font-weight",
+        PropertyId::TextAlign => "text-align",
+        PropertyId::LineHeight => "line-height",
+        PropertyId::GridTemplateColumns => "grid-template-columns",
+        PropertyId::GridTemplateRows => "grid-template-rows",
+        PropertyId::GridColumn => "grid-column",
+        PropertyId::GridRow => "grid-row",
+        PropertyId::GridGap => "grid-gap",
+        PropertyId::AnimationName => "animation-name",
+        PropertyId::AnimationDuration => "animation-duration",
+        PropertyId::AnimationTimingFunction => "animation-timing-function",
+        PropertyId::AnimationIterationCount => "animation-iteration-count",
     }
 }
 

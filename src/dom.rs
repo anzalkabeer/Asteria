@@ -72,6 +72,66 @@ pub struct Node {
     pub flags: NodeFlags,
 }
 
+impl Node {
+    /// Safely extract the element's tag name from the source buffer.
+    pub fn tag_name<'a>(&self, source: &'a [u8]) -> &'a str {
+        match self.kind {
+            NodeKind::Element { tag_start, tag_end } => {
+                if (tag_start as usize) <= source.len() && (tag_end as usize) <= source.len() && tag_start <= tag_end {
+                    std::str::from_utf8(&source[tag_start as usize..tag_end as usize]).unwrap_or("")
+                } else {
+                    ""
+                }
+            }
+            _ => "",
+        }
+    }
+
+    /// Safely extract the text content from the source buffer.
+    pub fn text_content<'a>(&self, source: &'a [u8]) -> &'a str {
+        match self.kind {
+            NodeKind::Text { start, end } => {
+                if (start as usize) <= source.len() && (end as usize) <= source.len() && start <= end {
+                    std::str::from_utf8(&source[start as usize..end as usize]).unwrap_or("")
+                } else {
+                    ""
+                }
+            }
+            _ => "",
+        }
+    }
+
+    /// Look up an attribute value by name (case-insensitive) on this node from the source buffer.
+    pub fn get_attribute<'a>(&self, name: &str, source: &'a [u8]) -> Option<&'a str> {
+        for &(ns, ne, vs, ve) in &self.attributes {
+            if (ns as usize) <= source.len() && (ne as usize) <= source.len() && ns <= ne {
+                let attr_name = std::str::from_utf8(&source[ns as usize..ne as usize]).unwrap_or("");
+                if attr_name.eq_ignore_ascii_case(name) {
+                    if (vs as usize) <= source.len() && (ve as usize) <= source.len() && vs <= ve {
+                        return Some(std::str::from_utf8(&source[vs as usize..ve as usize]).unwrap_or(""));
+                    }
+                    return Some("");
+                }
+            }
+        }
+        None
+    }
+
+    /// Returns the element's id attribute if present.
+    pub fn get_id<'a>(&self, source: &'a [u8]) -> Option<&'a str> {
+        self.get_attribute("id", source)
+    }
+
+    /// Returns true if the element has the specified CSS class.
+    pub fn has_class(&self, class_name: &str, source: &[u8]) -> bool {
+        if let Some(class_val) = self.get_attribute("class", source) {
+            class_val.split_whitespace().any(|c| c == class_name)
+        } else {
+            false
+        }
+    }
+}
+
 // ─── The DOM Arena ───────────────────────────────────────────────
 //
 // This is the main data structure. All nodes are stored in a single Vec.

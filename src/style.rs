@@ -166,7 +166,6 @@ pub fn resolve_styles_with_viewport(
 ///
 /// `parent_style` — the parent's computed style (for inheritance)
 /// `root_font_size` — the root element's computed font-size (for rem units)
-#[allow(clippy::collapsible_if)]
 fn build_styled_node(
     dom: &Dom,
     node_id: NodeId,
@@ -226,21 +225,16 @@ fn build_styled_node(
             }
 
             // Check for inline style="" attribute (highest cascade priority)
-            for &(ns, ne, vs, ve) in &node.attributes {
-                let attr_name =
-                    std::str::from_utf8(&source[ns as usize..ne as usize]).unwrap_or("");
-                if attr_name.eq_ignore_ascii_case("style") && vs != 0 && ve != 0 {
-                    let style_text = &source[vs as usize..ve as usize];
-                    let inline_decls = parse_inline_style(style_text);
-                    for (prop, val) in inline_decls {
-                        declarations.push(MatchedDeclaration {
-                            property: Cow::Owned(prop),
-                            value: Cow::Owned(val),
-                            specificity: (0, 0, 0), // doesn't matter — origin wins
-                            source_order: usize::MAX,
-                            origin: Origin::Inline,
-                        });
-                    }
+            if let Some(style_text) = node.get_attribute("style", source) {
+                let inline_decls = parse_inline_style(style_text);
+                for (prop, val) in inline_decls {
+                    declarations.push(MatchedDeclaration {
+                        property: Cow::Owned(prop),
+                        value: Cow::Owned(val),
+                        specificity: (0, 0, 0), // doesn't matter — origin wins
+                        source_order: usize::MAX,
+                        origin: Origin::Inline,
+                    });
                 }
             }
 
@@ -294,7 +288,7 @@ fn build_styled_node(
                             values::parse_edges(value.as_ref(), parent_style.font_size, root_font_size);
                         let edge_values = [edges.top, edges.right, edges.bottom, edges.left];
                         for (id, px_val) in longhand_ids.iter().zip(edge_values.iter()) {
-                            let longhand_name = property_id_to_name(*id);
+                            let longhand_name = id.name();
                             // Only set if not already explicitly set by a longhand
                             if !specified.contains_key(longhand_name) {
                                 expanded.insert(Cow::Borrowed(longhand_name), Cow::Owned(format!("{}px", px_val)));
@@ -376,7 +370,7 @@ fn build_styled_node(
                     continue; // already handled above
                 }
 
-                let prop_name = property_id_to_name(prop_id);
+                let prop_name = prop_id.name();
 
                 if let Some(raw_value) = specified.get(prop_name) {
                     let value = substitute_vars(raw_value, &current_variables);
@@ -401,100 +395,9 @@ fn build_styled_node(
             computed.variables = current_variables;
 
             // User-Agent default stylesheet: apply tag-specific defaults for un-specified properties
-            if let NodeKind::Element { tag_start, tag_end } = &node.kind {
-                let tag_name = std::str::from_utf8(&source[*tag_start as usize..*tag_end as usize])
-                    .unwrap_or("")
-                    .to_ascii_lowercase();
-
-                if !specified.contains_key("display") {
-                    match tag_name.as_str() {
-                        "head" | "title" | "meta" | "script" | "style" | "link" => {
-                            computed.display = Display::None;
-                        }
-                        "img" => {
-                            computed.display = Display::InlineBlock;
-                        }
-                        _ if is_default_block_tag(&tag_name) => {
-                            computed.display = Display::Block;
-                        }
-                        _ => {}
-                    }
-                }
-
-                if tag_name == "img" {
-                    if computed.width.is_none() {
-                        computed.width = Some(160.0);
-                    }
-                    if computed.height.is_none() {
-                        computed.height = Some(100.0);
-                    }
-                }
-
-                if !specified.contains_key("background-color") {
-                    match tag_name.as_str() {
-                        "body" => {
-                            computed.background_color = values::Color::rgb(248, 250, 252);
-                        }
-                        "h1" => {
-                            computed.background_color = values::Color::rgb(240, 249, 255);
-                        }
-                        "div" => {
-                            computed.background_color = values::Color::rgb(248, 250, 252);
-                        }
-                        "img" => {
-                            computed.background_color = values::Color::rgb(226, 232, 240);
-                        }
-                        _ => {}
-                    }
-                }
-
-                if !specified.contains_key("color") && computed.color == values::Color::BLACK {
-                    if tag_name == "h1" {
-                        computed.color = values::Color::rgb(3, 105, 161);
-                    }
-                }
-
-                if !specified.contains_key("border") && !specified.contains_key("border-color") {
-                    match tag_name.as_str() {
-                        "h1" => {
-                            computed.border_color = values::Color::rgb(2, 132, 199);
-                        }
-                        "div" | "img" | "hr" => {
-                            computed.border_color = values::Color::rgb(203, 213, 225);
-                        }
-                        _ => {}
-                    }
-                }
-
-                if !specified.contains_key("border")
-                    && !specified.contains_key("border-width")
-                    && !specified.contains_key("border-left-width")
-                    && !specified.contains_key("border-top-width")
-                    && !specified.contains_key("border-right-width")
-                    && !specified.contains_key("border-bottom-width")
-                {
-                    match tag_name.as_str() {
-                        "h1" => {
-                            computed.border_width.left = 4.0;
-                        }
-                        "div" | "img" | "hr" => {
-                            computed.border_width = values::Edges::uniform(1.0);
-                        }
-                        _ => {}
-                    }
-                }
-
-                if !specified.contains_key("margin") && !specified.contains_key("margin-top") {
-                    if tag_name == "body" {
-                        computed.margin = values::Edges::uniform(8.0);
-                    }
-                }
-
-                if !specified.contains_key("padding") && !specified.contains_key("padding-top") {
-                    if tag_name == "h1" || tag_name == "div" {
-                        computed.padding = values::Edges::uniform(12.0);
-                    }
-                }
+            if let NodeKind::Element { .. } = &node.kind {
+                let tag_name = node.tag_name(source).to_ascii_lowercase();
+                apply_user_agent_defaults(&tag_name, &specified, &mut computed);
             }
 
             computed
@@ -538,7 +441,99 @@ fn build_styled_node(
     }
 }
 
-/// Copy a single property value from parent to child.
+/// User-Agent default stylesheet: apply tag-specific defaults for un-specified properties
+fn apply_user_agent_defaults(
+    tag_name: &str,
+    specified: &HashMap<Cow<str>, Cow<str>>,
+    computed: &mut ComputedStyle,
+) {
+    if !specified.contains_key("display") {
+        match tag_name {
+            "head" | "title" | "meta" | "script" | "style" | "link" => {
+                computed.display = Display::None;
+            }
+            "img" => {
+                computed.display = Display::InlineBlock;
+            }
+            _ if is_default_block_tag(tag_name) => {
+                computed.display = Display::Block;
+            }
+            _ => {}
+        }
+    }
+
+    if tag_name == "img" {
+        if computed.width.is_none() {
+            computed.width = Some(160.0);
+        }
+        if computed.height.is_none() {
+            computed.height = Some(100.0);
+        }
+    }
+
+    if !specified.contains_key("background-color") {
+        match tag_name {
+            "body" | "div" => {
+                computed.background_color = values::Color::rgb(248, 250, 252);
+            }
+            "h1" => {
+                computed.background_color = values::Color::rgb(240, 249, 255);
+            }
+            "img" => {
+                computed.background_color = values::Color::rgb(226, 232, 240);
+            }
+            _ => {}
+        }
+    }
+
+    if !specified.contains_key("color") && computed.color == values::Color::BLACK && tag_name == "h1" {
+        computed.color = values::Color::rgb(3, 105, 161);
+    }
+
+    if !specified.contains_key("border") && !specified.contains_key("border-color") {
+        match tag_name {
+            "h1" => {
+                computed.border_color = values::Color::rgb(2, 132, 199);
+            }
+            "div" | "img" | "hr" => {
+                computed.border_color = values::Color::rgb(203, 213, 225);
+            }
+            _ => {}
+        }
+    }
+
+    if !specified.contains_key("border")
+        && !specified.contains_key("border-width")
+        && !specified.contains_key("border-left-width")
+        && !specified.contains_key("border-top-width")
+        && !specified.contains_key("border-right-width")
+        && !specified.contains_key("border-bottom-width")
+    {
+        match tag_name {
+            "h1" => {
+                computed.border_width.left = 4.0;
+            }
+            "div" | "img" | "hr" => {
+                computed.border_width = values::Edges::uniform(1.0);
+            }
+            _ => {}
+        }
+    }
+
+    if !specified.contains_key("margin") && !specified.contains_key("margin-top") && tag_name == "body" {
+        computed.margin = values::Edges::uniform(8.0);
+    }
+
+    if !specified.contains_key("padding")
+        && !specified.contains_key("padding-top")
+        && (tag_name == "h1" || tag_name == "div")
+    {
+        computed.padding = values::Edges::uniform(12.0);
+    }
+}
+
+/// Copy a single property value from parent to child (for explicit keyword inheritance
+/// or default property inheritance).
 fn copy_property(child: &mut ComputedStyle, parent: &ComputedStyle, prop: PropertyId) {
     match prop {
         PropertyId::Display => child.display = parent.display,
@@ -585,48 +580,8 @@ fn copy_property(child: &mut ComputedStyle, parent: &ComputedStyle, prop: Proper
     }
 }
 
-/// Map a PropertyId back to its CSS property name string.
-fn property_id_to_name(id: PropertyId) -> &'static str {
-    match id {
-        PropertyId::Display => "display",
-        PropertyId::Position => "position",
-        PropertyId::Width => "width",
-        PropertyId::Height => "height",
-        PropertyId::MarginTop => "margin-top",
-        PropertyId::MarginRight => "margin-right",
-        PropertyId::MarginBottom => "margin-bottom",
-        PropertyId::MarginLeft => "margin-left",
-        PropertyId::PaddingTop => "padding-top",
-        PropertyId::PaddingRight => "padding-right",
-        PropertyId::PaddingBottom => "padding-bottom",
-        PropertyId::PaddingLeft => "padding-left",
-        PropertyId::BorderTopWidth => "border-top-width",
-        PropertyId::BorderRightWidth => "border-right-width",
-        PropertyId::BorderBottomWidth => "border-bottom-width",
-        PropertyId::BorderLeftWidth => "border-left-width",
-        PropertyId::BorderColor => "border-color",
-        PropertyId::BorderStyle => "border-style",
-        PropertyId::Color => "color",
-        PropertyId::BackgroundColor => "background-color",
-        PropertyId::FontSize => "font-size",
-        PropertyId::FontWeight => "font-weight",
-        PropertyId::TextAlign => "text-align",
-        PropertyId::LineHeight => "line-height",
-        PropertyId::GridTemplateColumns => "grid-template-columns",
-        PropertyId::GridTemplateRows => "grid-template-rows",
-        PropertyId::GridColumn => "grid-column",
-        PropertyId::GridRow => "grid-row",
-        PropertyId::GridGap => "grid-gap",
-        PropertyId::AnimationName => "animation-name",
-        PropertyId::AnimationDuration => "animation-duration",
-        PropertyId::AnimationTimingFunction => "animation-timing-function",
-        PropertyId::AnimationIterationCount => "animation-iteration-count",
-    }
-}
-
-/// Parse inline style declarations from a style="" attribute value.
-fn parse_inline_style(style_bytes: &[u8]) -> Vec<(String, String)> {
-    let style_str = std::str::from_utf8(style_bytes).unwrap_or("");
+/// Parse inline style declarations from a style="" attribute value string.
+fn parse_inline_style(style_str: &str) -> Vec<(String, String)> {
     let mut result = Vec::new();
 
     for declaration in style_str.split(';') {
@@ -804,24 +759,18 @@ fn node_has_attribute(
     expected_val: &Option<(String, String)>,
     source: &[u8],
 ) -> bool {
-    for &(ns, ne, vs, ve) in &node.attributes {
-        let name = std::str::from_utf8(&source[ns as usize..ne as usize]).unwrap_or("");
-        if name.eq_ignore_ascii_case(attr_name) {
-            if let Some((op, val)) = expected_val {
-                let actual_val = if vs == 0 && ve == 0 {
-                    ""
-                } else {
-                    std::str::from_utf8(&source[vs as usize..ve as usize]).unwrap_or("")
-                };
-                return match op.as_str() {
-                    "=" => actual_val == val,
-                    _ => false, // fallback for other operators
-                };
+    if let Some(actual_val) = node.get_attribute(attr_name, source) {
+        if let Some((op, val)) = expected_val {
+            match op.as_str() {
+                "=" => actual_val == val,
+                _ => false,
             }
-            return true;
+        } else {
+            true
         }
+    } else {
+        false
     }
-    false
 }
 
 /// Check if all simple selectors in a compound selector match a node.
@@ -833,21 +782,17 @@ fn compound_matches(
     source: &[u8],
 ) -> bool {
     let node = dom.get(node_id);
+    if !matches!(node.kind, NodeKind::Element { .. }) {
+        return false;
+    }
 
-    let (tag_start, tag_end) = match &node.kind {
-        NodeKind::Element { tag_start, tag_end } => (*tag_start, *tag_end),
-        _ => return false,
-    };
-
-    let tag_name = std::str::from_utf8(&source[tag_start as usize..tag_end as usize])
-        .unwrap_or("")
-        .to_ascii_lowercase();
+    let tag_name = node.tag_name(source).to_ascii_lowercase();
 
     for simple in compound {
         let matches = match simple {
             SimpleSelector::Tag(name) => tag_name == *name,
-            SimpleSelector::Class(class_name) => node_has_class(node, class_name, source),
-            SimpleSelector::Id(id_name) => node_has_id(node, id_name, source),
+            SimpleSelector::Class(class_name) => node.has_class(class_name, source),
+            SimpleSelector::Id(id_name) => node.get_id(source) == Some(id_name.as_str()),
             SimpleSelector::Universal => true,
             SimpleSelector::PseudoClass(pseudo) => match pseudo.as_str() {
                 "first-child" => is_first_child(node_id, dom),
@@ -864,32 +809,6 @@ fn compound_matches(
     }
 
     true
-}
-
-/// Check if a node has a specific class in its class attribute.
-fn node_has_class(node: &crate::dom::Node, class_name: &str, source: &[u8]) -> bool {
-    for &(ns, ne, vs, ve) in &node.attributes {
-        let attr_name = std::str::from_utf8(&source[ns as usize..ne as usize]).unwrap_or("");
-
-        if attr_name.eq_ignore_ascii_case("class") && vs != 0 && ve != 0 {
-            let attr_value = std::str::from_utf8(&source[vs as usize..ve as usize]).unwrap_or("");
-            return attr_value.split_whitespace().any(|c| c == class_name);
-        }
-    }
-    false
-}
-
-/// Check if a node has a specific id attribute value.
-fn node_has_id(node: &crate::dom::Node, id_name: &str, source: &[u8]) -> bool {
-    for &(ns, ne, vs, ve) in &node.attributes {
-        let attr_name = std::str::from_utf8(&source[ns as usize..ne as usize]).unwrap_or("");
-
-        if attr_name.eq_ignore_ascii_case("id") && vs != 0 && ve != 0 {
-            let attr_value = std::str::from_utf8(&source[vs as usize..ve as usize]).unwrap_or("");
-            return attr_value == id_name;
-        }
-    }
-    false
 }
 
 // ─── Styled Tree Printer ─────────────────────────────────────────

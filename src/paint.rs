@@ -13,7 +13,7 @@
 
 use std::fmt;
 
-use crate::dom::{Dom, NodeId, NodeKind};
+use crate::dom::{Dom, NodeId};
 use crate::layout::{EdgeSizes, LayoutBox, Rect};
 use crate::values::Color;
 
@@ -135,21 +135,9 @@ fn find_link_url(dom: &Dom, source: &[u8], node_id: Option<NodeId>) -> Option<St
     let mut curr = node_id;
     while let Some(id) = curr {
         let node = dom.get(id);
-        if let NodeKind::Element { tag_start, tag_end } = node.kind {
-            let tag_name =
-                std::str::from_utf8(&source[tag_start as usize..tag_end as usize]).unwrap_or("");
-            if tag_name.eq_ignore_ascii_case("a") {
-                for &(ns, ne, vs, ve) in &node.attributes {
-                    let attr_name =
-                        std::str::from_utf8(&source[ns as usize..ne as usize]).unwrap_or("");
-                    if attr_name.eq_ignore_ascii_case("href") {
-                        return Some(
-                            std::str::from_utf8(&source[vs as usize..ve as usize])
-                                .unwrap_or("")
-                                .to_string(),
-                        );
-                    }
-                }
+        if node.tag_name(source).eq_ignore_ascii_case("a") {
+            if let Some(href) = node.get_attribute("href", source) {
+                return Some(href.to_string());
             }
         }
         curr = node.parent;
@@ -210,22 +198,20 @@ fn render_text(layout_box: &LayoutBox, dom: &Dom, source: &[u8], display_list: &
     };
 
     let node = dom.get(styled.node_id);
-    if let NodeKind::Text { start, end } = node.kind {
-        let text = std::str::from_utf8(&source[start as usize..end as usize]).unwrap_or("");
-        let trimmed_text = text.trim();
-        if !trimmed_text.is_empty() {
-            let rect = layout_box.dimensions.content;
-            let link_url = find_link_url(dom, source, Some(styled.node_id));
-            display_list.push(DisplayCommand::Text {
-                text: text.to_string(),
-                x: rect.x,
-                y: rect.y,
-                target_width: rect.width,
-                font_size: styled.styles.font_size,
-                color: styled.styles.color,
-                link_url,
-            });
-        }
+    let text = node.text_content(source);
+    let trimmed_text = text.trim();
+    if !trimmed_text.is_empty() {
+        let rect = layout_box.dimensions.content;
+        let link_url = find_link_url(dom, source, Some(styled.node_id));
+        display_list.push(DisplayCommand::Text {
+            text: text.to_string(),
+            x: rect.x,
+            y: rect.y,
+            target_width: rect.width,
+            font_size: styled.styles.font_size,
+            color: styled.styles.color,
+            link_url,
+        });
     }
 }
 
@@ -235,32 +221,18 @@ fn render_image(layout_box: &LayoutBox, dom: &Dom, source: &[u8], display_list: 
     };
 
     let node = dom.get(styled.node_id);
-    if let NodeKind::Element { tag_start, tag_end } = node.kind {
-        let tag_name =
-            std::str::from_utf8(&source[tag_start as usize..tag_end as usize]).unwrap_or("");
-        if tag_name.eq_ignore_ascii_case("img") {
-            let mut src = None;
-            for &(ns, ne, vs, ve) in &node.attributes {
-                let attr_name =
-                    std::str::from_utf8(&source[ns as usize..ne as usize]).unwrap_or("");
-                if attr_name.eq_ignore_ascii_case("src") {
-                    src =
-                        Some(std::str::from_utf8(&source[vs as usize..ve as usize]).unwrap_or(""));
-                    break;
-                }
-            }
-            if let Some(src_val) = src {
-                let rect = layout_box.dimensions.content;
-                let link_url = find_link_url(dom, source, Some(styled.node_id));
-                display_list.push(DisplayCommand::Image {
-                    image_id: src_val.to_string(),
-                    x: rect.x,
-                    y: rect.y,
-                    width: rect.width,
-                    height: rect.height,
-                    link_url,
-                });
-            }
+    if node.tag_name(source).eq_ignore_ascii_case("img") {
+        if let Some(src_val) = node.get_attribute("src", source) {
+            let rect = layout_box.dimensions.content;
+            let link_url = find_link_url(dom, source, Some(styled.node_id));
+            display_list.push(DisplayCommand::Image {
+                image_id: src_val.to_string(),
+                x: rect.x,
+                y: rect.y,
+                width: rect.width,
+                height: rect.height,
+                link_url,
+            });
         }
     }
 }
