@@ -288,26 +288,26 @@ impl HttpClient {
         }
     }
 
-    /// Sends a prepared `HttpRequest` and returns the `HttpResponse`.
-    pub fn send_request(&mut self, request: &HttpRequest) -> Result<HttpResponse, NetworkError> {
-        // 1. DNS resolve
-        let dns_entry = self
-            .dns
-            .resolve(&request.url.host)
-            .map_err(|e| NetworkError::DnsError(format!("{}", e)))?;
-
-        // 2. Pick the first resolved IP and build a SocketAddr
-        let ip = dns_entry.ip_addresses.first().ok_or_else(|| {
-            NetworkError::DnsError(format!(
-                "No IP addresses resolved for '{}'",
-                request.url.host
-            ))
-        })?;
-        let addr = std::net::SocketAddr::new(*ip, request.url.port);
-
-        let key = format!("{}:{}", request.url.host, request.url.port);
+    /// Resolves DNS and retrieves or establishes a pooled TCP/TLS connection for the target URL.
+    pub fn acquire_stream(&mut self, url: &Url) -> Result<&mut Stream, NetworkError> {
+        let key = format!("{}:{}", url.host, url.port);
 
         if self.pool.get(&key).is_none() {
+            // 1. DNS resolve
+            let dns_entry = self
+                .dns
+                .resolve(&url.host)
+                .map_err(|e| NetworkError::DnsError(format!("{}", e)))?;
+
+            // 2. Pick the first resolved IP and build a SocketAddr
+            let ip = dns_entry.ip_addresses.first().ok_or_else(|| {
+                NetworkError::DnsError(format!(
+                    "No IP addresses resolved for '{}'",
+                    url.host
+                ))
+            })?;
+            let addr = std::net::SocketAddr::new(*ip, url.port);
+
             let tcp = TcpStream::connect_timeout(&addr, std::time::Duration::from_secs(10))
                 .map_err(|_| NetworkError::ConnectionTimeout {
                     addr: key.clone(),
@@ -317,37 +317,47 @@ impl HttpClient {
             let _ = tcp.set_write_timeout(Some(std::time::Duration::from_secs(10)));
             let _ = tcp.set_nodelay(true);
 
-            let stream_wrapper = if request.url.scheme == "https" {
-                Stream::Tls(Box::new(self.tls.connect(&request.url.host, tcp)?))
+            let stream_wrapper = if url.scheme == "https" {
+                Stream::Tls(Box::new(self.tls.connect(&url.host, tcp)?))
             } else {
                 Stream::Plain(tcp)
             };
 
+            let now = std::time::Instant::now();
             let conn = TcpConnection {
                 remote_addr: addr,
                 stream: stream_wrapper,
-                connected_at: std::time::Instant::now(),
+                connected_at: now,
+                last_used_at: now,
                 key: key.clone(),
             };
             self.pool.insert(key.clone(), conn);
         }
 
-        let stream = self.pool.get(&key).unwrap();
+        self.pool
+            .get(&key)
+            .ok_or_else(|| NetworkError::Other("Failed to obtain stream from pool".into()))
+    }
 
-        // 4. Write the HTTP request
+    /// Sends a prepared `HttpRequest` and returns the `HttpResponse`.
+    pub fn send_request(&mut self, request: &HttpRequest) -> Result<HttpResponse, NetworkError> {
         let req_bytes = request.to_request_bytes();
+        let stream = self.acquire_stream(&request.url)?;
+
+        // Write the HTTP request
         stream
             .write_all(&req_bytes)
             .map_err(|e| NetworkError::WriteError {
                 message: e.to_string(),
             })?;
 
-        // 5. Read the response
+        // Read the response
         let mut response = read_response(stream)?;
         response.url = request.url.raw.clone();
 
         Ok(response)
     }
+
     pub fn stream(
         &mut self,
         url: &str,
@@ -360,53 +370,10 @@ impl HttpClient {
             headers: Vec::new(),
         };
 
-        // 1. DNS resolve
-        let dns_entry = self
-            .dns
-            .resolve(&request.url.host)
-            .map_err(|e| NetworkError::DnsError(format!("{}", e)))?;
-
-        // 2. Pick the first resolved IP and build a SocketAddr
-        let ip = dns_entry.ip_addresses.first().ok_or_else(|| {
-            NetworkError::DnsError(format!(
-                "No IP addresses resolved for '{}'",
-                request.url.host
-            ))
-        })?;
-        let addr = std::net::SocketAddr::new(*ip, request.url.port);
-
-        let key = format!("{}:{}", request.url.host, request.url.port);
-
-        if self.pool.get(&key).is_none() {
-            let tcp =
-                std::net::TcpStream::connect_timeout(&addr, std::time::Duration::from_secs(10))
-                    .map_err(|_| NetworkError::ConnectionTimeout {
-                        addr: key.clone(),
-                        timeout: std::time::Duration::from_secs(10),
-                    })?;
-            let _ = tcp.set_read_timeout(Some(std::time::Duration::from_secs(30)));
-            let _ = tcp.set_write_timeout(Some(std::time::Duration::from_secs(10)));
-            let _ = tcp.set_nodelay(true);
-
-            let stream_wrapper = if request.url.scheme == "https" {
-                Stream::Tls(Box::new(self.tls.connect(&request.url.host, tcp)?))
-            } else {
-                Stream::Plain(tcp)
-            };
-
-            let conn = TcpConnection {
-                remote_addr: addr,
-                stream: stream_wrapper,
-                connected_at: std::time::Instant::now(),
-                key: key.clone(),
-            };
-            self.pool.insert(key.clone(), conn);
-        }
-
-        let stream = self.pool.get(&key).unwrap();
+        let req_bytes = request.to_request_bytes();
+        let stream = self.acquire_stream(&request.url)?;
 
         // Write request
-        let req_bytes = request.to_request_bytes();
         stream
             .write_all(&req_bytes)
             .map_err(|e| NetworkError::WriteError {

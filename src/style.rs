@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::collections::HashMap;
 
 use crate::css_parser::{Selector, SimpleSelector, Stylesheet};
@@ -76,11 +77,11 @@ pub enum Origin {
 }
 
 /// A single declaration that matched an element, along with its
-/// cascade metadata for sorting.
+/// cascade metadata for sorting. Zero-copy with Cow<'a, str>.
 #[derive(Debug)]
-struct MatchedDeclaration {
-    property: String,
-    value: String,
+struct MatchedDeclaration<'a> {
+    property: Cow<'a, str>,
+    value: Cow<'a, str>,
     specificity: Specificity,
     source_order: usize,
     origin: Origin,
@@ -214,8 +215,8 @@ fn build_styled_node(
                 if let Some(specificity) = best_specificity {
                     for decl in &rule.declarations {
                         declarations.push(MatchedDeclaration {
-                            property: decl.property.clone(),
-                            value: decl.value.clone(),
+                            property: Cow::Borrowed(&decl.property),
+                            value: Cow::Borrowed(&decl.value),
                             specificity,
                             source_order: rule.position,
                             origin: Origin::Author,
@@ -233,8 +234,8 @@ fn build_styled_node(
                     let inline_decls = parse_inline_style(style_text);
                     for (prop, val) in inline_decls {
                         declarations.push(MatchedDeclaration {
-                            property: prop,
-                            value: val,
+                            property: Cow::Owned(prop),
+                            value: Cow::Owned(val),
                             specificity: (0, 0, 0), // doesn't matter — origin wins
                             source_order: usize::MAX,
                             origin: Origin::Inline,
@@ -255,17 +256,17 @@ fn build_styled_node(
 
             // ── Step 3: Pick winners per property ─────────────────
             // Last declaration for each property wins (since sorted ascending)
-            let mut specified: HashMap<String, String> = HashMap::new();
-            for decl in &declarations {
-                specified.insert(decl.property.clone(), decl.value.clone());
+            let mut specified: HashMap<Cow<str>, Cow<str>> = HashMap::new();
+            for decl in declarations {
+                specified.insert(decl.property, decl.value);
             }
 
             // ── Step 4: Expand shorthands ─────────────────────────
-            let mut expanded: HashMap<String, String> = HashMap::new();
+            let mut expanded: HashMap<Cow<'static, str>, Cow<str>> = HashMap::new();
             for (prop, value) in &specified {
-                if properties::is_shorthand(prop) {
-                    if prop == "border" {
-                        let (w, s, c) = values::parse_border_shorthand(value);
+                if properties::is_shorthand(prop.as_ref()) {
+                    if prop.as_ref() == "border" {
+                        let (w, s, c) = values::parse_border_shorthand(value.as_ref());
                         if let Some(w_val) = w {
                             for edge_name in &[
                                 "border-top-width",
@@ -274,29 +275,29 @@ fn build_styled_node(
                                 "border-left-width",
                             ] {
                                 if !specified.contains_key(*edge_name) {
-                                    expanded.insert(edge_name.to_string(), w_val.clone());
+                                    expanded.insert(Cow::Borrowed(edge_name), Cow::Owned(w_val.clone()));
                                 }
                             }
                         }
                         if let Some(s_val) = s {
                             if !specified.contains_key("border-style") {
-                                expanded.insert("border-style".to_string(), s_val);
+                                expanded.insert(Cow::Borrowed("border-style"), Cow::Owned(s_val));
                             }
                         }
                         if let Some(c_val) = c {
                             if !specified.contains_key("border-color") {
-                                expanded.insert("border-color".to_string(), c_val);
+                                expanded.insert(Cow::Borrowed("border-color"), Cow::Owned(c_val));
                             }
                         }
-                    } else if let Some(longhand_ids) = properties::expand_shorthand(prop) {
+                    } else if let Some(longhand_ids) = properties::expand_shorthand(prop.as_ref()) {
                         let edges =
-                            values::parse_edges(value, parent_style.font_size, root_font_size);
+                            values::parse_edges(value.as_ref(), parent_style.font_size, root_font_size);
                         let edge_values = [edges.top, edges.right, edges.bottom, edges.left];
                         for (id, px_val) in longhand_ids.iter().zip(edge_values.iter()) {
                             let longhand_name = property_id_to_name(*id);
                             // Only set if not already explicitly set by a longhand
                             if !specified.contains_key(longhand_name) {
-                                expanded.insert(longhand_name.to_string(), format!("{}px", px_val));
+                                expanded.insert(Cow::Borrowed(longhand_name), Cow::Owned(format!("{}px", px_val)));
                             }
                         }
                     }
@@ -313,7 +314,7 @@ fn build_styled_node(
             // Extract and update custom properties from specified
             for (prop, value) in &specified {
                 if prop.starts_with("--") {
-                    current_variables.insert(prop.clone(), value.clone());
+                    current_variables.insert(prop.to_string(), value.to_string());
                 }
             }
 

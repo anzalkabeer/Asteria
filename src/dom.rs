@@ -1,5 +1,4 @@
 use crate::tokens::Attribute;
-
 // ─── Node Identity ───────────────────────────────────────────────
 //
 // Instead of using pointers (Box, Rc, etc.) to link nodes together,

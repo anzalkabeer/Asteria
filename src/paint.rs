@@ -107,7 +107,26 @@ fn render_layout_box(
         }
     }
 
+    // Paint normal flow children first, then positioned overlay children on top
+    let mut normal_children = Vec::new();
+    let mut positioned_children = Vec::new();
+
     for child in &layout_box.children {
+        let is_positioned = child
+            .styled_node
+            .map(|n| n.styles.position != crate::values::Position::Static)
+            .unwrap_or(false);
+        if is_positioned {
+            positioned_children.push(child);
+        } else {
+            normal_children.push(child);
+        }
+    }
+
+    for child in normal_children {
+        render_layout_box(child, dom, source, display_list);
+    }
+    for child in positioned_children {
         render_layout_box(child, dom, source, display_list);
     }
 }

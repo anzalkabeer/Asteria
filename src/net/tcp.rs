@@ -163,6 +163,8 @@ pub struct TcpConnection {
     pub stream: Stream,
     /// When the connection was established.
     pub connected_at: Instant,
+    /// When the connection was last accessed.
+    pub last_used_at: Instant,
     /// The unique identifier in the pool, typically `host:port` or `ip:port`.
     pub key: String,
 }
@@ -172,6 +174,7 @@ impl fmt::Debug for TcpConnection {
         f.debug_struct("TcpConnection")
             .field("remote_addr", &self.remote_addr)
             .field("key", &self.key)
+            .field("last_used_at", &self.last_used_at)
             .finish()
     }
 }
@@ -189,7 +192,7 @@ impl TcpConnection {
 // ─── ConnectionPool Struct ───────────
 
 /// Manages a pool of active TCP connections to reduce connection overhead
-/// for subsequent requests to the same host.
+/// for subsequent requests to the same host with idle timeout and capacity management.
 #[derive(Debug)]
 pub struct ConnectionPool {
     /// Active connections keyed by their host and port.
@@ -198,6 +201,10 @@ pub struct ConnectionPool {
     connect_timeout: Duration,
     /// Timeout for reading data from established connections.
     read_timeout: Duration,
+    /// Maximum duration an unused connection remains in the pool before eviction.
+    idle_timeout: Duration,
+    /// Maximum total concurrent connections across all hosts.
+    max_total_connections: usize,
 }
 
 impl Default for ConnectionPool {
@@ -207,32 +214,56 @@ impl Default for ConnectionPool {
 }
 
 impl ConnectionPool {
-    /// Creates a new connection pool with default timeouts.
-    /// Default connect timeout is 10 seconds.
-    /// Default read timeout is 30 seconds.
+    /// Creates a new connection pool with default timeouts and limits.
+    /// Default connect timeout: 10 seconds.
+    /// Default read timeout: 30 seconds.
+    /// Default idle timeout: 60 seconds.
+    /// Default max total connections: 32.
     pub fn new() -> Self {
-        Self::with_timeouts(Duration::from_secs(10), Duration::from_secs(30))
+        Self::with_timeouts_and_limits(
+            Duration::from_secs(10),
+            Duration::from_secs(30),
+            Duration::from_secs(60),
+            32,
+        )
     }
 
     /// Creates a new connection pool with custom timeouts.
     pub fn with_timeouts(connect: Duration, read: Duration) -> Self {
+        Self::with_timeouts_and_limits(connect, read, Duration::from_secs(60), 32)
+    }
+
+    /// Creates a new connection pool with custom timeouts, idle expiration, and capacity limits.
+    pub fn with_timeouts_and_limits(
+        connect: Duration,
+        read: Duration,
+        idle: Duration,
+        max_total: usize,
+    ) -> Self {
         Self {
             connections: HashMap::new(),
             connect_timeout: connect,
             read_timeout: read,
+            idle_timeout: idle,
+            max_total_connections: max_total,
         }
     }
 
-    /// Connects to a specific IP address, reusing an existing connection if alive.
-    /// If a connection exists but is dead, it is replaced.
+    /// Connects to a specific IP address, reusing an existing connection if alive and not expired.
+    /// If a connection exists but is dead or expired, it is replaced.
     pub fn connect(&mut self, addr: SocketAddr) -> Result<&mut Stream, NetworkError> {
         let key = addr.to_string();
 
-        if let Some(conn) = self.connections.get(&key)
-            && conn.is_alive()
-        {
-            return Ok(&mut self.connections.get_mut(&key).unwrap().stream);
+        self.prune_idle();
+
+        if let Some(conn) = self.connections.get_mut(&key) {
+            if conn.is_alive() && conn.last_used_at.elapsed() <= self.idle_timeout {
+                conn.last_used_at = Instant::now();
+                return Ok(&mut self.connections.get_mut(&key).unwrap().stream);
+            }
         }
+
+        self.ensure_capacity();
 
         let stream = TcpStream::connect_timeout(&addr, self.connect_timeout).map_err(|_| {
             NetworkError::ConnectionTimeout {
@@ -245,10 +276,12 @@ impl ConnectionPool {
         stream.set_write_timeout(Some(self.connect_timeout))?;
         stream.set_nodelay(true)?;
 
+        let now = Instant::now();
         let conn = TcpConnection {
             remote_addr: addr,
             stream: Stream::Plain(stream),
-            connected_at: Instant::now(),
+            connected_at: now,
+            last_used_at: now,
             key: key.clone(),
         };
 
@@ -266,11 +299,16 @@ impl ConnectionPool {
     ) -> Result<&mut Stream, NetworkError> {
         let key = format!("{}:{}", host, port);
 
-        if let Some(conn) = self.connections.get(&key)
-            && conn.is_alive()
-        {
-            return Ok(&mut self.connections.get_mut(&key).unwrap().stream);
+        self.prune_idle();
+
+        if let Some(conn) = self.connections.get_mut(&key) {
+            if conn.is_alive() && conn.last_used_at.elapsed() <= self.idle_timeout {
+                conn.last_used_at = Instant::now();
+                return Ok(&mut self.connections.get_mut(&key).unwrap().stream);
+            }
         }
+
+        self.ensure_capacity();
 
         let stream = TcpStream::connect_timeout(&addr, self.connect_timeout).map_err(|_| {
             NetworkError::ConnectionTimeout {
@@ -283,10 +321,12 @@ impl ConnectionPool {
         stream.set_write_timeout(Some(self.connect_timeout))?;
         stream.set_nodelay(true)?;
 
+        let now = Instant::now();
         let conn = TcpConnection {
             remote_addr: addr,
             stream: Stream::Plain(stream),
-            connected_at: Instant::now(),
+            connected_at: now,
+            last_used_at: now,
             key: key.clone(),
         };
 
@@ -295,17 +335,25 @@ impl ConnectionPool {
     }
 
     /// Inserts an externally created connection (e.g., a TLS upgraded stream) into the pool.
-    pub fn insert(&mut self, key: String, conn: TcpConnection) -> &mut Stream {
+    pub fn insert(&mut self, key: String, mut conn: TcpConnection) -> &mut Stream {
+        self.prune_idle();
+        self.ensure_capacity();
+        conn.last_used_at = Instant::now();
         self.connections.insert(key.clone(), conn);
         &mut self.connections.get_mut(&key).unwrap().stream
     }
 
-    /// Gets an existing connection if alive, otherwise returns None.
+    /// Gets an existing connection if alive and not expired, otherwise returns None.
     pub fn get(&mut self, key: &str) -> Option<&mut Stream> {
-        if let Some(conn) = self.connections.get(key)
-            && conn.is_alive()
-        {
-            return Some(&mut self.connections.get_mut(key).unwrap().stream);
+        if let Some(conn) = self.connections.get(key) {
+            if !conn.is_alive() || conn.last_used_at.elapsed() > self.idle_timeout {
+                self.connections.remove(key);
+                return None;
+            }
+        }
+        if let Some(conn) = self.connections.get_mut(key) {
+            conn.last_used_at = Instant::now();
+            return Some(&mut conn.stream);
         }
         None
     }
@@ -330,6 +378,32 @@ impl ConnectionPool {
         let initial_len = self.connections.len();
         self.connections.retain(|_, conn| conn.is_alive());
         initial_len - self.connections.len()
+    }
+
+    /// Evicts expired idle connections and dead connections. Returns the count of removed connections.
+    pub fn prune_idle(&mut self) -> usize {
+        let initial_len = self.connections.len();
+        let idle_timeout = self.idle_timeout;
+        self.connections
+            .retain(|_, conn| conn.is_alive() && conn.last_used_at.elapsed() <= idle_timeout);
+        initial_len - self.connections.len()
+    }
+
+    /// Ensures that pool size is strictly below `max_total_connections`.
+    /// Evicts the connection with the oldest `last_used_at` timestamp if capacity is reached.
+    fn ensure_capacity(&mut self) {
+        while self.connections.len() >= self.max_total_connections {
+            if let Some(oldest_key) = self
+                .connections
+                .iter()
+                .min_by_key(|(_, conn)| conn.last_used_at)
+                .map(|(k, _)| k.clone())
+            {
+                self.connections.remove(&oldest_key);
+            } else {
+                break;
+            }
+        }
     }
 }
 
@@ -460,5 +534,17 @@ mod tests {
     fn test_connection_pool_is_send() {
         fn assert_send<T: Send>() {}
         assert_send::<ConnectionPool>();
+    }
+
+    #[test]
+    fn test_pool_idle_timeout_settings() {
+        let pool = ConnectionPool::with_timeouts_and_limits(
+            Duration::from_secs(5),
+            Duration::from_secs(10),
+            Duration::from_secs(1),
+            10,
+        );
+        assert_eq!(pool.idle_timeout, Duration::from_secs(1));
+        assert_eq!(pool.max_total_connections, 10);
     }
 }

@@ -1,4 +1,5 @@
 use std::collections::VecDeque;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -164,6 +165,7 @@ pub struct ThreadedScheduler {
     next_id: u64,
     job_sender: Option<mpsc::Sender<WorkerJob>>,
     result_receiver: mpsc::Receiver<TaskMessage>,
+    shutdown_flag: Arc<AtomicBool>,
     workers: Vec<thread::JoinHandle<()>>,
 }
 
@@ -174,14 +176,20 @@ impl ThreadedScheduler {
         let (result_sender, result_receiver) = mpsc::channel::<TaskMessage>();
 
         let job_receiver = Arc::new(Mutex::new(job_receiver));
+        let shutdown_flag = Arc::new(AtomicBool::new(false));
         let mut workers = Vec::with_capacity(num_workers);
 
         for _ in 0..num_workers {
             let receiver = Arc::clone(&job_receiver);
             let tx = result_sender.clone();
+            let is_shutdown = Arc::clone(&shutdown_flag);
 
             let handle = thread::spawn(move || {
                 loop {
+                    if is_shutdown.load(Ordering::Relaxed) {
+                        break;
+                    }
+
                     let job = {
                         let rx = receiver.lock().unwrap();
                         rx.recv()
@@ -189,6 +197,10 @@ impl ThreadedScheduler {
 
                     match job {
                         Ok(WorkerJob { task_id, stage }) => {
+                            if is_shutdown.load(Ordering::Relaxed) {
+                                break;
+                            }
+
                             let stage_res =
                                 std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                                     execute_stage(stage)
@@ -231,6 +243,7 @@ impl ThreadedScheduler {
             next_id: 1,
             job_sender: Some(job_sender),
             result_receiver,
+            shutdown_flag,
             workers,
         }
     }
@@ -238,6 +251,10 @@ impl ThreadedScheduler {
     /// Schedule a pipeline stage for background processing.
     /// Returns the unique `u64` task ID.
     pub fn schedule(&mut self, stage: PipelineStage) -> Result<u64, String> {
+        if self.shutdown_flag.load(Ordering::Relaxed) {
+            return Err("Scheduler is shut down".to_string());
+        }
+
         let task_id = self.next_id;
         self.next_id += 1;
 
@@ -261,8 +278,9 @@ impl ThreadedScheduler {
         self.result_receiver.recv().ok()
     }
 
-    /// Cleanly shut down worker threads.
+    /// Cleanly shut down worker threads with atomic notification.
     pub fn shutdown(&mut self) {
+        self.shutdown_flag.store(true, Ordering::SeqCst);
         self.job_sender.take(); // Drop sender to close worker channel
         for handle in self.workers.drain(..) {
             let _ = handle.join();
