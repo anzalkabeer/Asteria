@@ -58,9 +58,32 @@ impl TlsConnector {
         }
     }
 
+    /// Parses and sanitizes a domain string into a valid Rustls `ServerName`.
+    /// Strips any accidental schemes, ports, or trailing dots.
+    pub fn parse_server_name(domain: &str) -> Result<ServerName<'static>, NetworkError> {
+        let clean = domain
+            .trim()
+            .trim_start_matches("https://")
+            .trim_start_matches("http://")
+            .split('/')
+            .next()
+            .unwrap_or(domain)
+            .split(':')
+            .next()
+            .unwrap_or(domain)
+            .trim_end_matches('.');
+
+        if clean.is_empty() {
+            return Err(NetworkError::TlsError("Domain name is empty".to_string()));
+        }
+
+        ServerName::try_from(clean.to_string()).map_err(|e| {
+            NetworkError::TlsError(format!("Invalid TLS server name '{}': {}", clean, e))
+        })
+    }
+
     pub fn connect(&self, domain: &str, stream: TcpStream) -> Result<TlsConnection, NetworkError> {
-        let server_name = ServerName::try_from(domain.to_string())
-            .map_err(|e| NetworkError::TlsError(format!("Invalid DNS name: {}", e)))?;
+        let server_name = Self::parse_server_name(domain)?;
 
         let conn = ClientConnection::new(self.config.clone(), server_name)
             .map_err(|e| NetworkError::TlsError(format!("TLS connect error: {}", e)))?;
@@ -74,5 +97,27 @@ impl TlsConnector {
 impl Default for TlsConnector {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_server_name_valid() {
+        assert!(TlsConnector::parse_server_name("example.com").is_ok());
+        assert!(TlsConnector::parse_server_name("sub.domain.org").is_ok());
+        assert!(TlsConnector::parse_server_name("https://example.com:443/path").is_ok());
+        assert!(TlsConnector::parse_server_name("example.com.").is_ok());
+        assert!(TlsConnector::parse_server_name("127.0.0.1").is_ok());
+    }
+
+    #[test]
+    fn test_parse_server_name_invalid() {
+        assert!(TlsConnector::parse_server_name("").is_err());
+        assert!(TlsConnector::parse_server_name("   ").is_err());
+        assert!(TlsConnector::parse_server_name("invalid..domain").is_err());
+        assert!(TlsConnector::parse_server_name("domain with spaces.com").is_err());
     }
 }

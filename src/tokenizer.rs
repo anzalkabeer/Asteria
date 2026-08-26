@@ -79,7 +79,7 @@ impl Tokenizer {
             // If we are at the end of the current buffer
             if self.pos == input.len() {
                 if is_eof {
-                    if self.state == State::Data && self.pos > self.token_start {
+                    if self.pos > self.token_start {
                         self.emit_text();
                     }
                     self.tokens.push(Token {

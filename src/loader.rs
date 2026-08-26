@@ -486,18 +486,21 @@ impl ResourceLoader {
 fn resolve_path(href: &str, base_dir: Option<&Path>) -> String {
     let href_path = Path::new(href);
 
-    // If it's already absolute, use it directly
-    if href_path.is_absolute() {
-        return normalize_path_string(href);
-    }
-
-    // If we have a base directory, join relative to it
     if let Some(base) = base_dir {
-        let joined = base.join(href);
+        // Always resolve relative to base directory.
+        // Strip leading '/' from absolute paths to force them relative to base.
+        let relative = href_path.strip_prefix("/").unwrap_or(href_path);
+        let joined = base.join(relative);
         return normalize_path_string(&joined.to_string_lossy());
     }
 
-    // No base dir — return as-is
+    // No base directory — reject absolute paths to prevent traversal
+    if href_path.is_absolute() {
+        eprintln!("Warning: Blocked absolute path access: {}", href);
+        return String::new();
+    }
+
+    // Relative path with no base — return as-is
     href.to_string()
 }
 

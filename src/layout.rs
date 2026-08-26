@@ -381,7 +381,10 @@ impl<'a> LayoutBox<'a> {
         let mut cursor_y = self.dimensions.content.y;
         let mut max_line_height: f32 = 0.0;
         let mut total_flex_height: f32 = 0.0;
-        let gap = 16.0;
+        let gap = self
+            .styled_node
+            .map(|s| s.styles.grid_gap.right)
+            .unwrap_or(0.0);
 
         for child in &mut self.children {
             let child_w = child

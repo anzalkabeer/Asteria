@@ -465,7 +465,13 @@ fn build_styled_node(
                         return val.to_string();
                     }
                     let mut result = val.to_string();
+                    let mut depth = 0;
+                    const MAX_VAR_DEPTH: usize = 16;
                     while let Some(start) = result.find("var(") {
+                        depth += 1;
+                        if depth > MAX_VAR_DEPTH {
+                            break; // Prevent infinite loops from circular var() references
+                        }
                         if let Some(end_offset) = result[start + 4..].find(')') {
                             // Extract inner string by indexing (avoids borrowing `result`)
                             let var_inner =
@@ -732,6 +738,9 @@ fn copy_property(child: &mut ComputedStyle, parent: &ComputedStyle, prop: Proper
     }
 }
 
+/// NOTE: This implementation naively splits on ';' which will break if a
+/// property value contains a semicolon (e.g. `content: "a;b"` or data URIs).
+/// A more robust solution would use the CSS tokenizer to parse inline styles.
 /// Parse inline style declarations from a style="" attribute value string.
 fn parse_inline_style(style_str: &str) -> Vec<(String, String)> {
     let mut result = Vec::new();
@@ -949,6 +958,7 @@ fn compound_matches(
             SimpleSelector::PseudoClass(pseudo) => match pseudo.as_str() {
                 "first-child" => is_first_child(node_id, dom),
                 "last-child" => is_last_child(node_id, dom),
+                "root" => tag_name == "html" || node.parent == Some(NodeId(0)),
                 "hover" => false,
                 _ => false,
             },

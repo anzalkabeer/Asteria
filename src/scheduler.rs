@@ -74,7 +74,11 @@ impl TaskScheduler {
         None
     }
 
-    /// Adjust active worker count dynamically to save power based on complexity.
+    /// Adjusts the target worker count based on scene complexity.
+    ///
+    /// NOTE: This currently only updates an internal counter. The actual
+    /// thread pool in `ThreadedScheduler` does not yet dynamically resize
+    /// based on this value. This is a placeholder for future scaling.
     pub fn adapt_to_workload(&mut self, scene_node_count: usize) {
         self.active_workers = if scene_node_count <= 50 {
             1

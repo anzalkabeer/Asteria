@@ -135,11 +135,73 @@ pub struct HttpRequest {
     pub headers: Vec<(String, String)>,
 }
 
+/// Validate and sanitize an HTTP header name according to RFC 7230 token rules.
+/// Header names must be non-empty and contain only valid token characters (no colons, CRLF, or whitespace).
+pub fn sanitize_header_name(name: &str) -> Option<String> {
+    let trimmed = name.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let is_valid_token_char = |c: char| {
+        c.is_ascii_alphanumeric()
+            || matches!(
+                c,
+                '!' | '#'
+                    | '$'
+                    | '%'
+                    | '&'
+                    | '\''
+                    | '*'
+                    | '+'
+                    | '-'
+                    | '.'
+                    | '^'
+                    | '_'
+                    | '`'
+                    | '|'
+                    | '~'
+            )
+    };
+    if trimmed.chars().all(is_valid_token_char) {
+        Some(trimmed.to_string())
+    } else {
+        None
+    }
+}
+
+/// Sanitize an HTTP header value by stripping carriage returns (`\r`), newlines (`\n`), and null bytes (`\0`).
+pub fn sanitize_header_value(value: &str) -> Option<String> {
+    let stripped: String = value
+        .chars()
+        .filter(|&c| c != '\r' && c != '\n' && c != '\0')
+        .collect();
+    let trimmed = stripped.trim();
+    if trimmed.chars().all(|c| c >= ' ' && c != '\x7F') {
+        Some(trimmed.to_string())
+    } else {
+        None
+    }
+}
+
+/// Sanitize the request path for the HTTP status line, removing any CRLF or null characters.
+pub fn sanitize_request_path(path: &str) -> String {
+    let clean: String = path
+        .chars()
+        .filter(|&c| c != '\r' && c != '\n' && c != '\0')
+        .collect();
+    if clean.is_empty() || !clean.starts_with('/') {
+        format!("/{}", clean.trim_start_matches('/'))
+    } else {
+        clean
+    }
+}
+
 impl HttpRequest {
-    /// Serializes the request into HTTP/1.1 wire format bytes.
+    /// Serializes the request into HTTP/1.1 wire format bytes with CRLF injection protection.
     pub fn to_request_bytes(&self) -> Vec<u8> {
         let mut req = String::new();
-        req.push_str(&format!("{} {} HTTP/1.1\r\n", self.method, self.url.path));
+        let safe_path = sanitize_request_path(&self.url.path);
+        req.push_str(&format!("{} {} HTTP/1.1\r\n", self.method, safe_path));
 
         let mut has_host = false;
         let mut has_connection = false;
@@ -147,19 +209,23 @@ impl HttpRequest {
         let mut has_accept = false;
 
         for (k, v) in &self.headers {
-            req.push_str(&format!("{}: {}\r\n", k, v));
-            let lower_k = k.to_lowercase();
-            if lower_k == "host" {
-                has_host = true;
-            }
-            if lower_k == "connection" {
-                has_connection = true;
-            }
-            if lower_k == "user-agent" {
-                has_user_agent = true;
-            }
-            if lower_k == "accept" {
-                has_accept = true;
+            if let (Some(safe_k), Some(safe_v)) =
+                (sanitize_header_name(k), sanitize_header_value(v))
+            {
+                req.push_str(&format!("{}: {}\r\n", safe_k, safe_v));
+                let lower_k = safe_k.to_lowercase();
+                if lower_k == "host" {
+                    has_host = true;
+                }
+                if lower_k == "connection" {
+                    has_connection = true;
+                }
+                if lower_k == "user-agent" {
+                    has_user_agent = true;
+                }
+                if lower_k == "accept" {
+                    has_accept = true;
+                }
             }
         }
 
@@ -169,7 +235,8 @@ impl HttpRequest {
             } else {
                 self.url.host_port()
             };
-            req.push_str(&format!("Host: {}\r\n", host_header));
+            let safe_host = sanitize_header_value(&host_header).unwrap_or(host_header);
+            req.push_str(&format!("Host: {}\r\n", safe_host));
         }
         if !has_connection {
             req.push_str("Connection: keep-alive\r\n");
@@ -566,7 +633,8 @@ fn read_chunked_body<R: std::io::Read>(stream: &mut R) -> Result<Vec<u8>, Networ
             }
         }
 
-        let hex_size = size_str.trim();
+        // Strip chunk extensions (RFC 7230 §4.1.1) before parsing hex size
+        let hex_size = size_str.trim().split(';').next().unwrap_or("").trim();
         let size = usize::from_str_radix(hex_size, 16)
             .map_err(|_| NetworkError::Other("Invalid chunk size format".into()))?;
 
@@ -594,11 +662,21 @@ fn read_chunked_body<R: std::io::Read>(stream: &mut R) -> Result<Vec<u8>, Networ
     Ok(body)
 }
 
+/// Maximum response body size: 64MB.
+const MAX_RESPONSE_BODY_SIZE: usize = 64 * 1024 * 1024;
+
 /// Reads an exact number of bytes for the HTTP response body.
 fn read_exact_body<R: std::io::Read>(
     stream: &mut R,
     length: usize,
 ) -> Result<Vec<u8>, NetworkError> {
+    if length > MAX_RESPONSE_BODY_SIZE {
+        return Err(NetworkError::Other(format!(
+            "Response body too large: {} bytes exceeds {}MB limit",
+            length,
+            MAX_RESPONSE_BODY_SIZE / (1024 * 1024)
+        )));
+    }
     let mut body = vec![0u8; length];
     stream
         .read_exact(&mut body)
@@ -630,7 +708,9 @@ fn stream_chunked_body<R: std::io::Read>(
         }
 
         let size_str = String::from_utf8_lossy(&size_buf[..size_buf.len() - 2]);
-        let size = usize::from_str_radix(size_str.trim(), 16)
+        // Strip chunk extensions (RFC 7230 §4.1.1) before parsing hex size
+        let hex_size = size_str.trim().split(';').next().unwrap_or("").trim();
+        let size = usize::from_str_radix(hex_size, 16)
             .map_err(|_| NetworkError::Other("Invalid chunk size".into()))?;
 
         if size == 0 {
@@ -891,5 +971,86 @@ mod tests {
 
         let redirect2 = url.resolve_relative("other.html").unwrap();
         assert_eq!(redirect2.path, "/dir/other.html");
+    }
+
+    #[test]
+    fn test_crlf_injection_in_header_value_stripped() {
+        let url = Url::parse("http://example.com/index.html").unwrap();
+        let req = HttpRequest {
+            method: HttpMethod::Get,
+            url,
+            headers: vec![
+                (
+                    "User-Agent".to_string(),
+                    "Asteria/0.1\r\nInjected-Header: Evil\r\n\r\nInjectedBody".to_string(),
+                ),
+                ("X-Custom".to_string(), "SafeValue\nNextLine".to_string()),
+            ],
+        };
+
+        let raw_bytes = req.to_request_bytes();
+        let raw_str = String::from_utf8(raw_bytes).unwrap();
+
+        // Ensure CRLF characters were stripped from values and cannot inject new headers
+        assert!(!raw_str.contains("\r\nInjected-Header:"));
+        assert!(raw_str.contains("User-Agent: Asteria/0.1Injected-Header: EvilInjectedBody\r\n"));
+        assert!(raw_str.contains("X-Custom: SafeValueNextLine\r\n"));
+    }
+
+    #[test]
+    fn test_crlf_injection_in_header_name_rejected() {
+        let url = Url::parse("http://example.com/").unwrap();
+        let req = HttpRequest {
+            method: HttpMethod::Get,
+            url,
+            headers: vec![
+                ("Injected\r\nHeader".to_string(), "Value".to_string()),
+                ("Invalid:Name".to_string(), "Value".to_string()),
+                ("Valid-Header".to_string(), "ValidValue".to_string()),
+            ],
+        };
+
+        let raw_bytes = req.to_request_bytes();
+        let raw_str = String::from_utf8(raw_bytes).unwrap();
+
+        assert!(!raw_str.contains("Injected"));
+        assert!(!raw_str.contains("Invalid:Name"));
+        assert!(raw_str.contains("Valid-Header: ValidValue\r\n"));
+    }
+
+    #[test]
+    fn test_crlf_injection_in_path_sanitized() {
+        let mut url = Url::parse("http://example.com/").unwrap();
+        url.path = "/injected\r\nHTTP/1.1 200 OK\r\n\r\n/path".to_string();
+
+        let req = HttpRequest {
+            method: HttpMethod::Get,
+            url,
+            headers: Vec::new(),
+        };
+
+        let raw_bytes = req.to_request_bytes();
+        let raw_str = String::from_utf8(raw_bytes).unwrap();
+
+        // The first line must contain only one HTTP/1.1 status token
+        let first_line = raw_str.lines().next().unwrap();
+        assert_eq!(first_line, "GET /injectedHTTP/1.1 200 OK/path HTTP/1.1");
+    }
+
+    #[test]
+    fn test_read_chunked_body_success() {
+        // Chunked HTTP payload: 4 bytes ("Wiki"), 6 bytes ("pedia\n"), 0 bytes (end)
+        let chunked_data = b"4\r\nWiki\r\n6\r\npedia\n\r\n0\r\n\r\n";
+        let mut cursor = std::io::Cursor::new(chunked_data);
+        let parsed_body = read_chunked_body(&mut cursor).expect("Should parse chunked body");
+        assert_eq!(parsed_body, b"Wikipedia\n");
+    }
+
+    #[test]
+    fn test_read_chunked_body_invalid_hex() {
+        let invalid_data = b"ZZ\r\nInvalid\r\n0\r\n\r\n";
+        let mut cursor = std::io::Cursor::new(invalid_data);
+        let result = read_chunked_body(&mut cursor);
+        assert!(result.is_err());
     }
 }

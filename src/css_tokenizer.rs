@@ -90,10 +90,11 @@ impl<'a> CssTokenizer<'a> {
                     self.consume_ident_or_function();
                 }
 
-                // Negative numbers or identifiers starting with '-'
+                // Negative numbers or identifiers starting with '-' (e.g. -webkit-*, --custom-var)
                 b'-' if self.pos + 1 < self.input.len()
                     && (self.input[self.pos + 1].is_ascii_digit()
-                        || is_ident_start(self.input[self.pos + 1])) =>
+                        || is_ident_start(self.input[self.pos + 1])
+                        || self.input[self.pos + 1] == b'-') =>
                 {
                     if self.input[self.pos + 1].is_ascii_digit() {
                         self.consume_numeric();

@@ -131,6 +131,34 @@ fn render_layout_box(
     }
 }
 
+/// Validate whether a link or resource URL is safe for browser navigation/loading.
+/// Disallows control characters, null bytes, and dangerous pseudo-schemes (e.g., `javascript:`, `data:`, `vbscript:`).
+pub fn is_safe_link_url(raw_url: &str) -> bool {
+    let trimmed = raw_url.trim();
+    if trimmed.is_empty() {
+        return false;
+    }
+
+    // Reject control characters or null bytes
+    if trimmed.chars().any(|c| c.is_control() || c == '\0') {
+        return false;
+    }
+
+    // If a scheme is present (`scheme:`), only allow standard browser protocols
+    if let Some(colon_pos) = trimmed.find(':') {
+        let scheme = &trimmed[..colon_pos].to_ascii_lowercase();
+        if scheme
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '+' || c == '-' || c == '.')
+        {
+            return matches!(scheme.as_str(), "http" | "https" | "file");
+        }
+    }
+
+    // Safe relative URLs (paths starting with `/`, `./`, `../`, `#`, `?`, or relative filenames)
+    true
+}
+
 fn find_link_url(dom: &Dom, source: &[u8], node_id: Option<NodeId>) -> Option<String> {
     let mut curr = node_id;
     while let Some(id) = curr {
@@ -138,7 +166,12 @@ fn find_link_url(dom: &Dom, source: &[u8], node_id: Option<NodeId>) -> Option<St
         if node.tag_name(source).eq_ignore_ascii_case("a")
             && let Some(href) = node.get_attribute("href", source)
         {
-            return Some(href.to_string());
+            let trimmed = href.trim();
+            if is_safe_link_url(trimmed) {
+                return Some(trimmed.to_string());
+            } else {
+                return None;
+            }
         }
         curr = node.parent;
     }
@@ -224,16 +257,19 @@ fn render_image(layout_box: &LayoutBox, dom: &Dom, source: &[u8], display_list: 
     if node.tag_name(source).eq_ignore_ascii_case("img")
         && let Some(src_val) = node.get_attribute("src", source)
     {
-        let rect = layout_box.dimensions.content;
-        let link_url = find_link_url(dom, source, Some(styled.node_id));
-        display_list.push(DisplayCommand::Image {
-            image_id: src_val.to_string(),
-            x: rect.x,
-            y: rect.y,
-            width: rect.width,
-            height: rect.height,
-            link_url,
-        });
+        let trimmed_src = src_val.trim();
+        if is_safe_link_url(trimmed_src) {
+            let rect = layout_box.dimensions.content;
+            let link_url = find_link_url(dom, source, Some(styled.node_id));
+            display_list.push(DisplayCommand::Image {
+                image_id: trimmed_src.to_string(),
+                x: rect.x,
+                y: rect.y,
+                width: rect.width,
+                height: rect.height,
+                link_url,
+            });
+        }
     }
 }
 
@@ -314,5 +350,44 @@ pub fn print_display_list(list: &DisplayList) {
     );
     for cmd in &list.commands {
         println!("  {}", cmd);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_is_safe_link_url_allowed_schemes() {
+        assert!(is_safe_link_url("http://example.com"));
+        assert!(is_safe_link_url("https://example.com/path?query=1#hash"));
+        assert!(is_safe_link_url("file:///tmp/index.html"));
+        assert!(is_safe_link_url("/relative/path"));
+        assert!(is_safe_link_url("./local.html"));
+        assert!(is_safe_link_url("../parent.html"));
+        assert!(is_safe_link_url("#anchor"));
+        assert!(is_safe_link_url("?search=test"));
+        assert!(is_safe_link_url("image.png"));
+    }
+
+    #[test]
+    fn test_is_safe_link_url_blocked_schemes() {
+        assert!(!is_safe_link_url("javascript:alert(1)"));
+        assert!(!is_safe_link_url("JAVASCRIPT:void(0)"));
+        assert!(!is_safe_link_url(
+            "data:text/html,<script>alert(1)</script>"
+        ));
+        assert!(!is_safe_link_url("vbscript:msgbox(1)"));
+        assert!(!is_safe_link_url("blob:http://example.com/uuid"));
+        assert!(!is_safe_link_url("custom-scheme://test"));
+    }
+
+    #[test]
+    fn test_is_safe_link_url_control_chars() {
+        assert!(!is_safe_link_url(""));
+        assert!(!is_safe_link_url("   "));
+        assert!(!is_safe_link_url("https://example.com\0evil"));
+        assert!(!is_safe_link_url("https://example.com\r\nHeader: evil"));
+        assert!(!is_safe_link_url("http://example.com/\x08test"));
     }
 }

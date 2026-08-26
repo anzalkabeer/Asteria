@@ -60,6 +60,8 @@ fn is_void_element(source: &[u8], tag_start: u32, tag_end: u32) -> bool {
 //   EndTag "div"    | pop div                              | [Document]
 //   Eof             | done                                 | [Document]
 
+const MAX_DOM_DEPTH: usize = 512;
+
 pub struct Parser {
     /// Stack of open element NodeIds — the current "insertion path"
     /// The top of the stack is the current parent for new nodes.
@@ -114,6 +116,9 @@ impl Parser {
         let node_id = dom.add_element(parent, token.start, token.end, &token.attributes);
 
         if !is_void_element(source, token.start, token.end) {
+            if self.open_elements.len() >= MAX_DOM_DEPTH {
+                return; // Silently refuse to nest deeper
+            }
             self.open_elements.push(node_id);
         } else {
             // Void elements complete immediately, mark them dirty
@@ -157,12 +162,21 @@ impl Parser {
         &mut self,
         dom: &mut Dom,
         token: &Token,
-        _source: &[u8],
+        source: &[u8],
         dirty: &mut Vec<NodeId>,
     ) {
         let parent = self.current_parent();
         let node_id = dom.add_element(parent, token.start, token.end, &token.attributes);
-        dirty.push(node_id);
+
+        if !is_void_element(source, token.start, token.end) {
+            if self.open_elements.len() >= MAX_DOM_DEPTH {
+                return; // Silently refuse to nest deeper
+            }
+            self.open_elements.push(node_id);
+        } else {
+            dirty.push(node_id);
+        }
+
         dirty.push(parent);
     }
 

@@ -320,15 +320,18 @@ pub fn build_scene_graph(display_list: &DisplayList, segment_height: f32) -> Sce
     let mut parent_stack: Vec<(SceneNodeId, Rect)> = Vec::new();
 
     for cmd in &display_list.commands {
-        // Determine parent: find the deepest stacked rect that contains this node
         let node_rect = cmd_bounding_rect(cmd);
-        let parent_id = parent_stack.iter().rev().find_map(|(id, r)| {
-            if rect_contains(r, &node_rect) {
-                Some(*id)
+
+        // Pop containers that no longer contain the current node.
+        // This keeps the stack proportional to nesting depth, not total node count.
+        while let Some((_, top_rect)) = parent_stack.last() {
+            if !rect_contains(top_rect, &node_rect) {
+                parent_stack.pop();
             } else {
-                None
+                break;
             }
-        });
+        }
+        let parent_id = parent_stack.last().map(|(id, _)| *id);
 
         match cmd {
             DisplayCommand::SolidColor {

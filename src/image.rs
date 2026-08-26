@@ -63,12 +63,38 @@ impl ImageDecoder {
     }
 
     pub fn decode_image(&self, id: &str, data: &[u8]) -> Result<DecodeImage, String> {
+        // Safety limits to prevent OOM from crafted image headers
+        const MAX_IMAGE_DIMENSION: u32 = 16384;
+        const MAX_PIXEL_BYTES: usize = 256 * 1024 * 1024; // 256MB
+
         let format = detect_image_format(data)
             .ok_or_else(|| format!("Unknown image format for '{}'", id))?;
         let (width, height) = parse_image_dimensions(format, data);
 
-        let pixel_count = (width as usize).max(1) * (height as usize).max(1);
-        let mut decoded_bytes = vec![0u8; pixel_count * 4];
+        if width > MAX_IMAGE_DIMENSION || height > MAX_IMAGE_DIMENSION {
+            return Err(format!(
+                "Image '{}' dimensions {}x{} exceed maximum {}",
+                id, width, height, MAX_IMAGE_DIMENSION
+            ));
+        }
+
+        let pixel_count = (width as usize)
+            .max(1)
+            .checked_mul((height as usize).max(1))
+            .ok_or_else(|| format!("Image '{}' pixel count overflow", id))?;
+        let byte_count = pixel_count
+            .checked_mul(4)
+            .ok_or_else(|| format!("Image '{}' byte count overflow", id))?;
+        if byte_count > MAX_PIXEL_BYTES {
+            return Err(format!(
+                "Image '{}' too large: {} bytes exceeds {}MB limit",
+                id,
+                byte_count,
+                MAX_PIXEL_BYTES / (1024 * 1024)
+            ));
+        }
+
+        let mut decoded_bytes = vec![0u8; byte_count];
         for (index, byte) in decoded_bytes.iter_mut().enumerate() {
             *byte = (index % data.len().max(1)) as u8;
         }

@@ -12,7 +12,8 @@ pub struct LruCache<K, V> {
 }
 
 impl<K: Eq + Hash + Clone, V> LruCache<K, V> {
-    /// Create a new LRU cache with O(1) eviction via an access-order queue.
+    /// Create a new LRU cache. Eviction is O(1) via front-pop, but access
+    /// reordering in `get()` is O(N) due to linear scan of the VecDeque.
     pub fn new(max_entries: usize) -> Self {
         Self {
             map: HashMap::with_capacity(max_entries),
@@ -22,7 +23,8 @@ impl<K: Eq + Hash + Clone, V> LruCache<K, V> {
         }
     }
 
-    /// Get a value from the cache, updating its LRU position (O(n) reorder, O(1) amortized).
+    /// Get a value from the cache, updating its LRU position.
+    /// Note: reordering is O(N) due to VecDeque linear scan and removal.
     pub fn get(&mut self, key: &K) -> Option<&V> {
         self.clock += 1;
         if let Some((_, timestamp)) = self.map.get_mut(key) {

@@ -222,16 +222,27 @@ impl<'a> CssParser<'a> {
             || header_lower.contains("not screen")
             || header_lower.contains("not all");
 
+        let parse_media_value = |val: &str| -> Option<f32> {
+            if val.ends_with("em") {
+                let num = val.trim_end_matches("em").trim_end_matches('r');
+                num.parse::<f32>().ok().map(|n| n * 16.0)
+            } else if val.ends_with("px") {
+                val.trim_end_matches("px").parse::<f32>().ok()
+            } else {
+                val.parse::<f32>().ok()
+            }
+        };
+
         // Parse min-width / max-width from header string
         if let Some(pos) = header_text.find("min-width") {
             let rest = &header_text[pos..];
             if let Some(val_start) = rest.find(':') {
-                let num_str: String = rest[val_start + 1..]
+                let val_str: String = rest[val_start + 1..]
                     .trim_start()
                     .chars()
-                    .take_while(|c| c.is_ascii_digit() || *c == '.')
+                    .take_while(|c| c.is_ascii_alphanumeric() || *c == '.')
                     .collect();
-                if let Ok(v) = num_str.parse::<f32>() {
+                if let Some(v) = parse_media_value(&val_str) {
                     min_width = Some(v);
                 }
             }
@@ -240,12 +251,12 @@ impl<'a> CssParser<'a> {
         if let Some(pos) = header_text.find("max-width") {
             let rest = &header_text[pos..];
             if let Some(val_start) = rest.find(':') {
-                let num_str: String = rest[val_start + 1..]
+                let val_str: String = rest[val_start + 1..]
                     .trim_start()
                     .chars()
-                    .take_while(|c| c.is_ascii_digit() || *c == '.')
+                    .take_while(|c| c.is_ascii_alphanumeric() || *c == '.')
                     .collect();
-                if let Ok(v) = num_str.parse::<f32>() {
+                if let Some(v) = parse_media_value(&val_str) {
                     max_width = Some(v);
                 }
             }

@@ -9,7 +9,9 @@
 use asteria::css_parser::Stylesheet;
 use asteria::dom::{Dom, NodeKind};
 use asteria::layout::{BoxType, LayoutBox, layout_document};
-use asteria::style::{StyledNode, resolve_styles};
+use asteria::paint::build_display_list;
+use asteria::scene::build_scene_graph;
+use asteria::style::{StyledNode, resolve_styles, resolve_styles_with_viewport};
 use asteria::values::Color;
 
 /// Helper: parse HTML + CSS → (LayoutBox, Dom, bytes, StyledNode)
@@ -389,4 +391,194 @@ fn test_layout_explicit_height_override() {
 
     // Explicit height of 350px overrides the natural sum of child heights
     assert_eq!(container_box.dimensions.content.height, 350.0);
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// 5. SECTION 8 TEST COVERAGE EXTENSIONS
+// ═══════════════════════════════════════════════════════════════════
+
+#[test]
+fn test_full_pipeline_parse_style_layout_paint_scene() {
+    let html = r#"<html><head></head><body><div id="card" style="background-color: #ff0000; margin: 10px; padding: 20px;"><a href="https://example.com"><h1>Header</h1></a><p>Content text</p></div></body></html>"#;
+    let css = r#"
+        body { margin: 0; padding: 0; }
+        h1 { font-size: 20px; color: #00ff00; }
+        p { font-size: 14px; color: #0000ff; }
+    "#;
+
+    let bytes = html.as_bytes().to_vec();
+    let mut processor = asteria::streaming_parser::StreamingHtmlProcessor::new();
+    let _ = processor.receive_network_chunk(&bytes, true);
+    let dom = processor.finish();
+
+    let stylesheet = Stylesheet::parse(css.as_bytes());
+    let styled = resolve_styles(&dom, &stylesheet, &bytes);
+
+    let layout_root = layout_document(&styled, &dom, &bytes, 1024.0, 768.0).unwrap();
+
+    // 2. Paint -> DisplayList
+    let display_list = build_display_list(&layout_root, &dom, &bytes);
+    assert!(!display_list.commands.is_empty());
+
+    // 3. Scene Graph
+    let scene = build_scene_graph(&display_list, 256.0);
+    assert!(!scene.is_empty());
+
+    // Verify solid color command exists for the card background
+    let has_bg_rect = display_list.commands.iter().any(|cmd| {
+        matches!(cmd, asteria::paint::DisplayCommand::SolidColor { color, .. } if *color == Color::rgb(255, 0, 0))
+    });
+    assert!(
+        has_bg_rect,
+        "Expected red background rectangle in display list"
+    );
+
+    // Verify text command with link URL attached
+    let has_linked_text = display_list.commands.iter().any(|cmd| {
+        matches!(cmd, asteria::paint::DisplayCommand::Text { text, link_url: Some(url), .. } if text == "Header" && url == "https://example.com")
+    });
+    assert!(
+        has_linked_text,
+        "Expected linked Header text in display list"
+    );
+}
+
+#[test]
+fn test_shorthand_expansion_and_cascade_override() {
+    let mut dom_store = None;
+    let mut bytes_store = Vec::new();
+    let mut styled_store = None;
+
+    let html = r#"<html><body><div id="box">Box</div></body></html>"#;
+    let css = r#"
+        #box {
+            margin: 10px 20px;
+            margin-top: 50px;
+            padding: 5px 10px 15px 20px;
+            width: 100px;
+            height: 100px;
+        }
+    "#;
+
+    let layout = parse_and_layout_full(
+        html,
+        css,
+        800.0,
+        600.0,
+        &mut dom_store,
+        &mut bytes_store,
+        &mut styled_store,
+    );
+
+    let html_box = &layout.children[0];
+    let body_box = &html_box.children[0];
+    let box_elem = &body_box.children[0];
+    let style = box_elem.styled_node.unwrap();
+
+    // Margin: margin-top was explicitly overridden to 50px, while others come from shorthand
+    assert_eq!(style.styles.margin.top, 50.0);
+    assert_eq!(style.styles.margin.right, 20.0);
+    assert_eq!(style.styles.margin.bottom, 10.0);
+    assert_eq!(style.styles.margin.left, 20.0);
+
+    // Padding: 5px top, 10px right, 15px bottom, 20px left
+    assert_eq!(style.styles.padding.top, 5.0);
+    assert_eq!(style.styles.padding.right, 10.0);
+    assert_eq!(style.styles.padding.bottom, 15.0);
+    assert_eq!(style.styles.padding.left, 20.0);
+}
+
+#[test]
+fn test_css_var_substitution_and_fallbacks() {
+    let html = r#"<html><body><div id="target">Text</div></body></html>"#;
+    let css = r#"
+        :root {
+            --custom-color: #ff5500;
+        }
+        #target {
+            color: var(--custom-color, #000000);
+            background-color: var(--undefined-var, #00ff00);
+        }
+    "#;
+
+    let mut dom_store = None;
+    let mut bytes_store = Vec::new();
+    let mut styled_store = None;
+
+    let layout = parse_and_layout_full(
+        html,
+        css,
+        800.0,
+        600.0,
+        &mut dom_store,
+        &mut bytes_store,
+        &mut styled_store,
+    );
+
+    let html_box = &layout.children[0];
+    let body_box = &html_box.children[0];
+    let target_box = &body_box.children[0];
+    let style = target_box.styled_node.unwrap();
+
+    // Variable substituted
+    assert_eq!(style.styles.color, Color::rgb(255, 85, 0));
+    // Missing variable resolved to fallback value
+    assert_eq!(style.styles.background_color, Color::rgb(0, 255, 0));
+}
+
+#[test]
+fn test_media_query_viewport_boundary_conditions() {
+    let html = r#"<html><body><div id="responsive">Responsive</div></body></html>"#;
+    let css = r#"
+        #responsive { color: #000000; }
+        @media (min-width: 600px) {
+            #responsive { color: #ff0000; }
+        }
+    "#;
+
+    let bytes = html.as_bytes().to_vec();
+    let mut processor = asteria::streaming_parser::StreamingHtmlProcessor::new();
+    let _ = processor.receive_network_chunk(&bytes, true);
+    let dom = processor.finish();
+    let stylesheet = Stylesheet::parse(css.as_bytes());
+
+    // 1. Viewport width 599px -> Under min-width (rule inactive)
+    let styled_599 = resolve_styles_with_viewport(&dom, &stylesheet, &bytes, 599.0);
+    let target_599 = &styled_599.children[0].children[0].children[0];
+    assert_eq!(target_599.styles.color, Color::rgb(0, 0, 0));
+
+    // 2. Viewport width 600px -> Exact boundary (rule active)
+    let styled_600 = resolve_styles_with_viewport(&dom, &stylesheet, &bytes, 600.0);
+    let target_600 = &styled_600.children[0].children[0].children[0];
+    assert_eq!(target_600.styles.color, Color::rgb(255, 0, 0));
+
+    // 3. Viewport width 601px -> Above min-width (rule active)
+    let styled_601 = resolve_styles_with_viewport(&dom, &stylesheet, &bytes, 601.0);
+    let target_601 = &styled_601.children[0].children[0].children[0];
+    assert_eq!(target_601.styles.color, Color::rgb(255, 0, 0));
+}
+
+#[test]
+fn test_malformed_html_tokenizer_fuzzing() {
+    // Malformed HTML inputs that must not panic or loop infinitely
+    let malformed_inputs = [
+        "<<<<div >>>>>",
+        "<div class=\"unclosed string",
+        "<!-- unclosed comment --",
+        "<!doctype html <html <body >",
+        "<div <span <<p>Text</div",
+        "<div>\0\0\0<p>Null bytes</p></div>",
+        "<&*!#$%>",
+        "<a href=\"\"\"\"\"\" target=\"_blank\">Link</a>",
+        "<div id=123 class=abc style=\"color: red;\">Test</div>",
+    ];
+
+    for input in malformed_inputs {
+        let bytes = input.as_bytes();
+        let mut processor = asteria::streaming_parser::StreamingHtmlProcessor::new();
+        let _ = processor.receive_network_chunk(bytes, true);
+        let dom = processor.finish();
+        // Ensure DOM root document exists and parsing succeeded without panic
+        assert!(!dom.nodes.is_empty());
+    }
 }

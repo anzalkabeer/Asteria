@@ -502,11 +502,17 @@ pub fn parse_color(value: &str) -> Color {
             let r = parts[0].trim().parse::<u8>().unwrap_or(0);
             let g = parts[1].trim().parse::<u8>().unwrap_or(0);
             let b = parts[2].trim().parse::<u8>().unwrap_or(0);
+            // CSS spec: alpha is 0.0–1.0, but tolerate 0–255 integers
             let a_str = parts[3].trim();
-            let a = if a_str.contains('.') {
-                (a_str.parse::<f32>().unwrap_or(1.0) * 255.0) as u8
-            } else {
-                a_str.parse::<u8>().unwrap_or(255)
+            let a = {
+                let a_float = a_str.parse::<f32>().unwrap_or(1.0);
+                if a_float > 1.0 {
+                    // Non-standard 0–255 integer value — clamp and use directly
+                    (a_float.min(255.0)) as u8
+                } else {
+                    // Standard 0.0–1.0 float range
+                    (a_float.clamp(0.0, 1.0) * 255.0) as u8
+                }
             };
             return Color::new(r, g, b, a);
         }
