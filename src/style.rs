@@ -690,8 +690,22 @@ fn apply_user_agent_defaults(
     }
 }
 
-/// Copy a single property value from parent to child (for explicit keyword inheritance
-/// or default property inheritance).
+/// Copy a single CSS property value from parent to child style.
+///
+/// This function serves two purposes:
+///
+/// 1. **Default inheritance**: For CSS properties that inherit by default
+///    (e.g., `color`, `font-size`, `text-align`), this is called when no
+///    explicit value is specified on the element. The child automatically
+///    inherits the parent's computed value.
+///
+/// 2. **Explicit `inherit` keyword**: For ANY property (including non-inherited
+///    ones like `display`, `width`, `margin`), when the CSS value is literally
+///    `"inherit"`, this function copies the parent's value to the child.
+///    This is why non-inherited properties like `Display` and `Width` have
+///    match arms here — they're needed for the `inherit` keyword to work.
+///
+/// See CSS Cascading and Inheritance Level 4 §7.1 for the full specification.
 fn copy_property(child: &mut ComputedStyle, parent: &ComputedStyle, prop: PropertyId) {
     match prop {
         PropertyId::Display => child.display = parent.display,
@@ -924,6 +938,11 @@ fn node_has_attribute(
         if let Some((op, val)) = expected_val {
             match op.as_str() {
                 "=" => actual_val == val,
+                "^=" => actual_val.starts_with(val.as_str()),
+                "$=" => actual_val.ends_with(val.as_str()),
+                "*=" => actual_val.contains(val.as_str()),
+                "~=" => actual_val.split_whitespace().any(|word| word == val),
+                "|=" => actual_val == val || actual_val.starts_with(&format!("{}-", val)),
                 _ => false,
             }
         } else {

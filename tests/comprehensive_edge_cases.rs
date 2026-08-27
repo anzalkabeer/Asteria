@@ -582,3 +582,97 @@ fn test_malformed_html_tokenizer_fuzzing() {
         assert!(!dom.nodes.is_empty());
     }
 }
+
+#[test]
+fn test_attribute_selector_operators() {
+    let html = "<html><body><div class=\"btn-primary\">Prefix</div><div class=\"card-large\">Substring</div><a href=\"doc.png\">Suffix</a><span data-tags=\"news tech featured\">Word</span><p lang=\"en-US\">Dash</p></body></html>";
+    let css = r#"
+        [class^="btn-"] { color: rgb(255, 0, 0); }
+        [class*="-large"] { color: rgb(0, 255, 0); }
+        [href$=".png"] { color: rgb(0, 0, 255); }
+        [data-tags~="tech"] { font-size: 20px; }
+        [lang|="en"] { line-height: 28px; }
+    "#;
+
+    let bytes = html.as_bytes();
+    let mut processor = asteria::streaming_parser::StreamingHtmlProcessor::new();
+    let _ = processor.receive_network_chunk(bytes, true);
+    let dom = processor.finish();
+    let stylesheet = Stylesheet::parse(css.as_bytes());
+    let styled = resolve_styles(&dom, &stylesheet, bytes);
+
+    let body = &styled.children[0].children[0];
+    let btn = &body.children[0];
+    let card = &body.children[1];
+    let link = &body.children[2];
+    let span = &body.children[3];
+    let p = &body.children[4];
+
+    assert_eq!(btn.styles.color, Color::rgb(255, 0, 0));
+    assert_eq!(card.styles.color, Color::rgb(0, 255, 0));
+    assert_eq!(link.styles.color, Color::rgb(0, 0, 255));
+    assert_eq!(span.styles.font_size, 20.0);
+    assert_eq!(p.styles.line_height, 28.0);
+}
+
+#[test]
+fn test_html_entity_decoding() {
+    assert_eq!(
+        asteria::dom::decode_html_entities("Hello &amp; World"),
+        "Hello & World"
+    );
+    assert_eq!(asteria::dom::decode_html_entities("&lt;div&gt;"), "<div>");
+    assert_eq!(
+        asteria::dom::decode_html_entities("&quot;quoted&quot;"),
+        "\"quoted\""
+    );
+    assert_eq!(
+        asteria::dom::decode_html_entities("It&#39;s work"),
+        "It's work"
+    );
+    assert_eq!(
+        asteria::dom::decode_html_entities("&#x41;&#x42;&#x43;"),
+        "ABC"
+    );
+    assert_eq!(
+        asteria::dom::decode_html_entities("No entities here"),
+        "No entities here"
+    );
+}
+
+#[test]
+fn test_relative_font_weight() {
+    use asteria::values::parse_font_weight_relative;
+    assert_eq!(parse_font_weight_relative("lighter", 400.0), 300.0);
+    assert_eq!(parse_font_weight_relative("lighter", 100.0), 100.0); // minimum clamp
+    assert_eq!(parse_font_weight_relative("bolder", 400.0), 500.0);
+    assert_eq!(parse_font_weight_relative("bolder", 900.0), 900.0); // maximum clamp
+    assert_eq!(parse_font_weight_relative("bold", 400.0), 700.0);
+    assert_eq!(parse_font_weight_relative("normal", 700.0), 400.0);
+}
+
+#[test]
+fn test_keyframe_modulo_looping() {
+    use asteria::animation::{ActiveAnimation, AnimationManager};
+    use asteria::dom::NodeId;
+    use asteria::values::AnimationTimingFunction;
+
+    let mut manager = AnimationManager::new();
+    let anim = ActiveAnimation {
+        node_id: NodeId(1),
+        name: "spin".to_string(),
+        duration: 2.0,
+        elapsed: 0.0,
+        iteration_count: 0.0, // Infinite loop
+        timing_function: AnimationTimingFunction::Linear,
+    };
+    manager.start_animation(anim);
+
+    // After 1 second (50% into first cycle)
+    let updates = manager.tick(1.0);
+    assert!((updates[0].2 - 0.5).abs() < 1e-4);
+
+    // After 2 more seconds (total 3s -> 50% into second cycle)
+    let updates2 = manager.tick(2.0);
+    assert!((updates2[0].2 - 0.5).abs() < 1e-4);
+}

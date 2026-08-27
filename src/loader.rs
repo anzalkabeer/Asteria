@@ -491,6 +491,29 @@ fn resolve_path(href: &str, base_dir: Option<&Path>) -> String {
         // Strip leading '/' from absolute paths to force them relative to base.
         let relative = href_path.strip_prefix("/").unwrap_or(href_path);
         let joined = base.join(relative);
+
+        if let (Ok(joined_canon), Ok(base_canon)) =
+            (std::fs::canonicalize(&joined), std::fs::canonicalize(base))
+        {
+            if !joined_canon.starts_with(&base_canon) {
+                eprintln!("Warning: Blocked path traversal escape for {}", href);
+                return String::new();
+            }
+        } else {
+            let mut depth = 0;
+            for comp in relative.components() {
+                match comp {
+                    std::path::Component::ParentDir => depth -= 1,
+                    std::path::Component::Normal(_) => depth += 1,
+                    _ => {}
+                }
+                if depth < 0 {
+                    eprintln!("Warning: Blocked path traversal escape for {}", href);
+                    return String::new();
+                }
+            }
+        }
+
         return normalize_path_string(&joined.to_string_lossy());
     }
 

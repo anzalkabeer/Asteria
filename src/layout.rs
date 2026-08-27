@@ -386,12 +386,9 @@ impl<'a> LayoutBox<'a> {
             .map(|s| s.styles.grid_gap.right)
             .unwrap_or(0.0);
 
-        for child in &mut self.children {
-            let child_w = child
-                .styled_node
-                .and_then(|n| n.styles.width)
-                .unwrap_or(200.0);
-
+        let mut unconstrained_auto_count = 0;
+        let mut fixed_or_intrinsic_width = 0.0;
+        for child in &self.children {
             let margin_w = child
                 .styled_node
                 .map_or(0.0, |n| n.styles.margin.left + n.styles.margin.right);
@@ -401,6 +398,61 @@ impl<'a> LayoutBox<'a> {
             let border_w = child.styled_node.map_or(0.0, |n| {
                 n.styles.border_width.left + n.styles.border_width.right
             });
+            let extra = margin_w + padding_w + border_w;
+
+            if let Some(w) = child.styled_node.and_then(|n| n.styles.width) {
+                fixed_or_intrinsic_width += w + extra;
+            } else {
+                let intrinsic = compute_intrinsic_inline_width(child.styled_node, dom, source);
+                if intrinsic > 0.0 {
+                    fixed_or_intrinsic_width += intrinsic + extra;
+                } else {
+                    unconstrained_auto_count += 1;
+                    fixed_or_intrinsic_width += extra; // just extra
+                }
+            }
+        }
+
+        let total_gaps = if self.children.is_empty() {
+            0.0
+        } else {
+            gap * (self.children.len() - 1) as f32
+        };
+        let available_for_auto =
+            (self.dimensions.content.width - fixed_or_intrinsic_width - total_gaps).max(0.0);
+        let fair_share = if unconstrained_auto_count > 0 {
+            available_for_auto / unconstrained_auto_count as f32
+        } else {
+            0.0
+        };
+
+        for child in &mut self.children {
+            let margin_w = child
+                .styled_node
+                .map_or(0.0, |n| n.styles.margin.left + n.styles.margin.right);
+            let padding_w = child
+                .styled_node
+                .map_or(0.0, |n| n.styles.padding.left + n.styles.padding.right);
+            let border_w = child.styled_node.map_or(0.0, |n| {
+                n.styles.border_width.left + n.styles.border_width.right
+            });
+
+            // If no explicit width, use intrinsic content width or
+            // divide remaining container space equally among auto-width children
+            let child_w = child
+                .styled_node
+                .and_then(|n| n.styles.width)
+                .unwrap_or_else(|| {
+                    // Compute intrinsic width from text/child content
+                    let intrinsic = compute_intrinsic_inline_width(child.styled_node, dom, source);
+                    if intrinsic > 0.0 {
+                        intrinsic
+                    } else {
+                        // Fallback: fair share of remaining container width
+                        fair_share
+                    }
+                });
+
             let outer_item_w = child_w + margin_w + padding_w + border_w;
 
             // Flex Row Line Wrap Check: if adding child exceeds container max width, wrap to next flex row!

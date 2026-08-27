@@ -398,7 +398,9 @@ impl ComputedStyle {
                 self.font_size = parse_length(value, parent_font_size, root_font_size)
             }
 
-            PropertyId::FontWeight => self.font_weight = parse_font_weight(value),
+            PropertyId::FontWeight => {
+                self.font_weight = parse_font_weight_relative(value, self.font_weight)
+            }
             PropertyId::TextAlign => self.text_align = parse_text_align(value),
             PropertyId::LineHeight => {
                 self.line_height = parse_line_height(value, self.font_size, root_font_size)
@@ -616,16 +618,20 @@ pub fn parse_position(value: &str) -> Position {
     }
 }
 
-/// Parse a CSS font-weight value.
-/// "normal" → 400, "bold" → 700, or a numeric value.
-pub fn parse_font_weight(value: &str) -> f32 {
+/// Parse a CSS font-weight value relative to parent weight.
+pub fn parse_font_weight_relative(value: &str, parent_weight: f32) -> f32 {
     match value.trim().to_ascii_lowercase().as_str() {
         "normal" => 400.0,
         "bold" => 700.0,
-        "lighter" => 100.0,
-        "bolder" => 900.0,
+        "lighter" => (parent_weight - 100.0).max(100.0),
+        "bolder" => (parent_weight + 100.0).min(900.0),
         other => other.parse::<f32>().unwrap_or(400.0),
     }
+}
+
+/// Parse a CSS font-weight value.
+pub fn parse_font_weight(value: &str) -> f32 {
+    parse_font_weight_relative(value, 400.0)
 }
 
 /// Parse a CSS text-align value.

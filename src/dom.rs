@@ -363,6 +363,69 @@ impl Dom {
 
 // ─── Tests ───────────────────────────────────────────────────────
 
+pub fn decode_html_entities(s: &str) -> std::borrow::Cow<'_, str> {
+    if !s.contains('&') {
+        return std::borrow::Cow::Borrowed(s);
+    }
+
+    let mut out = String::with_capacity(s.len());
+    let mut i = 0;
+    let bytes = s.as_bytes();
+
+    while i < bytes.len() {
+        if bytes[i] == b'&' {
+            let mut j = i + 1;
+            let mut found_semicolon = false;
+            while j < bytes.len() {
+                if bytes[j] == b';' {
+                    found_semicolon = true;
+                    break;
+                }
+                if bytes[j] == b'&' || bytes[j].is_ascii_whitespace() {
+                    break;
+                }
+                j += 1;
+            }
+
+            if found_semicolon {
+                let entity = &s[i + 1..j];
+                let mut decoded = None;
+                match entity {
+                    "amp" => decoded = Some('&'),
+                    "lt" => decoded = Some('<'),
+                    "gt" => decoded = Some('>'),
+                    "quot" => decoded = Some('"'),
+                    "apos" => decoded = Some('\''),
+                    "nbsp" => decoded = Some('\u{00A0}'),
+                    _ if entity.starts_with("#x") || entity.starts_with("#X") => {
+                        if let Ok(code) = u32::from_str_radix(&entity[2..], 16) {
+                            decoded = char::from_u32(code);
+                        }
+                    }
+                    _ if entity.starts_with("#") => {
+                        if let Ok(code) = entity[1..].parse::<u32>() {
+                            decoded = char::from_u32(code);
+                        }
+                    }
+                    _ => {}
+                }
+
+                if let Some(ch) = decoded {
+                    out.push(ch);
+                    i = j + 1;
+                    continue;
+                }
+            }
+        }
+
+        let ch = s[i..].chars().next().unwrap();
+        out.push(ch);
+        i += ch.len_utf8();
+    }
+
+    std::borrow::Cow::Owned(out)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

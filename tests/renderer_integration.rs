@@ -255,6 +255,7 @@ fn test_build_scene_graph_from_display_list() {
         y: 100.0,
         target_width: 800.0,
         font_size: 16.0,
+        line_height: 19.2,
         color: Color::new(255, 255, 255, 255),
         link_url: None,
     });

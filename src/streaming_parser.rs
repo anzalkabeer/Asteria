@@ -13,7 +13,7 @@ impl Default for StreamingHtmlProcessor {
     fn default() -> Self {
         Self::new()
     }
-}
+}f
 
 impl StreamingHtmlProcessor {
     pub fn new() -> Self {

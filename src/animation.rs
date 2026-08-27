@@ -80,6 +80,13 @@ impl AnimationManager {
         self.transitions.push(transition);
     }
 
+    /// Register a new keyframe animation. Replaces any existing animation on the same node & name.
+    pub fn start_animation(&mut self, animation: ActiveAnimation) {
+        self.animations
+            .retain(|a| !(a.node_id == animation.node_id && a.name == animation.name));
+        self.animations.push(animation);
+    }
+
     /// Progress all active animations and transitions by `dt` seconds.
     /// Returns a list of `(NodeId, PropertyId, f32)` representing updated property values.
     pub fn tick(&mut self, dt: f32) -> Vec<(NodeId, PropertyId, f32)> {
@@ -89,6 +96,30 @@ impl AnimationManager {
             let (val, is_finished) = trans.step(dt);
             updates.push((trans.node_id, trans.property, val));
             !is_finished
+        });
+
+        self.animations.retain_mut(|anim| {
+            anim.elapsed += dt;
+
+            // Calculate progress clamped between 0 and 1
+            let cycle_elapsed = if anim.iteration_count <= 0.0
+                || anim.elapsed < anim.duration * anim.iteration_count
+            {
+                anim.elapsed % anim.duration
+            } else {
+                anim.duration
+            };
+            let progress = (cycle_elapsed / anim.duration).clamp(0.0, 1.0);
+            let eased = ease(progress, &anim.timing_function);
+
+            // Send a placeholder update (PropertyId::Width) for keyframe progress mapping
+            updates.push((anim.node_id, PropertyId::Width, eased));
+
+            if anim.iteration_count <= 0.0 {
+                true // infinite loop
+            } else {
+                anim.elapsed < anim.duration * anim.iteration_count
+            }
         });
 
         updates
@@ -176,5 +207,34 @@ mod tests {
         assert_eq!(updates2.len(), 1);
         assert!((updates2[0].2 - 200.0).abs() < 1e-4);
         assert_eq!(manager.active_transition_count(), 0);
+    }
+
+    #[test]
+    fn test_keyframe_animation_progression() {
+        let mut manager = AnimationManager::new();
+        let anim = ActiveAnimation {
+            node_id: NodeId(1),
+            name: "slide-in".to_string(),
+            duration: 2.0,
+            elapsed: 0.0,
+            iteration_count: 1.0,
+            timing_function: AnimationTimingFunction::Linear,
+        };
+        manager.start_animation(anim);
+        assert_eq!(manager.animations.len(), 1);
+
+        // Step one second
+        let updates = manager.tick(1.0);
+        assert_eq!(updates.len(), 1);
+        assert_eq!(updates[0].0, NodeId(1));
+        assert_eq!(updates[0].1, PropertyId::Width);
+        assert!((updates[0].2 - 0.5).abs() < 1e-4);
+        assert_eq!(manager.animations.len(), 1);
+
+        // Step another second
+        let updates2 = manager.tick(1.0);
+        assert_eq!(updates2.len(), 1);
+        assert!((updates2[0].2 - 1.0).abs() < 1e-4);
+        assert_eq!(manager.animations.len(), 0);
     }
 }

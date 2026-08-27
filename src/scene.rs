@@ -389,10 +389,11 @@ pub fn build_scene_graph(display_list: &DisplayList, segment_height: f32) -> Sce
                 y,
                 target_width,
                 font_size,
+                line_height,
                 color,
                 link_url,
             } => {
-                let rect = compute_text_rect(text, *x, *y, *target_width, *font_size);
+                let rect = compute_text_rect(text, *x, *y, *target_width, *line_height);
                 let seg = assign_segment(*y, segment_height);
                 scene.push(
                     SceneNode {
@@ -456,9 +457,8 @@ pub fn build_scene_graph(display_list: &DisplayList, segment_height: f32) -> Sce
 }
 
 /// Compute bounding rect for text with line breaks and minimum 1 line height.
-fn compute_text_rect(text: &str, x: f32, y: f32, width: f32, font_size: f32) -> Rect {
+fn compute_text_rect(text: &str, x: f32, y: f32, width: f32, line_height: f32) -> Rect {
     let line_count = text.lines().count().max(1) as f32;
-    let line_height = font_size * 1.2;
     Rect {
         x,
         y,
@@ -477,9 +477,9 @@ fn cmd_bounding_rect(cmd: &DisplayCommand) -> Rect {
             x,
             y,
             target_width,
-            font_size,
+            line_height,
             ..
-        } => compute_text_rect(text, *x, *y, *target_width, *font_size),
+        } => compute_text_rect(text, *x, *y, *target_width, *line_height),
         DisplayCommand::Image {
             x,
             y,

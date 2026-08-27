@@ -590,17 +590,33 @@ impl<'a> CssParser<'a> {
 
                         let mut attr_value = None;
 
-                        // Check for operator (e.g., =, ^=, $=, *=)
-                        if self.current_kind() == CssTokenKind::Delim && self.current_slice() == "="
-                        {
-                            self.advance(); // skip '='
+                        // Check for operator (e.g., =, ^=, $=, *=, ~=, |=)
+                        let mut op_str = None;
+                        if self.current_kind() == CssTokenKind::Delim {
+                            let slice = self.current_slice();
+                            if slice == "=" {
+                                self.advance();
+                                op_str = Some("=".to_string());
+                            } else if matches!(slice, "^" | "$" | "*" | "~" | "|") {
+                                let c = slice.to_string();
+                                self.advance();
+                                if self.current_kind() == CssTokenKind::Delim
+                                    && self.current_slice() == "="
+                                {
+                                    self.advance();
+                                    op_str = Some(format!("{}=", c));
+                                }
+                            }
+                        }
+
+                        if let Some(op) = op_str {
                             self.skip_whitespace();
                             if self.current_kind() == CssTokenKind::String
                                 || self.current_kind() == CssTokenKind::Ident
                             {
                                 // Strings might be quoted, we need to extract inner
                                 let val = self.current_slice().to_string(); // Tokenizer gives inner string
-                                attr_value = Some(("=".to_string(), val));
+                                attr_value = Some((op, val));
                                 self.advance();
                             }
                         }

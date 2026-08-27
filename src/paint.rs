@@ -38,6 +38,7 @@ pub enum DisplayCommand {
         y: f32,
         target_width: f32,
         font_size: f32,
+        line_height: f32,
         color: Color,
         link_url: Option<String>,
     },
@@ -234,14 +235,16 @@ fn render_text(layout_box: &LayoutBox, dom: &Dom, source: &[u8], display_list: &
     let text = node.text_content(source);
     let trimmed_text = text.trim();
     if !trimmed_text.is_empty() {
+        let decoded = crate::dom::decode_html_entities(trimmed_text);
         let rect = layout_box.dimensions.content;
         let link_url = find_link_url(dom, source, Some(styled.node_id));
         display_list.push(DisplayCommand::Text {
-            text: trimmed_text.to_string(),
+            text: decoded.into_owned(),
             x: rect.x,
             y: rect.y,
             target_width: rect.width,
             font_size: styled.styles.font_size,
+            line_height: styled.styles.line_height,
             color: styled.styles.color,
             link_url,
         });
@@ -315,14 +318,15 @@ impl fmt::Display for DisplayCommand {
                 x,
                 y,
                 font_size,
+                line_height,
                 color,
                 link_url,
                 ..
             } => {
                 write!(
                     f,
-                    "Text \"{}\" at (x: {:.1}, y: {:.1}) font_size={:.1}px color={} link={:?}",
-                    text, x, y, font_size, color, link_url
+                    "Text \"{}\" at (x: {:.1}, y: {:.1}) font_size={:.1}px line_height={:.1}px color={} link={:?}",
+                    text, x, y, font_size, line_height, color, link_url
                 )
             }
             DisplayCommand::Image {
