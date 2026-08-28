@@ -321,10 +321,16 @@ impl ComputedStyle {
             PropertyId::GridColumn => "<grid-placement>".to_string(),
             PropertyId::GridRow => "<grid-placement>".to_string(),
             PropertyId::GridGap => {
-                if (self.grid_gap.bottom - self.grid_gap.right).abs() < 1e-4 {
-                    format!("{}px", self.grid_gap.bottom)
+                let g = self.grid_gap;
+                if (g.top - g.right).abs() < 1e-4
+                    && (g.top - g.bottom).abs() < 1e-4
+                    && (g.top - g.left).abs() < 1e-4
+                {
+                    format!("{}px", g.top)
+                } else if (g.top - g.bottom).abs() < 1e-4 && (g.left - g.right).abs() < 1e-4 {
+                    format!("{}px {}px", g.top, g.right)
                 } else {
-                    format!("{}px {}px", self.grid_gap.bottom, self.grid_gap.right)
+                    format!("{}px {}px {}px {}px", g.top, g.right, g.bottom, g.left)
                 }
             }
             PropertyId::AnimationName => self.animation_name.clone(),
@@ -418,7 +424,7 @@ impl ComputedStyle {
             PropertyId::GridColumn => self.grid_column = parse_grid_placement(value),
             PropertyId::GridRow => self.grid_row = parse_grid_placement(value),
             PropertyId::GridGap => {
-                self.grid_gap = parse_edges(value, self.font_size, root_font_size)
+                self.grid_gap = parse_gap(value, self.font_size, root_font_size)
             }
             PropertyId::AnimationName => self.animation_name = value.trim().to_string(),
             PropertyId::AnimationDuration => self.animation_duration = parse_time(value),
@@ -741,6 +747,32 @@ pub fn parse_edges(value: &str, em_base: f32, rem_base: f32) -> Edges {
             bottom: parse_length(parts[2], em_base, rem_base),
             left: parse_length(parts[3], em_base, rem_base),
         },
+        _ => Edges::ZERO,
+    }
+}
+
+/// Parse a CSS gap / grid-gap value.
+/// Per CSS Box Alignment Module Level 3 §8:
+/// Accepts 1 or 2 values: `row-gap column-gap?`
+/// 1 value sets both row and column gap.
+/// 2 values sets row-gap (top/bottom) and column-gap (left/right).
+pub fn parse_gap(value: &str, em_base: f32, rem_base: f32) -> Edges {
+    let parts: Vec<&str> = value.split_whitespace().collect();
+    match parts.len() {
+        1 => {
+            let v = parse_length(parts[0], em_base, rem_base);
+            Edges::uniform(v)
+        }
+        2 => {
+            let row = parse_length(parts[0], em_base, rem_base);
+            let col = parse_length(parts[1], em_base, rem_base);
+            Edges {
+                top: row,
+                right: col,
+                bottom: row,
+                left: col,
+            }
+        }
         _ => Edges::ZERO,
     }
 }

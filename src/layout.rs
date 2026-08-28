@@ -365,8 +365,8 @@ impl<'a> LayoutBox<'a> {
                     prev_margin_bottom = child.dimensions.margin.bottom;
                     is_first = false;
                 } else {
-                    // Vertical margin collapsing: adjacent vertical margins collapse to their maximum
-                    let collapsed_margin = prev_margin_bottom.max(child_margin_top);
+                    // Vertical margin collapsing: CSS 2.1 §8.3.1 (positive/negative/mixed)
+                    let collapsed_margin = collapse_margins(prev_margin_bottom, child_margin_top);
                     container.content.height =
                         prev_border_box_bottom + collapsed_margin - child_margin_top;
                     child.layout(container, dom, source);
@@ -762,6 +762,18 @@ fn estimate_char_width_ratio(ch: char) -> f32 {
         // Fallback for other characters
         _ => 0.55,
     }
+}
+
+// ─── Margin Collapsing Helper ──────────────────────────────────────
+
+/// Collapse two adjacent vertical margins according to CSS 2.1 §8.3.1:
+/// - If both are positive: max(m1, m2)
+/// - If both are negative: min(m1, m2) (the most negative value)
+/// - If one is positive and one is negative: max(positive) + min(negative)
+pub fn collapse_margins(m1: f32, m2: f32) -> f32 {
+    let pos = m1.max(0.0).max(m2.max(0.0));
+    let neg = m1.min(0.0).min(m2.min(0.0));
+    pos + neg
 }
 
 // ─── Layout Tree Builder ───────────────────────────────────────────

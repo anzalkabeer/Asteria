@@ -744,3 +744,98 @@ fn test_grid_gap_property_display() {
     style.set_property(PropertyId::GridGap, "15px 25px", 16.0, 16.0);
     assert_eq!(style.get_property_display(PropertyId::GridGap), "15px 25px");
 }
+
+#[test]
+fn test_margin_collapsing_negative_and_mixed() {
+    use asteria::layout::collapse_margins;
+
+    // CSS 2.1 §8.3.1 rules:
+    // Positive + Positive: max(p1, p2)
+    assert_eq!(collapse_margins(20.0, 30.0), 30.0);
+    // Positive + Negative: max(pos) + min(neg)
+    assert_eq!(collapse_margins(20.0, -15.0), 5.0);
+    assert_eq!(collapse_margins(-15.0, 20.0), 5.0);
+    assert_eq!(collapse_margins(10.0, -25.0), -15.0);
+    // Negative + Negative: min(neg) (the most negative)
+    assert_eq!(collapse_margins(-10.0, -25.0), -25.0);
+    assert_eq!(collapse_margins(-30.0, -10.0), -30.0);
+    // Zeros
+    assert_eq!(collapse_margins(0.0, -10.0), -10.0);
+    assert_eq!(collapse_margins(10.0, 0.0), 10.0);
+    assert_eq!(collapse_margins(0.0, 0.0), 0.0);
+
+    // Layout execution test for mixed & negative margin collapsing
+    let mut dom_store = None;
+    let mut bytes_store = Vec::new();
+    let mut styled_store = None;
+
+    let html = r#"<html><body><div id="b1"></div><div id="b2"></div></body></html>"#;
+    let css = r#"
+        body { margin: 0; padding: 0; }
+        #b1 { height: 50px; margin-top: 10px; margin-bottom: 20px; padding: 0; border-width: 0; }
+        #b2 { height: 40px; margin-top: -15px; margin-bottom: 0; padding: 0; border-width: 0; }
+    "#;
+
+    let layout = parse_and_layout_full(
+        html,
+        css,
+        800.0,
+        600.0,
+        &mut dom_store,
+        &mut bytes_store,
+        &mut styled_store,
+    );
+
+    let html_box = &layout.children[0];
+    let body_box = &html_box.children[0];
+    let b1 = &body_box.children[0];
+    let b2 = &body_box.children[1];
+
+    // b1: starts at y = 10px, height = 50px -> bottom at y = 60px
+    assert_eq!(b1.dimensions.content.y, 10.0);
+    assert_eq!(b1.dimensions.content.height, 50.0);
+
+    // Collapsed margin = collapse_margins(20, -15) = 5px.
+    // b2: starts at 60 + 5 = 65px.
+    assert_eq!(b2.dimensions.content.y, 65.0);
+    assert_eq!(b2.dimensions.content.height, 40.0);
+}
+
+#[test]
+fn test_grid_gap_four_value_and_parsing() {
+    use asteria::properties::PropertyId;
+    use asteria::values::{parse_gap, ComputedStyle, Edges};
+
+    // 1-value parse
+    let g1 = parse_gap("12px", 16.0, 16.0);
+    assert_eq!(g1, Edges::uniform(12.0));
+
+    // 2-value parse
+    let g2 = parse_gap("10px 20px", 16.0, 16.0);
+    assert_eq!(
+        g2,
+        Edges {
+            top: 10.0,
+            right: 20.0,
+            bottom: 10.0,
+            left: 20.0,
+        }
+    );
+
+    // Invalid (>2 values) parse returns zero
+    let g_inv = parse_gap("10px 20px 30px", 16.0, 16.0);
+    assert_eq!(g_inv, Edges::ZERO);
+
+    // 4-value custom edge representation serialization
+    let mut style = ComputedStyle::default();
+    style.grid_gap = Edges {
+        top: 1.0,
+        right: 2.0,
+        bottom: 3.0,
+        left: 4.0,
+    };
+    assert_eq!(
+        style.get_property_display(PropertyId::GridGap),
+        "1px 2px 3px 4px"
+    );
+}
