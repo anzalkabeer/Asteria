@@ -320,7 +320,13 @@ impl ComputedStyle {
             PropertyId::GridTemplateRows => "<grid-tracks>".to_string(),
             PropertyId::GridColumn => "<grid-placement>".to_string(),
             PropertyId::GridRow => "<grid-placement>".to_string(),
-            PropertyId::GridGap => format!("{}px", self.grid_gap.top),
+            PropertyId::GridGap => {
+                if (self.grid_gap.bottom - self.grid_gap.right).abs() < 1e-4 {
+                    format!("{}px", self.grid_gap.bottom)
+                } else {
+                    format!("{}px {}px", self.grid_gap.bottom, self.grid_gap.right)
+                }
+            }
             PropertyId::AnimationName => self.animation_name.clone(),
             PropertyId::AnimationDuration => format!("{}s", self.animation_duration),
             PropertyId::AnimationTimingFunction => "<timing-function>".to_string(),

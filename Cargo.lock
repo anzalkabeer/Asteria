@@ -1109,23 +1109,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "main"
-version = "0.1.0"
-dependencies = [
- "bytemuck",
- "env_logger",
- "glyphon",
- "log",
- "lru",
- "pollster",
- "rustls",
- "rustls-pki-types",
- "webpki-roots 0.26.11",
- "wgpu",
- "winit",
-]
-
-[[package]]
 name = "malloc_buf"
 version = "0.0.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1425,6 +1408,23 @@ name = "profiling"
 version = "1.0.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3d595e54a326bc53c1c197b32d295e14b169e3cfeaa8dc82b529f947fba6bcf5"
+
+[[package]]
+name = "project"
+version = "0.1.0"
+dependencies = [
+ "bytemuck",
+ "env_logger",
+ "glyphon",
+ "log",
+ "lru",
+ "pollster",
+ "rustls",
+ "rustls-pki-types",
+ "webpki-roots 0.26.11",
+ "wgpu",
+ "winit",
+]
 
 [[package]]
 name = "quick-xml"

@@ -676,3 +676,71 @@ fn test_keyframe_modulo_looping() {
     let updates2 = manager.tick(2.0);
     assert!((updates2[0].2 - 0.5).abs() < 1e-4);
 }
+
+#[test]
+fn test_vertical_margin_collapsing() {
+    let mut dom_store = None;
+    let mut bytes_store = Vec::new();
+    let mut styled_store = None;
+
+    let html = r#"<html><body><div id="box1"></div><div id="box2"></div></body></html>"#;
+    let css = r#"
+        body { margin: 0; padding: 0; }
+        #box1 { height: 50px; margin-top: 10px; margin-bottom: 30px; padding: 0; border-width: 0; }
+        #box2 { height: 40px; margin-top: 20px; margin-bottom: 10px; padding: 0; border-width: 0; }
+    "#;
+
+    let layout = parse_and_layout_full(
+        html,
+        css,
+        800.0,
+        600.0,
+        &mut dom_store,
+        &mut bytes_store,
+        &mut styled_store,
+    );
+
+    let html_box = &layout.children[0];
+    let body_box = &html_box.children[0];
+    let box1 = &body_box.children[0];
+    let box2 = &body_box.children[1];
+
+    // Box 1 starts at y = 10px, height = 50px -> bottom at y = 60px
+    assert_eq!(box1.dimensions.content.y, 10.0);
+    assert_eq!(box1.dimensions.content.height, 50.0);
+
+    // Box 2 top margin is 20px, Box 1 bottom margin is 30px.
+    // Collapsed margin = max(30, 20) = 30px.
+    // Box 2 starts at 60 + 30 = 90px.
+    assert_eq!(box2.dimensions.content.y, 90.0);
+    assert_eq!(box2.dimensions.content.height, 40.0);
+}
+
+#[test]
+fn test_https_host_header_port_omission() {
+    use asteria::net::http::{HttpMethod, HttpRequest, Url};
+
+    let url = Url::parse("https://example.com/api").unwrap();
+    let req = HttpRequest {
+        method: HttpMethod::Get,
+        url,
+        headers: vec![],
+    };
+    let raw = String::from_utf8(req.to_request_bytes()).unwrap();
+
+    assert!(raw.contains("Host: example.com\r\n"));
+    assert!(!raw.contains("Host: example.com:443\r\n"));
+}
+
+#[test]
+fn test_grid_gap_property_display() {
+    use asteria::properties::PropertyId;
+    use asteria::values::ComputedStyle;
+
+    let mut style = ComputedStyle::default();
+    style.set_property(PropertyId::GridGap, "10px", 16.0, 16.0);
+    assert_eq!(style.get_property_display(PropertyId::GridGap), "10px");
+
+    style.set_property(PropertyId::GridGap, "15px 25px", 16.0, 16.0);
+    assert_eq!(style.get_property_display(PropertyId::GridGap), "15px 25px");
+}

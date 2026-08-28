@@ -230,7 +230,7 @@ impl HttpRequest {
         }
 
         if !has_host {
-            let host_header = if self.url.port == 80 {
+            let host_header = if self.url.port == 80 || self.url.port == 443 {
                 self.url.host.clone()
             } else {
                 self.url.host_port()

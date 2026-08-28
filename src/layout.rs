@@ -345,19 +345,43 @@ impl<'a> LayoutBox<'a> {
             self.dimensions.content.height =
                 (cursor_y + current_line_height) - self.dimensions.content.y;
         } else {
-            // ─── Block Formatting Context (Vertical Stack Flow) ──────────────
-            let mut content_height = 0.0;
+            // ─── Block Formatting Context (Vertical Stack Flow with Margin Collapsing) ────────
+            let mut prev_border_box_bottom = 0.0;
+            let mut prev_margin_bottom = 0.0;
+            let mut is_first = true;
 
             for child in &mut self.children {
+                let child_margin_top = child
+                    .styled_node
+                    .map_or(0.0, |n| n.styles.margin.top);
+
                 let mut container = self.dimensions;
-                container.content.height = content_height;
+                if is_first {
+                    container.content.height = 0.0;
+                    child.layout(container, dom, source);
 
-                child.layout(container, dom, source);
+                    prev_border_box_bottom =
+                        child.dimensions.margin.top + child.dimensions.border_box().height;
+                    prev_margin_bottom = child.dimensions.margin.bottom;
+                    is_first = false;
+                } else {
+                    // Vertical margin collapsing: adjacent vertical margins collapse to their maximum
+                    let collapsed_margin = prev_margin_bottom.max(child_margin_top);
+                    container.content.height =
+                        prev_border_box_bottom + collapsed_margin - child_margin_top;
+                    child.layout(container, dom, source);
 
-                content_height += child.dimensions.margin_box().height;
+                    prev_border_box_bottom +=
+                        collapsed_margin + child.dimensions.border_box().height;
+                    prev_margin_bottom = child.dimensions.margin.bottom;
+                }
             }
 
-            self.dimensions.content.height = content_height;
+            self.dimensions.content.height = if is_first {
+                0.0
+            } else {
+                prev_border_box_bottom + prev_margin_bottom
+            };
         }
     }
 

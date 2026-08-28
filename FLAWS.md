@@ -130,15 +130,9 @@ Table elements are missing from the UA stylesheet defaults. `<table>` should def
 
 ---
 
-### 2.4 `grid_gap` uses wrong edge values (`values.rs:323`, `layout.rs:445–446`)
+### 2.4 [RESOLVED] `grid_gap` uses wrong edge values (`values.rs:323`, `layout.rs:445–446`)
 
-```rust
-PropertyId::GridGap => format!("{}px", self.grid_gap.top),  // values.rs:323
-let gap_x = style.grid_gap.right;   // layout.rs:445
-let gap_y = style.grid_gap.bottom;  // layout.rs:446
-```
-
-**Flaw:** The `gap` shorthand is parsed via `parse_edges()` (which fills top/right/bottom/left), but grid gap should just be `row-gap column-gap`. The display function shows `top`, layout reads `right` and `bottom`. This is internally inconsistent — nobody agrees on which edge stores which gap dimension.
+> **Status:** Resolved in Batch 2. `grid_gap` property display and layout formatting consistently use `row_gap` (top/bottom) and `column_gap` (right/left).
 
 ---
 
@@ -221,17 +215,9 @@ Every scene node is created with `parent: None`. The `invalidate()` method walks
 
 ---
 
-### 2.11 Host header port formatting compatibility note (`http.rs:167–172`)
+### 2.11 [RESOLVED] Host header port formatting compatibility note (`http.rs:167–172`)
 
-```rust
-let host_header = if self.url.port == 80 {
-    self.url.host.clone()
-} else {
-    self.url.host_port()
-};
-```
-
-**Compatibility Note:** The client appends `:port` for all non-80 ports, resulting in `Host: example.com:443` for HTTPS connections on port 443. While compliant with RFC 9110 (which allows explicit port numbers in Host headers), standard web browsers omit default ports for HTTPS (443) as well as HTTP (80).
+> **Status:** Resolved in Batch 2. Default ports 80 (HTTP) and 443 (HTTPS) are both cleanly omitted from Host headers.
 
 ---
 
@@ -280,9 +266,9 @@ The block width algorithm always uses content-box sizing. `box-sizing: border-bo
 
 ---
 
-### 3.7 No margin collapsing (`layout.rs:348–362`)
+### 3.7 [RESOLVED] No margin collapsing (`layout.rs:348–362`)
 
-Adjacent vertical margins between block siblings should collapse (the larger wins). Currently both margins are fully applied, resulting in doubled spacing.
+> **Status:** Resolved in Batch 2. Block formatting context implements CSS Box Model vertical margin collapsing (`max(prev_margin_bottom, curr_margin_top)`).
 
 ---
 
@@ -649,17 +635,18 @@ The HTML tokenizer is a complex state machine processing arbitrary byte input. T
 | Category | Active Count | Severity |
 |----------|--------------|----------|
 | Critical Bugs | 5 *(2 resolved)* | 🔴 High |
-| Logic Flaws | 11 | 🟠 Medium-High |
-| Spec Non-Compliance | 9 | 🟡 Medium |
-| Architecture Flaws | 9 | 🟠 Medium-High |
-| Code Quality | 7 | 🟡 Medium |
-| Performance Issues | 6 | 🟡 Medium |
-| Security Concerns | 5 | 🔴 High |
-| Test Coverage Gaps | 9 | 🟡 Medium |
-| **Total Active** | **61** | |
+| Logic Flaws | 3 *(8 resolved)* | 🟠 Medium-High |
+| Spec Non-Compliance | 7 *(2 resolved)* | 🟡 Medium |
+| Architecture Flaws | 6 *(3 resolved)* | 🟠 Medium-High |
+| Code Quality | 3 *(4 resolved)* | 🟡 Medium |
+| Performance Issues | 0 *(6 resolved)* | 🟢 Complete |
+| Security Concerns | 0 *(5 resolved)* | 🟢 Complete |
+| Test Coverage Gaps | 0 *(9 resolved)* | 🟢 Complete |
+| **Total Active** | **24** *(39 resolved)* | |
 
 The most impactful active issues to fix next are:
-1. **Percentage length resolution** (#1.1) — breaks all %-based layouts
-2. **Inline layout double-layout** (#1.7) — position/size recalculation
-3. **No margin collapsing** (#3.7) — doubled spacing everywhere
-4. **`var()` substitution infinite loop** (#2.9) — potential hangs on cyclic vars
+1. **Percentage length resolution** (#1.1) — compute width/height % against containing block
+2. **`box-sizing: border-box`** (#3.6) — box model border-box support
+3. **`margin: auto` horizontal centering** (#3.1) — keyword detection and underflow centering
+4. **`!important` declaration priority** (#3.2) — cascade sorting with important flag
+5. **Stacking Context & `z-index`** (#4.9) — display list paint order
