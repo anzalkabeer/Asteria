@@ -45,10 +45,6 @@ impl Color {
     pub const BLACK: Color = Color::rgb(0, 0, 0);
     /// Default background: transparent
     pub const TRANSPARENT: Color = Color::new(0, 0, 0, 0);
-    /// Sentinel value indicating the `currentColor` CSS keyword.
-    /// This is resolved to the element's own `color` property after full cascade.
-    pub const CURRENT_COLOR: Color = Color::new(1, 1, 1, 0);
-
 
     /// Return (r, g, b, a) tuple for GPU color conversion
     pub const fn to_rgba(self) -> (u8, u8, u8, u8) {
@@ -62,6 +58,23 @@ impl std::fmt::Display for Color {
             write!(f, "rgb({},{},{})", self.r, self.g, self.b)
         } else {
             write!(f, "rgba({},{},{},{})", self.r, self.g, self.b, self.a)
+        }
+    }
+}
+
+/// A CSS color value which can be either a concrete RGBA color or the `currentColor` keyword.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CssColor {
+    Rgba(Color),
+    CurrentColor,
+}
+
+impl CssColor {
+    /// Resolve this CSS color against the element's computed text color.
+    pub fn resolve(self, current_color: Color) -> Color {
+        match self {
+            CssColor::Rgba(c) => c,
+            CssColor::CurrentColor => current_color,
         }
     }
 }
@@ -171,8 +184,8 @@ pub enum BoxSizing {
     BorderBox,
 }
 
-// ─── Edges (margin/padding) ──────────────────────────────────────
-
+// ─── Edges (padding/border/gap) ──────────────────────────────────
+ 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Edges {
     pub top: f32,
@@ -213,6 +226,63 @@ impl std::fmt::Display for Edges {
     }
 }
 
+/// Margin edges for box model (None represents "auto").
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Margin {
+    pub top: Option<f32>,
+    pub right: Option<f32>,
+    pub bottom: Option<f32>,
+    pub left: Option<f32>,
+}
+
+impl Margin {
+    pub const ZERO: Margin = Margin {
+        top: Some(0.0),
+        right: Some(0.0),
+        bottom: Some(0.0),
+        left: Some(0.0),
+    };
+
+    pub const AUTO: Margin = Margin {
+        top: None,
+        right: None,
+        bottom: None,
+        left: None,
+    };
+
+    pub fn uniform(v: f32) -> Self {
+        Margin {
+            top: Some(v),
+            right: Some(v),
+            bottom: Some(v),
+            left: Some(v),
+        }
+    }
+}
+
+impl std::fmt::Display for Margin {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        fn fmt_opt(o: Option<f32>) -> String {
+            match o {
+                Some(v) => format!("{}px", v),
+                None => "auto".to_string(),
+            }
+        }
+        if self.top == self.right && self.right == self.bottom && self.bottom == self.left {
+            write!(f, "{}", fmt_opt(self.top))
+        } else {
+            write!(
+                f,
+                "{} {} {} {}",
+                fmt_opt(self.top),
+                fmt_opt(self.right),
+                fmt_opt(self.bottom),
+                fmt_opt(self.left)
+            )
+        }
+    }
+}
+
 // ─── ComputedStyle ───────────────────────────────────────────────
 //
 // The final resolved style for one DOM node. Every value is a
@@ -227,8 +297,8 @@ pub struct ComputedStyle {
     pub height: Option<f32>,    // None = auto
     pub box_sizing: BoxSizing,  // content-box | border-box
 
-    // Margins (px)
-    pub margin: Edges,
+    // Margins (px or auto)
+    pub margin: Margin,
     // Padding (px)
     pub padding: Edges,
 
@@ -271,7 +341,7 @@ impl Default for ComputedStyle {
             width: None,
             height: None,
             box_sizing: BoxSizing::ContentBox,
-            margin: Edges::ZERO,
+            margin: Margin::ZERO,
             padding: Edges::ZERO,
             border_width: Edges::ZERO,
             border_color: Color::BLACK,
@@ -315,10 +385,22 @@ impl ComputedStyle {
                 BoxSizing::ContentBox => "content-box".to_string(),
                 BoxSizing::BorderBox => "border-box".to_string(),
             },
-            PropertyId::MarginTop => format!("{}px", self.margin.top),
-            PropertyId::MarginRight => format!("{}px", self.margin.right),
-            PropertyId::MarginBottom => format!("{}px", self.margin.bottom),
-            PropertyId::MarginLeft => format!("{}px", self.margin.left),
+            PropertyId::MarginTop => match self.margin.top {
+                Some(v) => format!("{}px", v),
+                None => "auto".to_string(),
+            },
+            PropertyId::MarginRight => match self.margin.right {
+                Some(v) => format!("{}px", v),
+                None => "auto".to_string(),
+            },
+            PropertyId::MarginBottom => match self.margin.bottom {
+                Some(v) => format!("{}px", v),
+                None => "auto".to_string(),
+            },
+            PropertyId::MarginLeft => match self.margin.left {
+                Some(v) => format!("{}px", v),
+                None => "auto".to_string(),
+            },
             PropertyId::PaddingTop => format!("{}px", self.padding.top),
             PropertyId::PaddingRight => format!("{}px", self.padding.right),
             PropertyId::PaddingBottom => format!("{}px", self.padding.bottom),
@@ -381,16 +463,16 @@ impl ComputedStyle {
             }
             PropertyId::BoxSizing => self.box_sizing = parse_box_sizing(value),
             PropertyId::MarginTop => {
-                self.margin.top = parse_length(value, self.font_size, root_font_size)
+                self.margin.top = parse_optional_length(value, self.font_size, root_font_size)
             }
             PropertyId::MarginRight => {
-                self.margin.right = parse_length(value, self.font_size, root_font_size)
+                self.margin.right = parse_optional_length(value, self.font_size, root_font_size)
             }
             PropertyId::MarginBottom => {
-                self.margin.bottom = parse_length(value, self.font_size, root_font_size)
+                self.margin.bottom = parse_optional_length(value, self.font_size, root_font_size)
             }
             PropertyId::MarginLeft => {
-                self.margin.left = parse_length(value, self.font_size, root_font_size)
+                self.margin.left = parse_optional_length(value, self.font_size, root_font_size)
             }
 
             PropertyId::PaddingTop => {
@@ -510,73 +592,67 @@ pub fn parse_box_sizing(value: &str) -> BoxSizing {
     }
 }
 
-/// Parse a CSS color value.
-/// Supports: named colors, #hex (3 or 6 digit), rgb(r,g,b), currentColor (returns BLACK as sentinel),
-/// and multi-token background shorthand values (extracts the color token).
-pub fn parse_color(value: &str) -> Color {
+/// Try to parse a single CSS color token (without fallback).
+/// Returns Some(Color) on recognized syntax, None otherwise.
+pub fn try_parse_color(value: &str) -> Option<Color> {
     let s = value.trim().to_ascii_lowercase();
 
-    // currentColor is resolved at computed-style time against the element's color property
-    // We return BLACK as a sentinel here; style.rs resolves it after all properties are computed.
-    if s == "currentcolor" {
-        return Color::CURRENT_COLOR;
-    }
-
-    // Handle transparent keyword
     if s == "transparent" || s == "none" {
-        return Color::TRANSPARENT;
+        return Some(Color::TRANSPARENT);
     }
 
-    // Named colors
     if let Some(c) = named_color(&s) {
-        return c;
+        return Some(c);
     }
 
-    // Hex colors: #rgb or #rrggbb
     if let Some(hex) = s.strip_prefix('#') {
-        return parse_hex_color(hex);
+        return try_parse_hex_color(hex);
     }
 
-    // rgb(r, g, b)
     if let Some(inner) = s.strip_prefix("rgb(").and_then(|s| s.strip_suffix(')')) {
         let parts: Vec<&str> = inner.split(',').collect();
         if parts.len() == 3 {
-            let r = parts[0].trim().parse::<u8>().unwrap_or(0);
-            let g = parts[1].trim().parse::<u8>().unwrap_or(0);
-            let b = parts[2].trim().parse::<u8>().unwrap_or(0);
-            return Color::rgb(r, g, b);
+            let r = parts[0].trim().parse::<u8>().ok()?;
+            let g = parts[1].trim().parse::<u8>().ok()?;
+            let b = parts[2].trim().parse::<u8>().ok()?;
+            return Some(Color::rgb(r, g, b));
         }
     }
 
-    // rgba(r, g, b, a)
     if let Some(inner) = s.strip_prefix("rgba(").and_then(|s| s.strip_suffix(')')) {
         let parts: Vec<&str> = inner.split(',').collect();
         if parts.len() == 4 {
-            let r = parts[0].trim().parse::<u8>().unwrap_or(0);
-            let g = parts[1].trim().parse::<u8>().unwrap_or(0);
-            let b = parts[2].trim().parse::<u8>().unwrap_or(0);
-            // CSS spec: alpha is 0.0–1.0, but tolerate 0–255 integers
+            let r = parts[0].trim().parse::<u8>().ok()?;
+            let g = parts[1].trim().parse::<u8>().ok()?;
+            let b = parts[2].trim().parse::<u8>().ok()?;
             let a_str = parts[3].trim();
             let a = {
-                let a_float = a_str.parse::<f32>().unwrap_or(1.0);
+                let a_float = a_str.parse::<f32>().ok()?;
                 if a_float > 1.0 {
-                    // Non-standard 0–255 integer value — clamp and use directly
                     (a_float.min(255.0)) as u8
                 } else {
-                    // Standard 0.0–1.0 float range
                     (a_float.clamp(0.0, 1.0) * 255.0) as u8
                 }
             };
-            return Color::new(r, g, b, a);
+            return Some(Color::new(r, g, b, a));
         }
     }
 
-    // Background shorthand: scan whitespace-separated tokens for a color component.
-    // e.g. "url(img.png) no-repeat center red" -> Color::rgb(255,0,0)
-    // This prevents valid multi-component background shorthand from collapsing to black.
+    None
+}
+
+/// Try to parse a CSS color or `currentColor` keyword from a value string
+/// (including scanning whitespace-separated background shorthand tokens).
+pub fn try_parse_css_color(value: &str) -> Option<CssColor> {
+    let s = value.trim();
+    if s.eq_ignore_ascii_case("currentcolor") {
+        return Some(CssColor::CurrentColor);
+    }
+    if let Some(c) = try_parse_color(s) {
+        return Some(CssColor::Rgba(c));
+    }
     if s.contains(' ') {
         for token in s.split_whitespace() {
-            // Skip url(), repeat, position, size keywords
             if token.starts_with("url(")
                 || matches!(
                     token,
@@ -600,45 +676,117 @@ pub fn parse_color(value: &str) -> Color {
             {
                 continue;
             }
-            // Try to parse this token as a color
-            let candidate = parse_color(token);
-            if candidate != Color::BLACK || token == "black" {
-                return candidate;
+            if token.eq_ignore_ascii_case("currentcolor") {
+                return Some(CssColor::CurrentColor);
             }
-            // Try hex
-            if token.starts_with('#') {
-                return candidate; // parse_color already tried this
+            if let Some(c) = try_parse_color(token) {
+                return Some(CssColor::Rgba(c));
             }
         }
     }
+    None
+}
 
-    // Fallback: transparent (better default for background than black for unknown values)
-    Color::TRANSPARENT
+/// Parse a CSS color value.
+/// Supports: named colors, #hex (3, 6, 8 digit), rgb(r,g,b), rgba(r,g,b,a),
+/// and multi-token background shorthand values (extracts the recognized color token).
+pub fn parse_color(value: &str) -> Color {
+    if let Some(css_color) = try_parse_css_color(value) {
+        match css_color {
+            CssColor::Rgba(c) => c,
+            CssColor::CurrentColor => Color::BLACK,
+        }
+    } else {
+        Color::TRANSPARENT
+    }
+}
+
+/// Parse a CSS color or `currentColor` keyword with fallback.
+pub fn parse_css_color(value: &str) -> CssColor {
+    try_parse_css_color(value).unwrap_or(CssColor::Rgba(Color::TRANSPARENT))
 }
 
 /// Parse a hex color string (without the # prefix).
-fn parse_hex_color(hex: &str) -> Color {
+fn try_parse_hex_color(hex: &str) -> Option<Color> {
+    let valid_hex = hex.chars().all(|c| c.is_ascii_hexdigit());
+    if !valid_hex {
+        return None;
+    }
     match hex.len() {
         3 => {
             let r = u8_from_hex_char(hex.as_bytes()[0]);
             let g = u8_from_hex_char(hex.as_bytes()[1]);
             let b = u8_from_hex_char(hex.as_bytes()[2]);
-            Color::rgb(r * 17, g * 17, b * 17)
+            Some(Color::rgb(r * 17, g * 17, b * 17))
         }
         6 => {
             let r = u8_from_hex_pair(hex.as_bytes()[0], hex.as_bytes()[1]);
             let g = u8_from_hex_pair(hex.as_bytes()[2], hex.as_bytes()[3]);
             let b = u8_from_hex_pair(hex.as_bytes()[4], hex.as_bytes()[5]);
-            Color::rgb(r, g, b)
+            Some(Color::rgb(r, g, b))
         }
         8 => {
             let r = u8_from_hex_pair(hex.as_bytes()[0], hex.as_bytes()[1]);
             let g = u8_from_hex_pair(hex.as_bytes()[2], hex.as_bytes()[3]);
             let b = u8_from_hex_pair(hex.as_bytes()[4], hex.as_bytes()[5]);
             let a = u8_from_hex_pair(hex.as_bytes()[6], hex.as_bytes()[7]);
-            Color::new(r, g, b, a)
+            Some(Color::new(r, g, b, a))
         }
-        _ => Color::BLACK,
+        _ => None,
+    }
+}
+
+pub fn parse_hex_color(hex: &str) -> Color {
+    try_parse_hex_color(hex).unwrap_or(Color::BLACK)
+}
+
+/// Parse a shorthand margin value into 4 optional edge values (supporting "auto").
+pub fn parse_margin(value: &str, em_base: f32, rem_base: f32) -> Margin {
+    let parts: Vec<&str> = value.split_whitespace().collect();
+    match parts.len() {
+        1 => {
+            let v = parse_optional_length(parts[0], em_base, rem_base);
+            Margin {
+                top: v,
+                right: v,
+                bottom: v,
+                left: v,
+            }
+        }
+        2 => {
+            let v = parse_optional_length(parts[0], em_base, rem_base);
+            let h = parse_optional_length(parts[1], em_base, rem_base);
+            Margin {
+                top: v,
+                right: h,
+                bottom: v,
+                left: h,
+            }
+        }
+        3 => {
+            let top = parse_optional_length(parts[0], em_base, rem_base);
+            let h = parse_optional_length(parts[1], em_base, rem_base);
+            let bottom = parse_optional_length(parts[2], em_base, rem_base);
+            Margin {
+                top,
+                right: h,
+                bottom,
+                left: h,
+            }
+        }
+        4 => {
+            let top = parse_optional_length(parts[0], em_base, rem_base);
+            let right = parse_optional_length(parts[1], em_base, rem_base);
+            let bottom = parse_optional_length(parts[2], em_base, rem_base);
+            let left = parse_optional_length(parts[3], em_base, rem_base);
+            Margin {
+                top,
+                right,
+                bottom,
+                left,
+            }
+        }
+        _ => Margin::ZERO,
     }
 }
 
@@ -1049,7 +1197,7 @@ mod tests {
         assert_eq!(s.background_color, Color::TRANSPARENT);
         assert_eq!(s.font_size, 16.0);
         assert_eq!(s.font_weight, 400.0);
-        assert_eq!(s.margin, Edges::ZERO);
+        assert_eq!(s.margin, Margin::ZERO);
         assert_eq!(s.padding, Edges::ZERO);
         assert_eq!(s.width, None);
         assert_eq!(s.height, None);
@@ -1085,12 +1233,21 @@ mod tests {
     }
 
     #[test]
-    fn test_current_color_sentinel() {
-        // CURRENT_COLOR sentinel should be distinct from BLACK
-        assert_ne!(Color::CURRENT_COLOR, Color::BLACK);
-        // parse_color("currentColor") returns the sentinel
-        assert_eq!(parse_color("currentColor"), Color::CURRENT_COLOR);
-        assert_eq!(parse_color("currentcolor"), Color::CURRENT_COLOR);
+    fn test_css_color_and_currentcolor() {
+        assert_eq!(
+            parse_css_color("currentColor"),
+            CssColor::CurrentColor
+        );
+        assert_eq!(
+            parse_css_color("currentcolor"),
+            CssColor::CurrentColor
+        );
+        let resolved = parse_css_color("currentColor").resolve(Color::rgb(10, 20, 30));
+        assert_eq!(resolved, Color::rgb(10, 20, 30));
+
+        // Explicit rgba(1, 1, 1, 0) is parsed accurately and not confused with anything
+        let explicit = parse_color("rgba(1, 1, 1, 0)");
+        assert_eq!(explicit, Color::new(1, 1, 1, 0));
     }
 
     #[test]
@@ -1108,5 +1265,28 @@ mod tests {
         // Should find hex color in shorthand
         let c2 = parse_color("center #ff0000");
         assert_eq!(c2, Color::rgb(255, 0, 0));
+
+        // Malformed or non-color fragments should not be treated as color matches
+        assert_eq!(try_parse_color("rgb(255,"), None);
+        assert_eq!(try_parse_color("foo"), None);
+
+        // Multi-token with malformed parts should still extract the valid color
+        let c3 = parse_color("url(foo) rgb(255, invalid center green");
+        assert_eq!(c3, Color::rgb(0, 128, 0));
+    }
+
+    #[test]
+    fn test_margin_shorthand_and_auto() {
+        let m1 = parse_margin("10px auto", 16.0, 16.0);
+        assert_eq!(m1.top, Some(10.0));
+        assert_eq!(m1.right, None);
+        assert_eq!(m1.bottom, Some(10.0));
+        assert_eq!(m1.left, None);
+
+        let m2 = parse_margin("0", 16.0, 16.0);
+        assert_eq!(m2.top, Some(0.0));
+        assert_eq!(m2.right, Some(0.0));
+        assert_eq!(m2.bottom, Some(0.0));
+        assert_eq!(m2.left, Some(0.0));
     }
 }

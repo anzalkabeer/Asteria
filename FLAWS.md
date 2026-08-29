@@ -209,25 +209,25 @@ Every scene node is created with `parent: None`. The `invalidate()` method walks
 
 ### 3.1 [RESOLVED] `margin: auto` centering not supported
 
-> **Status:** Resolved in Batch 3. `calculate_block_width` now implements the CSS §10.3.3 auto-margin distribution algorithm. When both margins are 0 (indicating auto) and width is explicitly set, the underflow is split equally to center the element. Explicit left/right auto detection handles the single-auto margin cases too.
+> **Status:** Resolved in Batch 3. `Margin` struct preserves `Option<f32>` (where `None` is `auto` and `Some(0.0)` is a definite 0 length). `calculate_block_width` now implements the complete CSS §10.3.3 constraint resolution and underflow distribution algorithm, preserving signed residuals on right margin so the constraint equation is always satisfied.
 
 ---
 
 ### 3.2 [RESOLVED] No `!important` support
 
-> **Status:** Resolved in Batch 3. A `strip_important()` helper parses `!important` annotations from declaration values. The cascade sort now sorts on `(important, origin, specificity, source_order)` — ascending — so `!important` declarations always sort last and win. Inline styles cannot carry `!important` per spec and are not marked important.
+> **Status:** Resolved in Batch 3. A `strip_important()` helper parses `!important` annotations on both author rules and inline `style=""` declarations. The cascade sort evaluates `(important, origin, specificity, source_order)` — ascending — so `!important` declarations always take precedence, with inline `!important` beating author `!important`.
 
 ---
 
 ### 3.3 [RESOLVED] No `inherit` / `initial` / `unset` for shorthand properties
 
-> **Status:** Resolved in Batch 3. Shorthand expansion in `style.rs` now detects CSS-wide keywords before parsing edge values. A shorthand like `margin: inherit` now expands each longhand to `inherit`, which is then processed correctly by the existing `copy_property` path.
+> **Status:** Resolved in Batch 3. Shorthands (`margin`, `padding`, `border`) are normalized into constituent longhand declarations preserving all cascade metadata prior to winner selection. CSS-wide keywords (`inherit`/`initial`/`unset`) expand to each longhand and are processed correctly.
 
 ---
 
 ### 3.4 [RESOLVED] No `currentColor` support (`values.rs`)
 
-> **Status:** Resolved in Batch 3. `parse_color("currentColor")` returns a `Color::CURRENT_COLOR` sentinel (`Color::new(1,1,1,0)`). After the full cascade is resolved, `style.rs` checks `border_color` and `background_color` for this sentinel and replaces them with the element's own computed `color` property.
+> **Status:** Resolved in Batch 3. A distinct `CssColor` enum (`Rgba(Color)` / `CurrentColor`) unambiguous representation is used. During style resolution, `currentColor` is resolved against the element's computed foreground text color, while preserving all explicit RGBA values (including `rgba(1, 1, 1, 0)`).
 
 ---
 

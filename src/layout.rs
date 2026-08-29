@@ -155,25 +155,13 @@ impl<'a> LayoutBox<'a> {
         let auto_width = style.map(|s| s.width.is_none()).unwrap_or(true);
         let specified_w = style.and_then(|s| s.width).unwrap_or(0.0);
 
-        // Read margin longhands; None = auto keyword
-        let margin_left_raw = style.and_then(|s| {
-            // auto resolves to None for explicit centering
-            if s.margin.left == 0.0 {
-                None // treat as potentially auto — underflow will be assigned below
-            } else {
-                Some(s.margin.left)
-            }
-        });
-        let margin_right_raw = style.and_then(|s| {
-            if s.margin.right == 0.0 {
-                None
-            } else {
-                Some(s.margin.right)
-            }
-        });
+        let left_is_auto = style.map_or(false, |s| s.margin.left.is_none());
+        let right_is_auto = style.map_or(false, |s| s.margin.right.is_none());
 
-        let margin_top = style.map(|s| s.margin.top).unwrap_or(0.0);
-        let margin_bottom = style.map(|s| s.margin.bottom).unwrap_or(0.0);
+        let ml = style.and_then(|s| s.margin.left).unwrap_or(0.0);
+        let mr = style.and_then(|s| s.margin.right).unwrap_or(0.0);
+        let margin_top = style.and_then(|s| s.margin.top).unwrap_or(0.0);
+        let margin_bottom = style.and_then(|s| s.margin.bottom).unwrap_or(0.0);
 
         let padding_left = style.map(|s| s.padding.left).unwrap_or(0.0);
         let padding_right = style.map(|s| s.padding.right).unwrap_or(0.0);
@@ -193,54 +181,44 @@ impl<'a> LayoutBox<'a> {
             specified_w
         };
 
-        let ml = margin_left_raw.unwrap_or(0.0);
-        let mr = margin_right_raw.unwrap_or(0.0);
         let total_non_width = ml + mr + padding_left + padding_right + border_left + border_right;
 
-        let (mut width, margin_left, mut margin_right) = if auto_width {
-            // Auto width: expand content width to fill containing block
-            let available = (containing_block.content.width - total_non_width).max(0.0);
-            (available, ml, mr)
+        let (width, margin_left, margin_right) = if auto_width {
+            // Auto width: any auto margins become 0 per CSS §10.3.3
+            let used_ml = if left_is_auto { 0.0 } else { ml };
+            let used_mr = if right_is_auto { 0.0 } else { mr };
+            let non_width =
+                used_ml + used_mr + padding_left + padding_right + border_left + border_right;
+            let available = containing_block.content.width - non_width;
+
+            if available < 0.0 {
+                // Preserve signed residual in margin_right so constraint equation holds
+                (0.0, used_ml, used_mr + available)
+            } else {
+                (available, used_ml, used_mr)
+            }
         } else {
             // Specified width — calculate underflow
             let underflow = containing_block.content.width - (content_width + total_non_width);
-            let final_w = content_width;
 
             // CSS §10.3.3 — distribute underflow to auto margins
-            let left_is_auto = style
-                .map(|s| s.margin.left == 0.0 && s.padding.left == 0.0)
-                .unwrap_or(false);
-            let right_is_auto = style
-                .map(|s| s.margin.right == 0.0 && s.padding.right == 0.0)
-                .unwrap_or(false);
-
             let (ml_final, mr_final) = match (left_is_auto, right_is_auto) {
                 (true, true) => {
-                    // Both auto: distribute equally → center the element
-                    let half = underflow / 2.0;
-                    (half, half)
+                    if underflow < 0.0 {
+                        // In LTR with both auto and negative underflow: margin-left becomes 0, margin-right gets underflow
+                        (0.0, underflow)
+                    } else {
+                        let half = underflow / 2.0;
+                        (half, half)
+                    }
                 }
                 (true, false) => (underflow, mr),
                 (false, true) => (ml, underflow),
-                (false, false) => {
-                    if underflow > 0.0 {
-                        (ml, mr + underflow) // absorb overflow into right margin
-                    } else {
-                        (ml, mr)
-                    }
-                }
+                (false, false) => (ml, mr + underflow), // Over-constrained: apply residual to right margin
             };
 
-            (final_w, ml_final, mr_final)
+            (content_width, ml_final, mr_final)
         };
-
-        // Clamp to zero if width would go negative
-        if width < 0.0 {
-            if margin_right >= 0.0 {
-                margin_right += width;
-            }
-            width = 0.0;
-        }
 
         // Store computed values into box dimensions
         self.dimensions.content.width = width;
@@ -300,10 +278,10 @@ impl<'a> LayoutBox<'a> {
             for child in &mut self.children {
                 let style = child.styled_node.map(|n| &n.styles);
 
-                let margin_left = style.map_or(0.0, |s| s.margin.left);
-                let margin_right = style.map_or(0.0, |s| s.margin.right);
-                let margin_top = style.map_or(0.0, |s| s.margin.top);
-                let margin_bottom = style.map_or(0.0, |s| s.margin.bottom);
+                let margin_left = style.and_then(|s| s.margin.left).unwrap_or(0.0);
+                let margin_right = style.and_then(|s| s.margin.right).unwrap_or(0.0);
+                let margin_top = style.and_then(|s| s.margin.top).unwrap_or(0.0);
+                let margin_bottom = style.and_then(|s| s.margin.bottom).unwrap_or(0.0);
 
                 let padding_left = style.map_or(0.0, |s| s.padding.left);
                 let padding_right = style.map_or(0.0, |s| s.padding.right);
@@ -406,7 +384,8 @@ impl<'a> LayoutBox<'a> {
             for child in &mut self.children {
                 let child_margin_top = child
                     .styled_node
-                    .map_or(0.0, |n| n.styles.margin.top);
+                    .and_then(|n| n.styles.margin.top)
+                    .unwrap_or(0.0);
 
                 let mut container = self.dimensions;
                 if is_first {
@@ -466,9 +445,9 @@ impl<'a> LayoutBox<'a> {
         let mut unconstrained_auto_count = 0;
         let mut fixed_or_intrinsic_width = 0.0;
         for child in &self.children {
-            let margin_w = child
-                .styled_node
-                .map_or(0.0, |n| n.styles.margin.left + n.styles.margin.right);
+            let margin_w = child.styled_node.map_or(0.0, |n| {
+                n.styles.margin.left.unwrap_or(0.0) + n.styles.margin.right.unwrap_or(0.0)
+            });
             let padding_w = child
                 .styled_node
                 .map_or(0.0, |n| n.styles.padding.left + n.styles.padding.right);
@@ -504,9 +483,9 @@ impl<'a> LayoutBox<'a> {
         };
 
         for child in &mut self.children {
-            let margin_w = child
-                .styled_node
-                .map_or(0.0, |n| n.styles.margin.left + n.styles.margin.right);
+            let margin_w = child.styled_node.map_or(0.0, |n| {
+                n.styles.margin.left.unwrap_or(0.0) + n.styles.margin.right.unwrap_or(0.0)
+            });
             let padding_w = child
                 .styled_node
                 .map_or(0.0, |n| n.styles.padding.left + n.styles.padding.right);
@@ -694,10 +673,10 @@ impl<'a> LayoutBox<'a> {
         let style = self.styled_node.map(|n| &n.styles);
 
         // Compute edge sizes from style
-        let margin_left = style.map_or(0.0, |s| s.margin.left);
-        let margin_right = style.map_or(0.0, |s| s.margin.right);
-        let margin_top = style.map_or(0.0, |s| s.margin.top);
-        let margin_bottom = style.map_or(0.0, |s| s.margin.bottom);
+        let margin_left = style.and_then(|s| s.margin.left).unwrap_or(0.0);
+        let margin_right = style.and_then(|s| s.margin.right).unwrap_or(0.0);
+        let margin_top = style.and_then(|s| s.margin.top).unwrap_or(0.0);
+        let margin_bottom = style.and_then(|s| s.margin.bottom).unwrap_or(0.0);
 
         let padding_left = style.map_or(0.0, |s| s.padding.left);
         let padding_right = style.map_or(0.0, |s| s.padding.right);

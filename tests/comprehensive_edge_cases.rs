@@ -476,10 +476,10 @@ fn test_shorthand_expansion_and_cascade_override() {
     let style = box_elem.styled_node.unwrap();
 
     // Margin: margin-top was explicitly overridden to 50px, while others come from shorthand
-    assert_eq!(style.styles.margin.top, 50.0);
-    assert_eq!(style.styles.margin.right, 20.0);
-    assert_eq!(style.styles.margin.bottom, 10.0);
-    assert_eq!(style.styles.margin.left, 20.0);
+    assert_eq!(style.styles.margin.top, Some(50.0));
+    assert_eq!(style.styles.margin.right, Some(20.0));
+    assert_eq!(style.styles.margin.bottom, Some(10.0));
+    assert_eq!(style.styles.margin.left, Some(20.0));
 
     // Padding: 5px top, 10px right, 15px bottom, 20px left
     assert_eq!(style.styles.padding.top, 5.0);
@@ -837,5 +837,83 @@ fn test_grid_gap_four_value_and_parsing() {
     assert_eq!(
         style.get_property_display(PropertyId::GridGap),
         "1px 2px 3px 4px"
+    );
+}
+
+#[test]
+fn test_margin_auto_vs_explicit_zero_centering() {
+    let mut dom_store = None;
+    let mut bytes_store = Vec::new();
+    let mut styled_store = None;
+
+    let html = r#"<html><body><div id="centered"></div><div id="left_aligned"></div></body></html>"#;
+    let css = r#"
+        body { margin: 0; padding: 0; }
+        #centered { width: 400px; height: 50px; margin-left: auto; margin-right: auto; padding: 0; border-width: 0; }
+        #left_aligned { width: 400px; height: 50px; margin-left: 0; margin-right: auto; padding: 0; border-width: 0; }
+    "#;
+
+    let layout = parse_and_layout_full(
+        html,
+        css,
+        800.0,
+        600.0,
+        &mut dom_store,
+        &mut bytes_store,
+        &mut styled_store,
+    );
+
+    let html_box = &layout.children[0];
+    let body_box = &html_box.children[0];
+    let centered = &body_box.children[0];
+    let left_aligned = &body_box.children[1];
+
+    // Centered: 800 - 400 = 400 underflow / 2 = 200px each margin
+    assert_eq!(centered.dimensions.margin.left, 200.0);
+    assert_eq!(centered.dimensions.margin.right, 200.0);
+    assert_eq!(centered.dimensions.content.x, 200.0);
+
+    // Left aligned: margin-left is explicit 0, margin-right absorbs all 400px underflow
+    assert_eq!(left_aligned.dimensions.margin.left, 0.0);
+    assert_eq!(left_aligned.dimensions.margin.right, 400.0);
+    assert_eq!(left_aligned.dimensions.content.x, 0.0);
+}
+
+#[test]
+fn test_horizontal_constraint_negative_underflow_residual() {
+    let mut dom_store = None;
+    let mut bytes_store = Vec::new();
+    let mut styled_store = None;
+
+    // Element wider than containing block: 900px in 800px viewport with margin-left: 50px, margin-right: 50px
+    let html = r#"<html><body><div id="overflowing"></div></body></html>"#;
+    let css = r#"
+        body { margin: 0; padding: 0; }
+        #overflowing { width: 900px; height: 50px; margin-left: 50px; margin-right: 50px; padding: 0; border-width: 0; }
+    "#;
+
+    let layout = parse_and_layout_full(
+        html,
+        css,
+        800.0,
+        600.0,
+        &mut dom_store,
+        &mut bytes_store,
+        &mut styled_store,
+    );
+
+    let html_box = &layout.children[0];
+    let body_box = &html_box.children[0];
+    let el = &body_box.children[0];
+
+    // ml = 50, mr = 50, w = 900 -> total = 1000px in 800px container -> underflow = -200px
+    // Over-constrained: margin-right becomes mr + underflow = 50 + (-200) = -150px
+    assert_eq!(el.dimensions.content.width, 900.0);
+    assert_eq!(el.dimensions.margin.left, 50.0);
+    assert_eq!(el.dimensions.margin.right, -150.0);
+    // Constraint equation: 50 + 900 + (-150) = 800px exactly satisfies constraint!
+    assert_eq!(
+        el.dimensions.margin.left + el.dimensions.content.width + el.dimensions.margin.right,
+        800.0
     );
 }

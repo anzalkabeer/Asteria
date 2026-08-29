@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use crate::css_parser::{Selector, SimpleSelector, StyleRule, Stylesheet};
 use crate::dom::{Dom, NodeId, NodeKind};
 use crate::properties::{self, ALL_PROPERTIES, PropertyId};
-use crate::values::{self, Color, ComputedStyle, Display};
+use crate::values::{self, ComputedStyle, Display};
 
 // ─── Rule Index ──────────────────────────────────────────────────
 //
@@ -407,62 +407,102 @@ fn build_styled_node(
             if let Some(style_text) = node.get_attribute("style", source) {
                 let inline_decls = parse_inline_style(style_text);
                 for (prop, val) in inline_decls {
-                    // Inline styles cannot carry !important per CSS spec
+                    let (clean_val, important) = strip_important(&val);
                     declarations.push(MatchedDeclaration {
                         property: Cow::Owned(prop),
-                        value: Cow::Owned(val),
+                        value: Cow::Owned(clean_val),
                         specificity: (0, 0, 0), // doesn't matter — origin wins
                         source_order: usize::MAX,
                         origin: Origin::Inline,
-                        important: false,
+                        important,
                     });
                 }
             }
 
-            // ── Step 2: Sort by cascade priority ──────────────────
-            // Sort order (ascending, last wins):
-            //   1. !important status (normal < important)
-            //   2. Origin (Author < Inline)
-            //   3. Specificity
-            //   4. Source order
-            declarations.sort_by(|a, b| {
-                a.important
-                    .cmp(&b.important)
-                    .then(a.origin.cmp(&b.origin))
-                    .then(a.specificity.cmp(&b.specificity))
-                    .then(a.source_order.cmp(&b.source_order))
-            });
-
-            // ── Step 3: Pick winners per property ─────────────────
-            // Last declaration for each property wins (since sorted ascending)
-            let mut specified: HashMap<Cow<str>, Cow<str>> = HashMap::new();
+            // ── Step 2: Expand shorthands before cascade sorting ──
+            // Every shorthand declaration generates longhand declarations retaining
+            // the exact same specificity, origin, source_order, and important metadata.
+            let mut normalized_decls = Vec::with_capacity(declarations.len());
             for decl in declarations {
-                specified.insert(decl.property, decl.value);
-            }
+                let prop = decl.property.as_ref();
+                let val_trimmed = decl.value.trim();
+                let val_lower = val_trimmed.to_ascii_lowercase();
+                let is_css_wide =
+                    val_lower == "inherit" || val_lower == "initial" || val_lower == "unset";
 
-            // ── Step 4: Expand shorthands ─────────────────────────
-            let mut expanded: HashMap<Cow<'static, str>, Cow<str>> = HashMap::new();
-            for (prop, value) in &specified {
-                if properties::is_shorthand(prop.as_ref()) {
-                    // Handle CSS-wide keywords on shorthands
-                    let val_lower = value.as_ref().trim().to_ascii_lowercase();
-                    if val_lower == "inherit" || val_lower == "initial" || val_lower == "unset" {
-                        // Expand shorthand CSS-wide keywords to each longhand
-                        if let Some(longhand_ids) = properties::expand_shorthand(prop.as_ref()) {
-                            for id in &longhand_ids {
-                                let longhand_name = id.name();
-                                if !specified.contains_key(longhand_name) {
-                                    expanded.insert(
-                                        Cow::Borrowed(longhand_name),
-                                        Cow::Owned(val_lower.clone()),
-                                    );
-                                }
-                            }
+                if prop == "margin" || prop == "padding" {
+                    let prefix = if prop == "margin" { "margin" } else { "padding" };
+                    if is_css_wide {
+                        for edge in &["top", "right", "bottom", "left"] {
+                            normalized_decls.push(MatchedDeclaration {
+                                property: Cow::Owned(format!("{}-{}", prefix, edge)),
+                                value: Cow::Owned(val_lower.clone()),
+                                specificity: decl.specificity,
+                                source_order: decl.source_order,
+                                origin: decl.origin,
+                                important: decl.important,
+                            });
                         }
-                        continue;
+                    } else {
+                        let parts: Vec<&str> = val_trimmed.split_whitespace().collect();
+                        let (top, right, bottom, left) = match parts.len() {
+                            1 => (parts[0], parts[0], parts[0], parts[0]),
+                            2 => (parts[0], parts[1], parts[0], parts[1]),
+                            3 => (parts[0], parts[1], parts[2], parts[1]),
+                            4 => (parts[0], parts[1], parts[2], parts[3]),
+                            _ => ("0px", "0px", "0px", "0px"),
+                        };
+                        for (edge, val) in &[
+                            ("top", top),
+                            ("right", right),
+                            ("bottom", bottom),
+                            ("left", left),
+                        ] {
+                            normalized_decls.push(MatchedDeclaration {
+                                property: Cow::Owned(format!("{}-{}", prefix, edge)),
+                                value: Cow::Owned(val.to_string()),
+                                specificity: decl.specificity,
+                                source_order: decl.source_order,
+                                origin: decl.origin,
+                                important: decl.important,
+                            });
+                        }
                     }
-                    if prop.as_ref() == "border" {
-                        let (w, s, c) = values::parse_border_shorthand(value.as_ref());
+                } else if prop == "border" {
+                    if is_css_wide {
+                        for edge_name in &[
+                            "border-top-width",
+                            "border-right-width",
+                            "border-bottom-width",
+                            "border-left-width",
+                        ] {
+                            normalized_decls.push(MatchedDeclaration {
+                                property: Cow::Borrowed(edge_name),
+                                value: Cow::Owned(val_lower.clone()),
+                                specificity: decl.specificity,
+                                source_order: decl.source_order,
+                                origin: decl.origin,
+                                important: decl.important,
+                            });
+                        }
+                        normalized_decls.push(MatchedDeclaration {
+                            property: Cow::Borrowed("border-style"),
+                            value: Cow::Owned(val_lower.clone()),
+                            specificity: decl.specificity,
+                            source_order: decl.source_order,
+                            origin: decl.origin,
+                            important: decl.important,
+                        });
+                        normalized_decls.push(MatchedDeclaration {
+                            property: Cow::Borrowed("border-color"),
+                            value: Cow::Owned(val_lower),
+                            specificity: decl.specificity,
+                            source_order: decl.source_order,
+                            origin: decl.origin,
+                            important: decl.important,
+                        });
+                    } else {
+                        let (w, s, c) = values::parse_border_shorthand(val_trimmed);
                         if let Some(w_val) = w {
                             for edge_name in &[
                                 "border-top-width",
@@ -470,47 +510,61 @@ fn build_styled_node(
                                 "border-bottom-width",
                                 "border-left-width",
                             ] {
-                                if !specified.contains_key(*edge_name) {
-                                    expanded.insert(
-                                        Cow::Borrowed(edge_name),
-                                        Cow::Owned(w_val.clone()),
-                                    );
-                                }
+                                normalized_decls.push(MatchedDeclaration {
+                                    property: Cow::Borrowed(edge_name),
+                                    value: Cow::Owned(w_val.clone()),
+                                    specificity: decl.specificity,
+                                    source_order: decl.source_order,
+                                    origin: decl.origin,
+                                    important: decl.important,
+                                });
                             }
                         }
-                        if let Some(s_val) = s
-                            && !specified.contains_key("border-style")
-                        {
-                            expanded.insert(Cow::Borrowed("border-style"), Cow::Owned(s_val));
+                        if let Some(s_val) = s {
+                            normalized_decls.push(MatchedDeclaration {
+                                property: Cow::Borrowed("border-style"),
+                                value: Cow::Owned(s_val),
+                                specificity: decl.specificity,
+                                source_order: decl.source_order,
+                                origin: decl.origin,
+                                important: decl.important,
+                            });
                         }
-                        if let Some(c_val) = c
-                            && !specified.contains_key("border-color")
-                        {
-                            expanded.insert(Cow::Borrowed("border-color"), Cow::Owned(c_val));
-                        }
-                    } else if let Some(longhand_ids) = properties::expand_shorthand(prop.as_ref()) {
-                        let edges = values::parse_edges(
-                            value.as_ref(),
-                            parent_style.font_size,
-                            root_font_size,
-                        );
-                        let edge_values = [edges.top, edges.right, edges.bottom, edges.left];
-                        for (id, px_val) in longhand_ids.iter().zip(edge_values.iter()) {
-                            let longhand_name = id.name();
-                            // Only set if not already explicitly set by a longhand
-                            if !specified.contains_key(longhand_name) {
-                                expanded.insert(
-                                    Cow::Borrowed(longhand_name),
-                                    Cow::Owned(format!("{}px", px_val)),
-                                );
-                            }
+                        if let Some(c_val) = c {
+                            normalized_decls.push(MatchedDeclaration {
+                                property: Cow::Borrowed("border-color"),
+                                value: Cow::Owned(c_val),
+                                specificity: decl.specificity,
+                                source_order: decl.source_order,
+                                origin: decl.origin,
+                                important: decl.important,
+                            });
                         }
                     }
+                } else {
+                    normalized_decls.push(decl);
                 }
             }
-            // Merge expanded shorthands (longhands take priority)
-            for (prop, value) in expanded {
-                specified.entry(prop).or_insert(value);
+
+            // ── Step 3: Sort by cascade priority ──────────────────
+            // Sort order (ascending, last wins):
+            //   1. !important status (normal < important)
+            //   2. Origin (Author < Inline)
+            //   3. Specificity
+            //   4. Source order
+            normalized_decls.sort_by(|a, b| {
+                a.important
+                    .cmp(&b.important)
+                    .then(a.origin.cmp(&b.origin))
+                    .then(a.specificity.cmp(&b.specificity))
+                    .then(a.source_order.cmp(&b.source_order))
+            });
+
+            // ── Step 4: Pick winners per property ─────────────────
+            // Last declaration for each property wins (since sorted ascending)
+            let mut specified: HashMap<Cow<str>, Cow<str>> = HashMap::new();
+            for decl in normalized_decls {
+                specified.insert(decl.property, decl.value);
             }
 
             // ── Step 5: Build ComputedStyle with inheritance ──────
@@ -609,15 +663,20 @@ fn build_styled_node(
             }
 
             // Assign the resolved variables to the computed style
-            computed.variables = current_variables;
+            computed.variables = current_variables.clone();
 
-            // Resolve `currentColor` keyword: if border_color or background_color
-            // resolved to the CURRENT_COLOR sentinel, replace with the element's own color.
-            if computed.border_color == Color::CURRENT_COLOR {
-                computed.border_color = computed.color;
+            // Resolve `currentColor` keyword for border_color / background_color
+            if let Some(raw_bc) = specified.get("border-color") {
+                let bc = substitute_vars(raw_bc, &current_variables);
+                if values::try_parse_css_color(&bc) == Some(values::CssColor::CurrentColor) {
+                    computed.border_color = computed.color;
+                }
             }
-            if computed.background_color == Color::CURRENT_COLOR {
-                computed.background_color = computed.color;
+            if let Some(raw_bg) = specified.get("background-color") {
+                let bg = substitute_vars(raw_bg, &current_variables);
+                if values::try_parse_css_color(&bg) == Some(values::CssColor::CurrentColor) {
+                    computed.background_color = computed.color;
+                }
             }
 
             // User-Agent default stylesheet: apply tag-specific defaults for un-specified properties
@@ -767,7 +826,7 @@ fn apply_user_agent_defaults(
         && !specified.contains_key("margin-top")
         && tag_name == "body"
     {
-        computed.margin = values::Edges::uniform(8.0);
+        computed.margin = values::Margin::uniform(8.0);
     }
 
     if !specified.contains_key("padding")
@@ -1335,7 +1394,7 @@ mod tests {
     fn test_universal_selector() {
         let (styled, _, _) = styled_tree("<p>Text</p>", "* { margin: 5px; }");
         let p = &styled.children[0];
-        assert_eq!(p.styles.margin, Edges::uniform(5.0));
+        assert_eq!(p.styles.margin, values::Margin::uniform(5.0));
     }
 
     #[test]
@@ -1400,8 +1459,8 @@ mod tests {
         let (styled, _, _) = styled_tree("<div><p>Hello</p></div>", "div { margin: 20px; }");
         let div = &styled.children[0];
         let p = &div.children[0];
-        assert_eq!(div.styles.margin, Edges::uniform(20.0));
-        assert_eq!(p.styles.margin, Edges::ZERO);
+        assert_eq!(div.styles.margin, values::Margin::uniform(20.0));
+        assert_eq!(p.styles.margin, values::Margin::ZERO);
     }
 
     #[test]
@@ -1462,6 +1521,26 @@ mod tests {
         assert_eq!(p.styles.font_size, 14.0);
     }
 
+    #[test]
+    fn test_inline_important_beats_author_important() {
+        let (styled, _, _) = styled_tree(
+            r#"<p style="color: green !important">Text</p>"#,
+            "p { color: red !important; }",
+        );
+        let p = &styled.children[0];
+        assert_eq!(p.styles.color, Color::rgb(0, 128, 0));
+    }
+
+    #[test]
+    fn test_author_important_beats_inline_normal() {
+        let (styled, _, _) = styled_tree(
+            r#"<p style="color: blue">Text</p>"#,
+            "p { color: red !important; }",
+        );
+        let p = &styled.children[0];
+        assert_eq!(p.styles.color, Color::rgb(255, 0, 0));
+    }
+
     // ── Display Property ─────────────────────────────────────────
 
     #[test]
@@ -1515,10 +1594,47 @@ mod tests {
     fn test_margin_shorthand() {
         let (styled, _, _) = styled_tree("<div>Content</div>", "div { margin: 10px 20px; }");
         let div = &styled.children[0];
-        assert_eq!(div.styles.margin.top, 10.0);
-        assert_eq!(div.styles.margin.right, 20.0);
-        assert_eq!(div.styles.margin.bottom, 10.0);
-        assert_eq!(div.styles.margin.left, 20.0);
+        assert_eq!(div.styles.margin.top, Some(10.0));
+        assert_eq!(div.styles.margin.right, Some(20.0));
+        assert_eq!(div.styles.margin.bottom, Some(10.0));
+        assert_eq!(div.styles.margin.left, Some(20.0));
+    }
+
+    #[test]
+    fn test_shorthand_overrides_earlier_longhand_by_cascade() {
+        // Earlier rule sets margin-top: 5px, later rule sets margin: 20px
+        let (styled, _, _) = styled_tree(
+            "<div>Content</div>",
+            "div { margin-top: 5px; margin: 20px; }",
+        );
+        let div = &styled.children[0];
+        assert_eq!(div.styles.margin.top, Some(20.0));
+        assert_eq!(div.styles.margin.left, Some(20.0));
+    }
+
+    #[test]
+    fn test_longhand_overrides_earlier_shorthand_by_cascade() {
+        // Earlier rule sets margin: 20px, later rule sets margin-top: 5px
+        let (styled, _, _) = styled_tree(
+            "<div>Content</div>",
+            "div { margin: 20px; margin-top: 5px; }",
+        );
+        let div = &styled.children[0];
+        assert_eq!(div.styles.margin.top, Some(5.0));
+        assert_eq!(div.styles.margin.left, Some(20.0));
+    }
+
+    #[test]
+    fn test_border_shorthand_expands_to_longhands() {
+        let (styled, _, _) = styled_tree(
+            "<div>Content</div>",
+            "div { border: 2px dashed red; }",
+        );
+        let div = &styled.children[0];
+        assert_eq!(div.styles.border_width.top, 2.0);
+        assert_eq!(div.styles.border_width.left, 2.0);
+        assert_eq!(div.styles.border_style, values::BorderStyleValue::Dashed);
+        assert_eq!(div.styles.border_color, Color::rgb(255, 0, 0));
     }
 
     // ── Multiple Properties ──────────────────────────────────────
@@ -1532,7 +1648,7 @@ mod tests {
         let p = &styled.children[0];
         assert_eq!(p.styles.color, Color::rgb(0, 128, 0));
         assert_eq!(p.styles.font_size, 14.0);
-        assert_eq!(p.styles.margin, Edges::uniform(5.0));
+        assert_eq!(p.styles.margin, values::Margin::uniform(5.0));
     }
 
     // ── Multiple Classes ─────────────────────────────────────────
@@ -1688,6 +1804,14 @@ mod tests {
         // border_color should equal computed color
         assert_eq!(div.styles.border_color, div.styles.color);
         assert_eq!(div.styles.color, crate::values::Color::rgb(100, 150, 200));
+
+        // Explicit rgba(1, 1, 1, 0) is not replaced with currentColor
+        let (styled2, _, _) = styled_tree(
+            "<div>Text</div>",
+            "div { color: red; border-color: rgba(1, 1, 1, 0); }",
+        );
+        let div2 = &styled2.children[0];
+        assert_eq!(div2.styles.border_color, Color::new(1, 1, 1, 0));
     }
 
     #[test]
