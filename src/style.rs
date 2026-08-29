@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use crate::css_parser::{Selector, SimpleSelector, StyleRule, Stylesheet};
 use crate::dom::{Dom, NodeId, NodeKind};
 use crate::properties::{self, ALL_PROPERTIES, PropertyId};
-use crate::values::{self, ComputedStyle, Display};
+use crate::values::{self, Color, ComputedStyle, Display};
 
 // ─── Rule Index ──────────────────────────────────────────────────
 //
@@ -214,6 +214,8 @@ struct MatchedDeclaration<'a> {
     specificity: Specificity,
     source_order: usize,
     origin: Origin,
+    /// True if the declaration has `!important` annotation.
+    important: bool,
 }
 
 // ─── Styled Node ─────────────────────────────────────────────────
@@ -245,27 +247,63 @@ const ROOT_FONT_SIZE: f32 = 16.0;
 fn is_default_block_tag(tag: &str) -> bool {
     matches!(
         tag.to_ascii_lowercase().as_str(),
+        // Document structure
         "html"
             | "body"
             | "div"
             | "p"
+            // Headings
             | "h1"
             | "h2"
             | "h3"
             | "h4"
             | "h5"
             | "h6"
+            // Sectioning
             | "header"
             | "footer"
             | "section"
             | "article"
             | "nav"
             | "main"
+            | "aside"
+            // Lists
             | "ul"
             | "ol"
             | "li"
+            | "dl"
+            | "dt"
+            | "dd"
+            // Semantic HTML5
+            | "blockquote"
+            | "pre"
+            | "figure"
+            | "figcaption"
+            | "details"
+            | "summary"
+            | "address"
+            | "fieldset"
+            | "legend"
+            // Table-level (display: table etc. handled separately; these are at minimum block)
+            | "table"
+            | "thead"
+            | "tbody"
+            | "tfoot"
+            | "tr"
+            | "caption"
+            // Forms
             | "form"
+            // Misc block
             | "hr"
+    )
+}
+
+/// Check if an HTML tag defaults to display: inline-block in User-Agent stylesheet
+fn is_default_inline_block_tag(tag: &str) -> bool {
+    matches!(
+        tag.to_ascii_lowercase().as_str(),
+        "img" | "input" | "button" | "select" | "textarea" | "video" | "audio" | "canvas"
+            | "iframe" | "embed" | "object"
     )
 }
 
@@ -350,12 +388,16 @@ fn build_styled_node(
 
                 if let Some(specificity) = best_specificity {
                     for decl in &rule.declarations {
+                        // Strip !important flag from value and record it
+                        let (clean_value, important) =
+                            strip_important(decl.value.as_str());
                         declarations.push(MatchedDeclaration {
                             property: Cow::Borrowed(&decl.property),
-                            value: Cow::Borrowed(&decl.value),
+                            value: Cow::Owned(clean_value),
                             specificity,
                             source_order: rule.position,
                             origin: Origin::Author,
+                            important,
                         });
                     }
                 }
@@ -365,22 +407,28 @@ fn build_styled_node(
             if let Some(style_text) = node.get_attribute("style", source) {
                 let inline_decls = parse_inline_style(style_text);
                 for (prop, val) in inline_decls {
+                    // Inline styles cannot carry !important per CSS spec
                     declarations.push(MatchedDeclaration {
                         property: Cow::Owned(prop),
                         value: Cow::Owned(val),
                         specificity: (0, 0, 0), // doesn't matter — origin wins
                         source_order: usize::MAX,
                         origin: Origin::Inline,
+                        important: false,
                     });
                 }
             }
 
             // ── Step 2: Sort by cascade priority ──────────────────
-            // (origin ASC, specificity ASC, source_order ASC)
-            // → last entry per property wins
+            // Sort order (ascending, last wins):
+            //   1. !important status (normal < important)
+            //   2. Origin (Author < Inline)
+            //   3. Specificity
+            //   4. Source order
             declarations.sort_by(|a, b| {
-                a.origin
-                    .cmp(&b.origin)
+                a.important
+                    .cmp(&b.important)
+                    .then(a.origin.cmp(&b.origin))
                     .then(a.specificity.cmp(&b.specificity))
                     .then(a.source_order.cmp(&b.source_order))
             });
@@ -396,6 +444,23 @@ fn build_styled_node(
             let mut expanded: HashMap<Cow<'static, str>, Cow<str>> = HashMap::new();
             for (prop, value) in &specified {
                 if properties::is_shorthand(prop.as_ref()) {
+                    // Handle CSS-wide keywords on shorthands
+                    let val_lower = value.as_ref().trim().to_ascii_lowercase();
+                    if val_lower == "inherit" || val_lower == "initial" || val_lower == "unset" {
+                        // Expand shorthand CSS-wide keywords to each longhand
+                        if let Some(longhand_ids) = properties::expand_shorthand(prop.as_ref()) {
+                            for id in &longhand_ids {
+                                let longhand_name = id.name();
+                                if !specified.contains_key(longhand_name) {
+                                    expanded.insert(
+                                        Cow::Borrowed(longhand_name),
+                                        Cow::Owned(val_lower.clone()),
+                                    );
+                                }
+                            }
+                        }
+                        continue;
+                    }
                     if prop.as_ref() == "border" {
                         let (w, s, c) = values::parse_border_shorthand(value.as_ref());
                         if let Some(w_val) = w {
@@ -546,6 +611,15 @@ fn build_styled_node(
             // Assign the resolved variables to the computed style
             computed.variables = current_variables;
 
+            // Resolve `currentColor` keyword: if border_color or background_color
+            // resolved to the CURRENT_COLOR sentinel, replace with the element's own color.
+            if computed.border_color == Color::CURRENT_COLOR {
+                computed.border_color = computed.color;
+            }
+            if computed.background_color == Color::CURRENT_COLOR {
+                computed.background_color = computed.color;
+            }
+
             // User-Agent default stylesheet: apply tag-specific defaults for un-specified properties
             if let NodeKind::Element { .. } = &node.kind {
                 let tag_name = node.tag_name(source).to_ascii_lowercase();
@@ -601,10 +675,10 @@ fn apply_user_agent_defaults(
 ) {
     if !specified.contains_key("display") {
         match tag_name {
-            "head" | "title" | "meta" | "script" | "style" | "link" => {
+            "head" | "title" | "meta" | "script" | "style" | "link" | "noscript" => {
                 computed.display = Display::None;
             }
-            "img" => {
+            _ if is_default_inline_block_tag(tag_name) => {
                 computed.display = Display::InlineBlock;
             }
             _ if is_default_block_tag(tag_name) => {
@@ -614,12 +688,26 @@ fn apply_user_agent_defaults(
         }
     }
 
-    if tag_name == "img" {
-        if computed.width.is_none() {
-            computed.width = Some(160.0);
+    // Default sizing for replaced / form / media elements
+    if computed.width.is_none() && !specified.contains_key("width") {
+        match tag_name {
+            "img" => computed.width = Some(160.0),
+            "video" | "canvas" => computed.width = Some(300.0),
+            "iframe" => computed.width = Some(300.0),
+            "textarea" => computed.width = Some(200.0),
+            "select" | "input" | "button" => computed.width = Some(120.0),
+            _ => {}
         }
-        if computed.height.is_none() {
-            computed.height = Some(100.0);
+    }
+    if computed.height.is_none() && !specified.contains_key("height") {
+        match tag_name {
+            "img" => computed.height = Some(100.0),
+            "video" => computed.height = Some(150.0),
+            "canvas" => computed.height = Some(150.0),
+            "iframe" => computed.height = Some(150.0),
+            "textarea" => computed.height = Some(80.0),
+            "select" | "input" | "button" => computed.height = Some(24.0),
+            _ => {}
         }
     }
 
@@ -712,6 +800,7 @@ fn copy_property(child: &mut ComputedStyle, parent: &ComputedStyle, prop: Proper
         PropertyId::Position => child.position = parent.position,
         PropertyId::Width => child.width = parent.width,
         PropertyId::Height => child.height = parent.height,
+        PropertyId::BoxSizing => child.box_sizing = parent.box_sizing,
         PropertyId::MarginTop => child.margin.top = parent.margin.top,
         PropertyId::MarginRight => child.margin.right = parent.margin.right,
         PropertyId::MarginBottom => child.margin.bottom = parent.margin.bottom,
@@ -750,6 +839,24 @@ fn copy_property(child: &mut ComputedStyle, parent: &ComputedStyle, prop: Proper
             child.animation_iteration_count = parent.animation_iteration_count
         }
     }
+}
+
+/// Strip `!important` annotation from a CSS value string.
+/// Returns `(clean_value, was_important)`.
+/// e.g. `"red !important"` → `("red", true)`
+fn strip_important(value: &str) -> (String, bool) {
+    let trimmed = value.trim();
+    if let Some(without) = trimmed.strip_suffix("!important") {
+        return (without.trim().to_string(), true);
+    }
+    // Handle `! important` with a space
+    if let Some(without) = trimmed.strip_suffix("important") {
+        let without = without.trim();
+        if without.ends_with('!') {
+            return (without[..without.len() - 1].trim().to_string(), true);
+        }
+    }
+    (trimmed.to_string(), false)
 }
 
 /// NOTE: This implementation naively splits on ';' which will break if a
@@ -1538,5 +1645,90 @@ mod tests {
 
         let wide = resolve_styles_with_viewport(&dom, &stylesheet, source, 800.0);
         assert_eq!(wide.children[0].styles.color, Color::rgb(255, 0, 0));
+    }
+
+    #[test]
+    fn test_important_overrides_higher_specificity() {
+        // #id { color: blue } beats div { color: red !important }
+        // !important on a lower-specificity rule should beat the higher-specificity rule
+        let (styled, _, _) = styled_tree(
+            r#"<div id="box">Text</div>"#,
+            "div { color: red !important; } #box { color: blue; }",
+        );
+        let div = &styled.children[0];
+        // !important red should win over higher-specificity blue
+        assert_eq!(div.styles.color, crate::values::Color::rgb(255, 0, 0));
+    }
+
+    #[test]
+    fn test_shorthand_inherit_expands_to_longhands() {
+        // When a shorthand is set to `inherit`, all longhands should also be inherit
+        // Here parent has margin 20px; child `margin: inherit` should pick up 20px
+        let source = b"<div><p></p></div>";
+        let mut processor = crate::streaming_parser::StreamingHtmlProcessor::new();
+        let _ = processor.receive_network_chunk(source, true);
+        let dom = processor.finish();
+        let stylesheet =
+            crate::css_parser::Stylesheet::parse(b"div { margin-top: 20px; } p { margin: inherit; }");
+        let styled = resolve_styles(&dom, &stylesheet, source);
+        let div = &styled.children[0];
+        let p = &div.children[0];
+        // p inherits margin-top from div
+        assert_eq!(p.styles.margin.top, div.styles.margin.top);
+    }
+
+    #[test]
+    fn test_currentcolor_resolves_to_element_color() {
+        // border-color: currentColor should resolve to the element's color property
+        let (styled, _, _) = styled_tree(
+            "<div>Text</div>",
+            "div { color: rgb(100, 150, 200); border-color: currentColor; }",
+        );
+        let div = &styled.children[0];
+        // border_color should equal computed color
+        assert_eq!(div.styles.border_color, div.styles.color);
+        assert_eq!(div.styles.color, crate::values::Color::rgb(100, 150, 200));
+    }
+
+    #[test]
+    fn test_ua_stylesheet_semantic_elements_get_block_display() {
+        // HTML5 semantic elements should default to display: block
+        for tag in &["aside", "blockquote", "pre", "figure", "details", "summary"] {
+            let html = format!("<{0}>content</{0}>", tag);
+            let (styled, _, _) = styled_tree(&html, "");
+            let el = &styled.children[0];
+            assert_eq!(
+                el.styles.display,
+                crate::values::Display::Block,
+                "{tag} should have display: block by default"
+            );
+        }
+    }
+
+    #[test]
+    fn test_ua_stylesheet_replaced_elements_inline_block() {
+        // img and input should default to display: inline-block
+        for tag in &["img", "input", "button"] {
+            let html = format!("<{}>", tag);
+            let (styled, _, _) = styled_tree(&html, "");
+            let el = &styled.children[0];
+            assert_eq!(
+                el.styles.display,
+                crate::values::Display::InlineBlock,
+                "{tag} should have display: inline-block by default"
+            );
+        }
+    }
+
+    #[test]
+    fn test_strip_important_helper() {
+        // Test via indirect effect: !important on a low-specificity rule beats high-specificity
+        let (styled, _, _) = styled_tree(
+            "<p>text</p>",
+            "* { color: green !important; } p { color: red; }",
+        );
+        let p = &styled.children[0];
+        // !important green beats non-important red from more specific `p` selector
+        assert_eq!(p.styles.color, crate::values::Color::rgb(0, 128, 0));
     }
 }

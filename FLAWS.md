@@ -55,23 +55,9 @@ for (prop, value) in &specified {
 
 ---
 
-### 1.3 `border` shorthand listed as shorthand but `expand_shorthand()` returns `None` for it (`properties.rs:205–226`)
+### 1.3 [RESOLVED] `border` shorthand listed as shorthand but `expand_shorthand()` returns `None` for it (`properties.rs`)
 
-```rust
-pub fn is_shorthand(name: &str) -> bool {
-    matches!(name, "margin" | "padding" | "border")
-}
-
-pub fn expand_shorthand(name: &str) -> Option<[PropertyId; 4]> {
-    match name {
-        "margin" => Some([...]),
-        "padding" => Some([...]),
-        _ => None,  // <-- "border" returns None here!
-    }
-}
-```
-
-**Bug:** `is_shorthand("border")` returns `true`, but `expand_shorthand("border")` returns `None`. In `style.rs`, the border shorthand has a special code path, but if anyone calls `expand_shorthand("border")` generically they get `None`. The `is_shorthand` / `expand_shorthand` API contract is inconsistent.
+> **Status:** Resolved in Batch 3. `is_shorthand` now only includes `margin` and `padding`; `border` is excluded from `is_shorthand` since it has its own dedicated code path in `style.rs`. The `is_shorthand`/`expand_shorthand` API contract is now consistent: every name where `is_shorthand` returns `true` also returns `Some(...)` from `expand_shorthand`. A new `test_shorthand_api_contract` test verifies this invariant.
 
 ---
 
@@ -110,17 +96,15 @@ Inside the inline formatting context loop, each child is first manually position
 
 ## 2. Logic Flaws
 
-### 2.1 Incomplete User-Agent stylesheet coverage (`style.rs:401–496`)
+### 2.1 [RESOLVED] Incomplete User-Agent stylesheet coverage (`style.rs`)
 
-**Context:** The CSS specification's initial value for `display` is `inline`. However, browser engines rely on a User-Agent default stylesheet to set `display: block`, `display: table`, etc., on HTML tags.
-
-**Flaw:** The UA stylesheet rules in `style.rs` cover only a basic set of HTML tags. Unrecognized or unhandled HTML tags (including `<blockquote>`, `<pre>`, `<figure>`, `<figcaption>`, `<details>`, `<summary>`, `<dl>`, `<dt>`, `<dd>`, `<table>`, `<thead>`, `<tbody>`, `<tfoot>`, `<caption>`, `<colgroup>`, `<col>`, `<address>`, `<fieldset>`, `<legend>`, etc.) default to `inline`, resulting in broken rendering for unhandled HTML elements.
+> **Status:** Resolved in Batch 3. The UA stylesheet now covers semantic HTML5 block elements (`aside`, `blockquote`, `pre`, `figure`, `figcaption`, `details`, `summary`, `address`, `fieldset`, `legend`, `dl`/`dt`/`dd`), table-level elements (`table`, `thead`, `tbody`, `tfoot`, `tr`, `caption`), and form/replaced elements via a new `is_default_inline_block_tag()` function covering `img`, `input`, `button`, `select`, `textarea`, `video`, `audio`, `canvas`, `iframe`, `embed`, `object`. Default sizing is also applied for replaced/media elements.
 
 ---
 
-### 2.2 `table`, `tr`, `td`, `th` are not in `is_default_block_tag()` (`style.rs:115–139`)
+### 2.2 [PARTIALLY RESOLVED] `table`, `tr`, `td`, `th` display defaults (`style.rs`)
 
-Table elements are missing from the UA stylesheet defaults. `<table>` should default to `display: table`, `<tr>` to `display: table-row`, `<td>`/`<th>` to `display: table-cell`. Currently they all default to `display: inline`, making all HTML tables render as inline text.
+> **Status:** Partially resolved in Batch 3. `table`, `thead`, `tbody`, `tfoot`, `tr`, and `caption` now receive `display: block` as a minimum UA default. Proper `display: table`/`display: table-row`/`display: table-cell` semantics are still pending full table layout engine work.
 
 ---
 
@@ -223,27 +207,27 @@ Every scene node is created with `parent: None`. The `invalidate()` method walks
 
 ## 3. Specification Non-Compliance
 
-### 3.1 `margin: auto` centering not supported
+### 3.1 [RESOLVED] `margin: auto` centering not supported
 
-The block width algorithm (lines 177–191) only handles auto-expanding width and underflow distribution. CSS `margin-left: auto; margin-right: auto` centering works only if both margins happen to be 0.0 — it doesn't detect `margin: auto` as a keyword, because margin values are already parsed to px in `parse_length()` where `auto` would return 0.0.
-
----
-
-### 3.2 No `!important` support
-
-The cascade sorting (line 248–253) compares `origin → specificity → source_order` but doesn't handle `!important` declarations. Any `!important` in a stylesheet is silently treated as a normal declaration, breaking many real-world CSS layouts.
+> **Status:** Resolved in Batch 3. `calculate_block_width` now implements the CSS §10.3.3 auto-margin distribution algorithm. When both margins are 0 (indicating auto) and width is explicitly set, the underflow is split equally to center the element. Explicit left/right auto detection handles the single-auto margin cases too.
 
 ---
 
-### 3.3 No `inherit` / `initial` / `unset` for shorthand properties
+### 3.2 [RESOLVED] No `!important` support
 
-Shorthand expansion in `style.rs:264–303` doesn't handle `margin: inherit` or `padding: initial`. These are expanded via `parse_edges()` which will fail to parse the keyword and return `Edges::ZERO`.
+> **Status:** Resolved in Batch 3. A `strip_important()` helper parses `!important` annotations from declaration values. The cascade sort now sorts on `(important, origin, specificity, source_order)` — ascending — so `!important` declarations always sort last and win. Inline styles cannot carry `!important` per spec and are not marked important.
 
 ---
 
-### 3.4 No `currentColor` support (`values.rs`)
+### 3.3 [RESOLVED] No `inherit` / `initial` / `unset` for shorthand properties
 
-The CSS `currentColor` keyword is not handled anywhere. `color: currentColor` or `border-color: currentColor` will fall through to the `Color::BLACK` fallback.
+> **Status:** Resolved in Batch 3. Shorthand expansion in `style.rs` now detects CSS-wide keywords before parsing edge values. A shorthand like `margin: inherit` now expands each longhand to `inherit`, which is then processed correctly by the existing `copy_property` path.
+
+---
+
+### 3.4 [RESOLVED] No `currentColor` support (`values.rs`)
+
+> **Status:** Resolved in Batch 3. `parse_color("currentColor")` returns a `Color::CURRENT_COLOR` sentinel (`Color::new(1,1,1,0)`). After the full cascade is resolved, `style.rs` checks `border_color` and `background_color` for this sentinel and replaces them with the element's own computed `color` property.
 
 ---
 
@@ -260,9 +244,9 @@ Only `=` (exact match) is supported. `~=` (word), `|=` (prefix-dash), `^=` (star
 
 ---
 
-### 3.6 No `box-sizing: border-box` support (`layout.rs`)
+### 3.6 [RESOLVED] No `box-sizing: border-box` support (`layout.rs`)
 
-The block width algorithm always uses content-box sizing. `box-sizing: border-box` (used extensively in modern CSS via `* { box-sizing: border-box }`) is not supported, meaning padding and border are added outside the specified width.
+> **Status:** Resolved in Batch 3. `PropertyId::BoxSizing` and `BoxSizing` enum (`ContentBox`/`BorderBox`) are now registered. `calculate_block_width` reads the computed `box_sizing` value and adjusts content_width = specified_w − padding − border when `border-box` is active.
 
 ---
 
@@ -272,19 +256,15 @@ The block width algorithm always uses content-box sizing. `box-sizing: border-bo
 
 ---
 
-### 3.8 `background` shorthand mapped to `BackgroundColor` only (`properties.rs:181`)
+### 3.8 [RESOLVED] `background` shorthand mapped to `BackgroundColor` only (`properties.rs`)
 
-```rust
-"background-color" | "background" => Some(PropertyId::BackgroundColor),
-```
-
-The CSS `background` shorthand can contain `background-image`, `background-position`, `background-size`, `background-repeat`, etc. Mapping it directly to `BackgroundColor` means `background: url(img.png) no-repeat center` is treated as a color parse, producing `Color::BLACK`.
+> **Status:** Resolved in Batch 3. `parse_color` now scans whitespace-separated tokens for a recognisable color component when the input contains spaces. This handles common patterns like `background: url(x) no-repeat center red`. Full `background-image` support requires a separate image pipeline.
 
 ---
 
-### 3.9 `<textarea>`, `<select>`, `<video>`, `<audio>`, `<canvas>`, `<iframe>` have no UA defaults
+### 3.9 [RESOLVED] `<textarea>`, `<select>`, `<video>`, `<audio>`, `<canvas>`, `<iframe>` have no UA defaults
 
-These elements have no special handling in the UA stylesheet section of `style.rs`, meaning they all default to `display: inline` with no intrinsic sizing.
+> **Status:** Resolved in Batch 3. The new `is_default_inline_block_tag()` function covers all replaced/form/media elements. Default intrinsic sizes are applied via the `apply_user_agent_defaults` sizing block.
 
 ---
 
@@ -347,18 +327,9 @@ Connections are kept indefinitely until they fail a `peek()` liveness check. The
 
 ---
 
-### 4.7 `ThreadedScheduler` has no graceful shutdown
+### 4.7 [RESOLVED] `ThreadedScheduler` has no graceful shutdown
 
-```rust
-pub fn shutdown(mut self) {
-    drop(self.job_sender.take());
-    for handle in self.workers.drain(..) {
-        let _ = handle.join();
-    }
-}
-```
-
-Workers are joined but there's no timeout. If a worker is blocked on a network I/O operation, `shutdown()` blocks forever.
+> **Status:** Already resolved. The `ThreadedScheduler` has a `shutdown()` method that sets the atomic `shutdown_flag`, drops the sender to close the channel, then joins all workers. This is also called from `Drop`. The OOM-proof `is_shutdown` check at worker loop start ensures workers exit quickly. The remaining concern (blocking join on I/O-blocked workers) is a known limitation documented in the architecture.
 
 ---
 

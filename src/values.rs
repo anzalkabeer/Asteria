@@ -45,6 +45,10 @@ impl Color {
     pub const BLACK: Color = Color::rgb(0, 0, 0);
     /// Default background: transparent
     pub const TRANSPARENT: Color = Color::new(0, 0, 0, 0);
+    /// Sentinel value indicating the `currentColor` CSS keyword.
+    /// This is resolved to the element's own `color` property after full cascade.
+    pub const CURRENT_COLOR: Color = Color::new(1, 1, 1, 0);
+
 
     /// Return (r, g, b, a) tuple for GPU color conversion
     pub const fn to_rgba(self) -> (u8, u8, u8, u8) {
@@ -158,6 +162,15 @@ pub enum BorderStyleValue {
     Dotted,
 }
 
+/// CSS box-sizing property: determines how width/height are measured.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BoxSizing {
+    /// Width/height specify content box (default).
+    ContentBox,
+    /// Width/height include padding and border.
+    BorderBox,
+}
+
 // ─── Edges (margin/padding) ──────────────────────────────────────
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -210,8 +223,9 @@ pub struct ComputedStyle {
     // Box model
     pub display: Display,
     pub position: Position,
-    pub width: Option<f32>,  // None = auto
-    pub height: Option<f32>, // None = auto
+    pub width: Option<f32>,     // None = auto
+    pub height: Option<f32>,    // None = auto
+    pub box_sizing: BoxSizing,  // content-box | border-box
 
     // Margins (px)
     pub margin: Edges,
@@ -256,6 +270,7 @@ impl Default for ComputedStyle {
             position: Position::Static,
             width: None,
             height: None,
+            box_sizing: BoxSizing::ContentBox,
             margin: Edges::ZERO,
             padding: Edges::ZERO,
             border_width: Edges::ZERO,
@@ -295,6 +310,10 @@ impl ComputedStyle {
             PropertyId::Height => match self.height {
                 Some(v) => format!("{}px", v),
                 None => "auto".to_string(),
+            },
+            PropertyId::BoxSizing => match self.box_sizing {
+                BoxSizing::ContentBox => "content-box".to_string(),
+                BoxSizing::BorderBox => "border-box".to_string(),
             },
             PropertyId::MarginTop => format!("{}px", self.margin.top),
             PropertyId::MarginRight => format!("{}px", self.margin.right),
@@ -360,7 +379,7 @@ impl ComputedStyle {
             PropertyId::Height => {
                 self.height = parse_optional_length(value, self.font_size, root_font_size)
             }
-
+            PropertyId::BoxSizing => self.box_sizing = parse_box_sizing(value),
             PropertyId::MarginTop => {
                 self.margin.top = parse_length(value, self.font_size, root_font_size)
             }
@@ -483,10 +502,30 @@ pub fn parse_optional_length(value: &str, em_base: f32, rem_base: f32) -> Option
     }
 }
 
+/// Parse a CSS box-sizing keyword.
+pub fn parse_box_sizing(value: &str) -> BoxSizing {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "border-box" => BoxSizing::BorderBox,
+        _ => BoxSizing::ContentBox,
+    }
+}
+
 /// Parse a CSS color value.
-/// Supports: named colors, #hex (3 or 6 digit), rgb(r,g,b).
+/// Supports: named colors, #hex (3 or 6 digit), rgb(r,g,b), currentColor (returns BLACK as sentinel),
+/// and multi-token background shorthand values (extracts the color token).
 pub fn parse_color(value: &str) -> Color {
     let s = value.trim().to_ascii_lowercase();
+
+    // currentColor is resolved at computed-style time against the element's color property
+    // We return BLACK as a sentinel here; style.rs resolves it after all properties are computed.
+    if s == "currentcolor" {
+        return Color::CURRENT_COLOR;
+    }
+
+    // Handle transparent keyword
+    if s == "transparent" || s == "none" {
+        return Color::TRANSPARENT;
+    }
 
     // Named colors
     if let Some(c) = named_color(&s) {
@@ -532,8 +571,49 @@ pub fn parse_color(value: &str) -> Color {
         }
     }
 
-    // Fallback: black
-    Color::BLACK
+    // Background shorthand: scan whitespace-separated tokens for a color component.
+    // e.g. "url(img.png) no-repeat center red" -> Color::rgb(255,0,0)
+    // This prevents valid multi-component background shorthand from collapsing to black.
+    if s.contains(' ') {
+        for token in s.split_whitespace() {
+            // Skip url(), repeat, position, size keywords
+            if token.starts_with("url(")
+                || matches!(
+                    token,
+                    "no-repeat"
+                        | "repeat"
+                        | "repeat-x"
+                        | "repeat-y"
+                        | "center"
+                        | "top"
+                        | "bottom"
+                        | "left"
+                        | "right"
+                        | "cover"
+                        | "contain"
+                        | "fixed"
+                        | "scroll"
+                        | "local"
+                        | "auto"
+                        | "/"
+                )
+            {
+                continue;
+            }
+            // Try to parse this token as a color
+            let candidate = parse_color(token);
+            if candidate != Color::BLACK || token == "black" {
+                return candidate;
+            }
+            // Try hex
+            if token.starts_with('#') {
+                return candidate; // parse_color already tried this
+            }
+        }
+    }
+
+    // Fallback: transparent (better default for background than black for unknown values)
+    Color::TRANSPARENT
 }
 
 /// Parse a hex color string (without the # prefix).
@@ -988,5 +1068,45 @@ mod tests {
         assert_eq!(parse_optional_length("auto", 16.0, 16.0), None);
         assert_eq!(parse_optional_length("100px", 16.0, 16.0), Some(100.0));
         assert_eq!(parse_optional_length("AUTO", 16.0, 16.0), None);
+    }
+
+    #[test]
+    fn test_box_sizing_parsing() {
+        assert_eq!(parse_box_sizing("border-box"), BoxSizing::BorderBox);
+        assert_eq!(parse_box_sizing("content-box"), BoxSizing::ContentBox);
+        assert_eq!(parse_box_sizing("BORDER-BOX"), BoxSizing::BorderBox);
+        assert_eq!(parse_box_sizing("unknown"), BoxSizing::ContentBox);
+    }
+
+    #[test]
+    fn test_box_sizing_default_is_content_box() {
+        let s = ComputedStyle::default();
+        assert_eq!(s.box_sizing, BoxSizing::ContentBox);
+    }
+
+    #[test]
+    fn test_current_color_sentinel() {
+        // CURRENT_COLOR sentinel should be distinct from BLACK
+        assert_ne!(Color::CURRENT_COLOR, Color::BLACK);
+        // parse_color("currentColor") returns the sentinel
+        assert_eq!(parse_color("currentColor"), Color::CURRENT_COLOR);
+        assert_eq!(parse_color("currentcolor"), Color::CURRENT_COLOR);
+    }
+
+    #[test]
+    fn test_transparent_keyword() {
+        assert_eq!(parse_color("transparent"), Color::TRANSPARENT);
+        assert_eq!(parse_color("TRANSPARENT"), Color::TRANSPARENT);
+    }
+
+    #[test]
+    fn test_background_shorthand_color_extraction() {
+        // Should find the color in a multi-token background value
+        let c = parse_color("no-repeat center blue");
+        assert_eq!(c, Color::rgb(0, 0, 255));
+
+        // Should find hex color in shorthand
+        let c2 = parse_color("center #ff0000");
+        assert_eq!(c2, Color::rgb(255, 0, 0));
     }
 }

@@ -20,6 +20,8 @@ pub enum PropertyId {
     Position,
     Width,
     Height,
+    /// CSS box-sizing: content-box | border-box
+    BoxSizing,
 
     // Margins
     MarginTop,
@@ -70,6 +72,7 @@ pub const ALL_PROPERTIES: &[PropertyId] = &[
     PropertyId::Position,
     PropertyId::Width,
     PropertyId::Height,
+    PropertyId::BoxSizing,
     PropertyId::MarginTop,
     PropertyId::MarginRight,
     PropertyId::MarginBottom,
@@ -122,6 +125,7 @@ pub fn is_inherited(id: PropertyId) -> bool {
         PropertyId::Position => false,
         PropertyId::Width => false,
         PropertyId::Height => false,
+        PropertyId::BoxSizing => false,
         PropertyId::MarginTop => false,
         PropertyId::MarginRight => false,
         PropertyId::MarginBottom => false,
@@ -177,6 +181,7 @@ pub fn property_from_name(name: &str) -> Option<PropertyId> {
         "position" => Some(PropertyId::Position),
         "width" => Some(PropertyId::Width),
         "height" => Some(PropertyId::Height),
+        "box-sizing" => Some(PropertyId::BoxSizing),
 
         // Longhands
         "margin-top" => Some(PropertyId::MarginTop),
@@ -225,6 +230,7 @@ pub fn property_id_to_name(id: PropertyId) -> &'static str {
         PropertyId::Position => "position",
         PropertyId::Width => "width",
         PropertyId::Height => "height",
+        PropertyId::BoxSizing => "box-sizing",
         PropertyId::MarginTop => "margin-top",
         PropertyId::MarginRight => "margin-right",
         PropertyId::MarginBottom => "margin-bottom",
@@ -258,12 +264,16 @@ pub fn property_id_to_name(id: PropertyId) -> &'static str {
 }
 
 /// Returns true if the given property name is a shorthand that needs expansion.
+/// Note: `border` is handled by its own code path in `style.rs` (not via `expand_shorthand`)
+/// and is intentionally excluded here to preserve the is_shorthand/expand_shorthand contract:
+/// every name that returns true here must also return Some(...) from expand_shorthand.
 pub fn is_shorthand(name: &str) -> bool {
-    matches!(name, "margin" | "padding" | "border")
+    matches!(name, "margin" | "padding")
 }
 
 /// Expand a shorthand property into its constituent longhand PropertyIds.
 /// Returns the longhand IDs in CSS order: top, right, bottom, left.
+/// Only margin and padding are handled here — border has a dedicated special path in style.rs.
 pub fn expand_shorthand(name: &str) -> Option<[PropertyId; 4]> {
     match name {
         "margin" => Some([
@@ -332,11 +342,26 @@ mod tests {
     }
 
     #[test]
+    fn test_shorthand_api_contract() {
+        // is_shorthand and expand_shorthand must be consistent:
+        // every name where is_shorthand returns true must also return Some from expand_shorthand.
+        for name in &["margin", "padding"] {
+            assert!(is_shorthand(name), "{name} should be a shorthand");
+            assert!(
+                expand_shorthand(name).is_some(),
+                "{name} must have expand_shorthand implementation"
+            );
+        }
+        // border has its own code path; is_shorthand returns false for it
+        assert!(!is_shorthand("border"), "border is handled separately, not via is_shorthand");
+    }
+
+    #[test]
     fn test_all_properties_covered() {
         // Every property in ALL_PROPERTIES should have an is_inherited result
         for &prop in ALL_PROPERTIES {
             let _ = is_inherited(prop);
         }
-        assert_eq!(ALL_PROPERTIES.len(), 33);
+        assert_eq!(ALL_PROPERTIES.len(), 34);
     }
 }

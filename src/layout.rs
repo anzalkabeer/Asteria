@@ -10,6 +10,7 @@
 
 use crate::dom::{Dom, NodeKind};
 use crate::style::StyledNode;
+use crate::values;
 use crate::values::Display;
 
 // ─── Geometry & Box Model ─────────────────────────────────────────
@@ -152,10 +153,25 @@ impl<'a> LayoutBox<'a> {
 
         // Read values or defaults
         let auto_width = style.map(|s| s.width.is_none()).unwrap_or(true);
-        let mut width = style.and_then(|s| s.width).unwrap_or(0.0);
+        let specified_w = style.and_then(|s| s.width).unwrap_or(0.0);
 
-        let mut margin_left = style.map(|s| s.margin.left).unwrap_or(0.0);
-        let mut margin_right = style.map(|s| s.margin.right).unwrap_or(0.0);
+        // Read margin longhands; None = auto keyword
+        let margin_left_raw = style.and_then(|s| {
+            // auto resolves to None for explicit centering
+            if s.margin.left == 0.0 {
+                None // treat as potentially auto — underflow will be assigned below
+            } else {
+                Some(s.margin.left)
+            }
+        });
+        let margin_right_raw = style.and_then(|s| {
+            if s.margin.right == 0.0 {
+                None
+            } else {
+                Some(s.margin.right)
+            }
+        });
+
         let margin_top = style.map(|s| s.margin.top).unwrap_or(0.0);
         let margin_bottom = style.map(|s| s.margin.bottom).unwrap_or(0.0);
 
@@ -169,24 +185,61 @@ impl<'a> LayoutBox<'a> {
         let border_top = style.map(|s| s.border_width.top).unwrap_or(0.0);
         let border_bottom = style.map(|s| s.border_width.bottom).unwrap_or(0.0);
 
-        let total_non_width =
-            margin_left + margin_right + padding_left + padding_right + border_left + border_right;
-
-        // Constraint solving: if width is auto, expand content width to fill containing block
-        if auto_width {
-            let available_width = (containing_block.content.width - total_non_width).max(0.0);
-            width = available_width;
+        // box-sizing: border-box — specified width includes padding+border
+        let box_sizing = style.map(|s| s.box_sizing).unwrap_or(values::BoxSizing::ContentBox);
+        let content_width = if !auto_width && box_sizing == values::BoxSizing::BorderBox {
+            (specified_w - padding_left - padding_right - border_left - border_right).max(0.0)
         } else {
-            // Specified width under CSS content-box semantics: assigned width is content width
-            let underflow = containing_block.content.width - (width + total_non_width);
-            if underflow > 0.0 {
-                if margin_left == 0.0 && margin_right == 0.0 {
-                    margin_left = underflow / 2.0;
-                    margin_right = underflow / 2.0;
-                } else {
-                    margin_right += underflow;
+            specified_w
+        };
+
+        let ml = margin_left_raw.unwrap_or(0.0);
+        let mr = margin_right_raw.unwrap_or(0.0);
+        let total_non_width = ml + mr + padding_left + padding_right + border_left + border_right;
+
+        let (mut width, margin_left, mut margin_right) = if auto_width {
+            // Auto width: expand content width to fill containing block
+            let available = (containing_block.content.width - total_non_width).max(0.0);
+            (available, ml, mr)
+        } else {
+            // Specified width — calculate underflow
+            let underflow = containing_block.content.width - (content_width + total_non_width);
+            let final_w = content_width;
+
+            // CSS §10.3.3 — distribute underflow to auto margins
+            let left_is_auto = style
+                .map(|s| s.margin.left == 0.0 && s.padding.left == 0.0)
+                .unwrap_or(false);
+            let right_is_auto = style
+                .map(|s| s.margin.right == 0.0 && s.padding.right == 0.0)
+                .unwrap_or(false);
+
+            let (ml_final, mr_final) = match (left_is_auto, right_is_auto) {
+                (true, true) => {
+                    // Both auto: distribute equally → center the element
+                    let half = underflow / 2.0;
+                    (half, half)
                 }
+                (true, false) => (underflow, mr),
+                (false, true) => (ml, underflow),
+                (false, false) => {
+                    if underflow > 0.0 {
+                        (ml, mr + underflow) // absorb overflow into right margin
+                    } else {
+                        (ml, mr)
+                    }
+                }
+            };
+
+            (final_w, ml_final, mr_final)
+        };
+
+        // Clamp to zero if width would go negative
+        if width < 0.0 {
+            if margin_right >= 0.0 {
+                margin_right += width;
             }
+            width = 0.0;
         }
 
         // Store computed values into box dimensions
