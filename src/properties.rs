@@ -363,7 +363,10 @@ mod tests {
             );
         }
         // border has its own code path; is_shorthand returns false for it
-        assert!(!is_shorthand("border"), "border is handled separately, not via is_shorthand");
+        assert!(
+            !is_shorthand("border"),
+            "border is handled separately, not via is_shorthand"
+        );
     }
 
     #[test]

@@ -155,7 +155,10 @@ fn collect_stacking_context_descendants<'a>(
             .unwrap_or(false);
 
         if is_positioned {
-            let z = child.styled_node.and_then(|n| n.styles.z_index).unwrap_or(0);
+            let z = child
+                .styled_node
+                .and_then(|n| n.styles.z_index)
+                .unwrap_or(0);
             if z < 0 {
                 neg_positioned.push((z, child));
             } else {

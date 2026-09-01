@@ -302,8 +302,17 @@ fn is_default_block_tag(tag: &str) -> bool {
 fn is_default_inline_block_tag(tag: &str) -> bool {
     matches!(
         tag.to_ascii_lowercase().as_str(),
-        "img" | "input" | "button" | "select" | "textarea" | "video" | "audio" | "canvas"
-            | "iframe" | "embed" | "object"
+        "img"
+            | "input"
+            | "button"
+            | "select"
+            | "textarea"
+            | "video"
+            | "audio"
+            | "canvas"
+            | "iframe"
+            | "embed"
+            | "object"
     )
 }
 
@@ -389,8 +398,7 @@ fn build_styled_node(
                 if let Some(specificity) = best_specificity {
                     for decl in &rule.declarations {
                         // Strip !important flag from value and record it
-                        let (clean_value, important) =
-                            strip_important(decl.value.as_str());
+                        let (clean_value, important) = strip_important(decl.value.as_str());
                         declarations.push(MatchedDeclaration {
                             property: Cow::Borrowed(&decl.property),
                             value: Cow::Owned(clean_value),
@@ -440,7 +448,11 @@ fn build_styled_node(
                     }
                     normalized_decls.push(decl);
                 } else if prop == "margin" || prop == "padding" {
-                    let prefix = if prop == "margin" { "margin" } else { "padding" };
+                    let prefix = if prop == "margin" {
+                        "margin"
+                    } else {
+                        "padding"
+                    };
                     if is_css_wide {
                         for edge in &["top", "right", "bottom", "left"] {
                             normalized_decls.push(MatchedDeclaration {
@@ -831,7 +843,10 @@ fn apply_user_agent_defaults(
         }
     }
 
-    if !specified.contains_key("border") && !specified.contains_key("border-style") && tag_name == "hr" {
+    if !specified.contains_key("border")
+        && !specified.contains_key("border-style")
+        && tag_name == "hr"
+    {
         computed.border_style = values::BorderStyleValue::Solid;
     }
 
@@ -938,8 +953,8 @@ fn strip_important(value: &str) -> (String, bool) {
     // Handle `! important` with a space
     if let Some(without) = trimmed.strip_suffix("important") {
         let without = without.trim();
-        if without.ends_with('!') {
-            return (without[..without.len() - 1].trim().to_string(), true);
+        if let Some(stripped) = without.strip_suffix('!') {
+            return (stripped.trim().to_string(), true);
         }
     }
     (trimmed.to_string(), false)
@@ -1641,10 +1656,7 @@ mod tests {
 
     #[test]
     fn test_border_shorthand_expands_to_longhands() {
-        let (styled, _, _) = styled_tree(
-            "<div>Content</div>",
-            "div { border: 2px dashed red; }",
-        );
+        let (styled, _, _) = styled_tree("<div>Content</div>", "div { border: 2px dashed red; }");
         let div = &styled.children[0];
         assert_eq!(div.styles.border_width.top, 2.0);
         assert_eq!(div.styles.border_width.left, 2.0);
@@ -1799,8 +1811,9 @@ mod tests {
         let mut processor = crate::streaming_parser::StreamingHtmlProcessor::new();
         let _ = processor.receive_network_chunk(source, true);
         let dom = processor.finish();
-        let stylesheet =
-            crate::css_parser::Stylesheet::parse(b"div { margin-top: 20px; } p { margin: inherit; }");
+        let stylesheet = crate::css_parser::Stylesheet::parse(
+            b"div { margin-top: 20px; } p { margin: inherit; }",
+        );
         let styled = resolve_styles(&dom, &stylesheet, source);
         let div = &styled.children[0];
         let p = &div.children[0];

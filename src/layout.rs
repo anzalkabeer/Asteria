@@ -160,8 +160,8 @@ impl<'a> LayoutBox<'a> {
             .and_then(|s| s.width.resolve_against(containing_block.content.width))
             .unwrap_or(0.0);
 
-        let left_is_auto = style.map_or(false, |s| s.margin.left.is_none());
-        let right_is_auto = style.map_or(false, |s| s.margin.right.is_none());
+        let left_is_auto = style.is_some_and(|s| s.margin.left.is_none());
+        let right_is_auto = style.is_some_and(|s| s.margin.right.is_none());
 
         let ml = style.and_then(|s| s.margin.left).unwrap_or(0.0);
         let mr = style.and_then(|s| s.margin.right).unwrap_or(0.0);
@@ -179,7 +179,9 @@ impl<'a> LayoutBox<'a> {
         let border_bottom = style.map(|s| s.border_width.bottom).unwrap_or(0.0);
 
         // box-sizing: border-box — specified width includes padding+border
-        let box_sizing = style.map(|s| s.box_sizing).unwrap_or(values::BoxSizing::ContentBox);
+        let box_sizing = style
+            .map(|s| s.box_sizing)
+            .unwrap_or(values::BoxSizing::ContentBox);
         let content_width = if !auto_width && box_sizing == values::BoxSizing::BorderBox {
             (specified_w - padding_left - padding_right - border_left - border_right).max(0.0)
         } else {
@@ -302,10 +304,20 @@ impl<'a> LayoutBox<'a> {
                 let font_size = style.map(|s| s.font_size).unwrap_or(16.0);
                 let content_h = style.map(|s| s.line_height).unwrap_or(font_size * 1.2);
 
-                let outer_w =
-                    content_w + margin_left + margin_right + border_left + border_right + padding_left + padding_right;
-                let outer_h =
-                    content_h + margin_top + margin_bottom + border_top + border_bottom + padding_top + padding_bottom;
+                let outer_w = content_w
+                    + margin_left
+                    + margin_right
+                    + border_left
+                    + border_right
+                    + padding_left
+                    + padding_right;
+                let outer_h = content_h
+                    + margin_top
+                    + margin_bottom
+                    + border_top
+                    + border_bottom
+                    + padding_top
+                    + padding_bottom;
 
                 // Horizontal Line Wrap Check
                 if container_max_w > 0.0
@@ -381,10 +393,9 @@ impl<'a> LayoutBox<'a> {
                 } else {
                     // Vertical margin collapsing: CSS 2.1 §8.3.1 (positive/negative/mixed)
                     let collapsed_margin = collapse_margins(prev_margin_bottom, child_margin_top);
-                    container.content.y = self.dimensions.content.y
-                        + prev_border_box_bottom
-                        + collapsed_margin
-                        - child_margin_top;
+                    container.content.y =
+                        self.dimensions.content.y + prev_border_box_bottom + collapsed_margin
+                            - child_margin_top;
                     child.layout(container, dom, source);
 
                     prev_border_box_bottom +=
@@ -403,10 +414,11 @@ impl<'a> LayoutBox<'a> {
 
     /// Override content height if explicitly specified on the element's style
     fn calculate_block_height(&mut self, containing_block: Dimensions) {
-        if let Some(h) = self
-            .styled_node
-            .and_then(|n| n.styles.height.resolve_against(containing_block.content.height))
-        {
+        if let Some(h) = self.styled_node.and_then(|n| {
+            n.styles
+                .height
+                .resolve_against(containing_block.content.height)
+        }) {
             self.dimensions.content.height = h;
         }
     }
@@ -443,10 +455,11 @@ impl<'a> LayoutBox<'a> {
             });
             let extra = margin_w + padding_w + border_w;
 
-            if let Some(w) = child
-                .styled_node
-                .and_then(|n| n.styles.width.resolve_against(self.dimensions.content.width))
-            {
+            if let Some(w) = child.styled_node.and_then(|n| {
+                n.styles
+                    .width
+                    .resolve_against(self.dimensions.content.width)
+            }) {
                 fixed_or_intrinsic_width += w + extra;
             } else {
                 let intrinsic = compute_intrinsic_inline_width(child.styled_node, dom, source);
@@ -487,7 +500,11 @@ impl<'a> LayoutBox<'a> {
             // divide remaining container space equally among auto-width children
             let child_w = child
                 .styled_node
-                .and_then(|n| n.styles.width.resolve_against(self.dimensions.content.width))
+                .and_then(|n| {
+                    n.styles
+                        .width
+                        .resolve_against(self.dimensions.content.width)
+                })
                 .unwrap_or_else(|| {
                     // Compute intrinsic width from text/child content
                     let intrinsic = compute_intrinsic_inline_width(child.styled_node, dom, source);
@@ -707,7 +724,9 @@ impl<'a> LayoutBox<'a> {
         self.layout_block_children(dom, source);
 
         // Height: explicit or content-driven
-        if let Some(h) = style.and_then(|s| s.height.resolve_against(containing_block.content.height)) {
+        if let Some(h) =
+            style.and_then(|s| s.height.resolve_against(containing_block.content.height))
+        {
             self.dimensions.content.height = h;
         }
     }

@@ -185,7 +185,7 @@ pub enum BoxSizing {
 }
 
 // ─── Edges (padding/border/gap) ──────────────────────────────────
- 
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Edges {
     pub top: f32,
@@ -293,10 +293,10 @@ pub struct ComputedStyle {
     // Box model
     pub display: Display,
     pub position: Position,
-    pub z_index: Option<i32>,   // None = auto
+    pub z_index: Option<i32>, // None = auto
     pub width: LengthOrPercentage,
     pub height: LengthOrPercentage,
-    pub box_sizing: BoxSizing,  // content-box | border-box
+    pub box_sizing: BoxSizing, // content-box | border-box
 
     // Margins (px or auto)
     pub margin: Margin,
@@ -540,9 +540,7 @@ impl ComputedStyle {
             PropertyId::GridTemplateRows => self.grid_template_rows = parse_grid_tracks(value),
             PropertyId::GridColumn => self.grid_column = parse_grid_placement(value),
             PropertyId::GridRow => self.grid_row = parse_grid_placement(value),
-            PropertyId::GridGap => {
-                self.grid_gap = parse_gap(value, self.font_size, root_font_size)
-            }
+            PropertyId::GridGap => self.grid_gap = parse_gap(value, self.font_size, root_font_size),
             PropertyId::AnimationName => self.animation_name = value.trim().to_string(),
             PropertyId::AnimationDuration => self.animation_duration = parse_time(value),
             PropertyId::AnimationTimingFunction => {
@@ -630,10 +628,11 @@ pub fn parse_length_or_percentage(value: &str, em_base: f32, rem_base: f32) -> L
     if s.eq_ignore_ascii_case("auto") {
         return LengthOrPercentage::Auto;
     }
-    if let Some(num) = s.strip_suffix('%') {
-        if let Ok(p) = num.trim().parse::<f32>() {
-            return LengthOrPercentage::Percentage(p);
-        }
+    if let Some(p) = s
+        .strip_suffix('%')
+        .and_then(|num| num.trim().parse::<f32>().ok())
+    {
+        return LengthOrPercentage::Percentage(p);
     }
     LengthOrPercentage::Px(parse_length(s, em_base, rem_base))
 }
@@ -1317,14 +1316,8 @@ mod tests {
 
     #[test]
     fn test_css_color_and_currentcolor() {
-        assert_eq!(
-            parse_css_color("currentColor"),
-            CssColor::CurrentColor
-        );
-        assert_eq!(
-            parse_css_color("currentcolor"),
-            CssColor::CurrentColor
-        );
+        assert_eq!(parse_css_color("currentColor"), CssColor::CurrentColor);
+        assert_eq!(parse_css_color("currentcolor"), CssColor::CurrentColor);
         let resolved = parse_css_color("currentColor").resolve(Color::rgb(10, 20, 30));
         assert_eq!(resolved, Color::rgb(10, 20, 30));
 

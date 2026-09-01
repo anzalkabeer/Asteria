@@ -232,7 +232,10 @@ fn test_style_inline_attribute_override() {
 
     // Inline style must win over #hero (color: green = rgb(0, 128, 0))
     assert_eq!(div_styled.styles.color, Color::rgb(0, 128, 0));
-    assert_eq!(div_styled.styles.width, asteria::values::LengthOrPercentage::Px(300.0));
+    assert_eq!(
+        div_styled.styles.width,
+        asteria::values::LengthOrPercentage::Px(300.0)
+    );
 }
 
 #[test]
@@ -804,7 +807,7 @@ fn test_margin_collapsing_negative_and_mixed() {
 #[test]
 fn test_grid_gap_four_value_and_parsing() {
     use asteria::properties::PropertyId;
-    use asteria::values::{parse_gap, ComputedStyle, Edges};
+    use asteria::values::{ComputedStyle, Edges, parse_gap};
 
     // 1-value parse
     let g1 = parse_gap("12px", 16.0, 16.0);
@@ -827,12 +830,14 @@ fn test_grid_gap_four_value_and_parsing() {
     assert_eq!(g_inv, Edges::ZERO);
 
     // 4-value custom edge representation serialization
-    let mut style = ComputedStyle::default();
-    style.grid_gap = Edges {
-        top: 1.0,
-        right: 2.0,
-        bottom: 3.0,
-        left: 4.0,
+    let style = ComputedStyle {
+        grid_gap: Edges {
+            top: 1.0,
+            right: 2.0,
+            bottom: 3.0,
+            left: 4.0,
+        },
+        ..Default::default()
     };
     assert_eq!(
         style.get_property_display(PropertyId::GridGap),
@@ -846,7 +851,8 @@ fn test_margin_auto_vs_explicit_zero_centering() {
     let mut bytes_store = Vec::new();
     let mut styled_store = None;
 
-    let html = r#"<html><body><div id="centered"></div><div id="left_aligned"></div></body></html>"#;
+    let html =
+        r#"<html><body><div id="centered"></div><div id="left_aligned"></div></body></html>"#;
     let css = r#"
         body { margin: 0; padding: 0; }
         #centered { width: 400px; height: 50px; margin-left: auto; margin-right: auto; padding: 0; border-width: 0; }
@@ -990,8 +996,14 @@ fn test_hr_user_agent_stylesheet_defaults() {
     let hr_node = &body_node.children[0];
 
     assert_eq!(hr_node.styles.display, asteria::values::Display::Block);
-    assert_eq!(hr_node.styles.border_style, asteria::values::BorderStyleValue::Solid);
-    assert_eq!(hr_node.styles.height, asteria::values::LengthOrPercentage::Px(0.0));
+    assert_eq!(
+        hr_node.styles.border_style,
+        asteria::values::BorderStyleValue::Solid
+    );
+    assert_eq!(
+        hr_node.styles.height,
+        asteria::values::LengthOrPercentage::Px(0.0)
+    );
     assert_eq!(hr_node.styles.margin.top, Some(8.0));
     assert_eq!(hr_node.styles.margin.bottom, Some(8.0));
 }
@@ -1026,7 +1038,9 @@ fn test_shorthand_em_font_size_dependency_ordering() {
 
 #[test]
 fn test_length_or_percentage_and_z_index_parsing() {
-    use asteria::values::{parse_length_or_percentage, parse_z_index, try_parse_z_index, LengthOrPercentage, ZIndex};
+    use asteria::values::{
+        LengthOrPercentage, ZIndex, parse_length_or_percentage, parse_z_index, try_parse_z_index,
+    };
 
     assert_eq!(parse_z_index("auto"), None);
     assert_eq!(parse_z_index("10"), Some(10));
@@ -1038,10 +1052,22 @@ fn test_length_or_percentage_and_z_index_parsing() {
     assert_eq!(try_parse_z_index("-9"), Some(ZIndex::Integer(-9)));
     assert_eq!(try_parse_z_index("invalid"), None);
 
-    assert_eq!(parse_length_or_percentage("auto", 16.0, 16.0), LengthOrPercentage::Auto);
-    assert_eq!(parse_length_or_percentage("50%", 16.0, 16.0), LengthOrPercentage::Percentage(50.0));
-    assert_eq!(parse_length_or_percentage("25px", 16.0, 16.0), LengthOrPercentage::Px(25.0));
-    assert_eq!(parse_length_or_percentage("2em", 20.0, 16.0), LengthOrPercentage::Px(40.0));
+    assert_eq!(
+        parse_length_or_percentage("auto", 16.0, 16.0),
+        LengthOrPercentage::Auto
+    );
+    assert_eq!(
+        parse_length_or_percentage("50%", 16.0, 16.0),
+        LengthOrPercentage::Percentage(50.0)
+    );
+    assert_eq!(
+        parse_length_or_percentage("25px", 16.0, 16.0),
+        LengthOrPercentage::Px(25.0)
+    );
+    assert_eq!(
+        parse_length_or_percentage("2em", 20.0, 16.0),
+        LengthOrPercentage::Px(40.0)
+    );
 }
 
 #[test]
@@ -1145,8 +1171,14 @@ fn test_nested_positioned_descendants_deferred_in_stacking_context() {
         }
     }
 
-    assert!(red_rect_idx.is_some(), "Red rect (nested-pos) should be in display list");
-    assert!(green_rect_idx.is_some(), "Green rect (later-in-flow) should be in display list");
+    assert!(
+        red_rect_idx.is_some(),
+        "Red rect (nested-pos) should be in display list"
+    );
+    assert!(
+        green_rect_idx.is_some(),
+        "Green rect (later-in-flow) should be in display list"
+    );
     // Positioned element with z-index: 10 should be painted AFTER in-flow green element
     assert!(
         red_rect_idx.unwrap() > green_rect_idx.unwrap(),
@@ -1164,4 +1196,3 @@ fn test_tls_parse_server_name_control_char_rejection() {
     assert!(TlsConnector::parse_server_name("\texample.com").is_err());
     assert!(TlsConnector::parse_server_name("ex\0ample.com").is_err());
 }
-

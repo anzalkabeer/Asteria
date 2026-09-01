@@ -81,12 +81,12 @@ impl TlsConnector {
             .unwrap_or(domain)
             .trim_end_matches('.');
 
-        if clean.is_empty()
-            || clean.starts_with('.')
-            || clean.contains("..")
-            || clean.contains(' ')
+        if clean.is_empty() || clean.starts_with('.') || clean.contains("..") || clean.contains(' ')
         {
-            return Err(NetworkError::TlsError(format!("Invalid TLS server name '{}'", clean)));
+            return Err(NetworkError::TlsError(format!(
+                "Invalid TLS server name '{}'",
+                clean
+            )));
         }
 
         ServerName::try_from(clean.to_string()).map_err(|e| {
