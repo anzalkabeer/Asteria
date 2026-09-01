@@ -61,6 +61,14 @@ impl TlsConnector {
     /// Parses and sanitizes a domain string into a valid Rustls `ServerName`.
     /// Strips any accidental schemes, ports, or trailing dots.
     pub fn parse_server_name(domain: &str) -> Result<ServerName<'static>, NetworkError> {
+        // Validate the raw domain for control characters or null bytes before trim() strips whitespace
+        if domain.chars().any(|c| c.is_control() || c == '\0') {
+            return Err(NetworkError::TlsError(format!(
+                "Invalid TLS server name: contains control characters in {:?}",
+                domain
+            )));
+        }
+
         let clean = domain
             .trim()
             .trim_start_matches("https://")
@@ -76,7 +84,7 @@ impl TlsConnector {
         if clean.is_empty()
             || clean.starts_with('.')
             || clean.contains("..")
-            || clean.chars().any(|c| c.is_control() || c == '\0')
+            || clean.contains(' ')
         {
             return Err(NetworkError::TlsError(format!("Invalid TLS server name '{}'", clean)));
         }
@@ -125,5 +133,8 @@ mod tests {
         assert!(TlsConnector::parse_server_name("invalid..domain").is_err());
         assert!(TlsConnector::parse_server_name("domain with spaces.com").is_err());
         assert!(TlsConnector::parse_server_name("example\0.com").is_err());
+        assert!(TlsConnector::parse_server_name("example.com\n").is_err());
+        assert!(TlsConnector::parse_server_name("\texample.com").is_err());
+        assert!(TlsConnector::parse_server_name("example.com\r\n").is_err());
     }
 }

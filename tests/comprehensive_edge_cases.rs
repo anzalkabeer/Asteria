@@ -232,7 +232,7 @@ fn test_style_inline_attribute_override() {
 
     // Inline style must win over #hero (color: green = rgb(0, 128, 0))
     assert_eq!(div_styled.styles.color, Color::rgb(0, 128, 0));
-    assert_eq!(div_styled.styles.width, Some(300.0));
+    assert_eq!(div_styled.styles.width, asteria::values::LengthOrPercentage::Px(300.0));
 }
 
 #[test]
@@ -991,7 +991,7 @@ fn test_hr_user_agent_stylesheet_defaults() {
 
     assert_eq!(hr_node.styles.display, asteria::values::Display::Block);
     assert_eq!(hr_node.styles.border_style, asteria::values::BorderStyleValue::Solid);
-    assert_eq!(hr_node.styles.height, Some(0.0));
+    assert_eq!(hr_node.styles.height, asteria::values::LengthOrPercentage::Px(0.0));
     assert_eq!(hr_node.styles.margin.top, Some(8.0));
     assert_eq!(hr_node.styles.margin.bottom, Some(8.0));
 }
@@ -1026,16 +1026,142 @@ fn test_shorthand_em_font_size_dependency_ordering() {
 
 #[test]
 fn test_length_or_percentage_and_z_index_parsing() {
-    use asteria::values::{parse_length_or_percentage, parse_z_index, LengthOrPercentage};
+    use asteria::values::{parse_length_or_percentage, parse_z_index, try_parse_z_index, LengthOrPercentage, ZIndex};
 
     assert_eq!(parse_z_index("auto"), None);
     assert_eq!(parse_z_index("10"), Some(10));
     assert_eq!(parse_z_index("-5"), Some(-5));
     assert_eq!(parse_z_index("invalid"), None);
 
+    assert_eq!(try_parse_z_index("auto"), Some(ZIndex::Auto));
+    assert_eq!(try_parse_z_index("42"), Some(ZIndex::Integer(42)));
+    assert_eq!(try_parse_z_index("-9"), Some(ZIndex::Integer(-9)));
+    assert_eq!(try_parse_z_index("invalid"), None);
+
     assert_eq!(parse_length_or_percentage("auto", 16.0, 16.0), LengthOrPercentage::Auto);
     assert_eq!(parse_length_or_percentage("50%", 16.0, 16.0), LengthOrPercentage::Percentage(50.0));
     assert_eq!(parse_length_or_percentage("25px", 16.0, 16.0), LengthOrPercentage::Px(25.0));
     assert_eq!(parse_length_or_percentage("2em", 20.0, 16.0), LengthOrPercentage::Px(40.0));
+}
+
+#[test]
+fn test_percentage_width_and_height_layout_resolution() {
+    let html = "<html><body><div id=\"parent\"><div id=\"child\">Inner</div></div></body></html>";
+    let css = "#parent { width: 800px; height: 400px; display: block; } #child { width: 50%; height: 25%; display: block; }";
+
+    let bytes = html.as_bytes();
+    let mut processor = asteria::streaming_parser::StreamingHtmlProcessor::new();
+    let _ = processor.receive_network_chunk(bytes, true);
+    let dom = processor.finish();
+
+    let stylesheet = Stylesheet::parse(css.as_bytes());
+    let styled = resolve_styles(&dom, &stylesheet, bytes);
+    let layout_root = layout_document(&styled, &dom, bytes, 800.0, 600.0).unwrap();
+
+    let html_box = &layout_root.children[0];
+    let body_box = &html_box.children[0];
+    let parent_box = &body_box.children[0];
+    let child_box = &parent_box.children[0];
+
+    assert_eq!(parent_box.dimensions.content.width, 800.0);
+    assert_eq!(parent_box.dimensions.content.height, 400.0);
+    assert_eq!(child_box.dimensions.content.width, 400.0); // 50% of 800px
+    assert_eq!(child_box.dimensions.content.height, 100.0); // 25% of 400px
+}
+
+#[test]
+fn test_hr_partial_margin_override() {
+    let html = "<html><body><hr id=\"divider\" style=\"margin-top: 24px;\"></body></html>";
+    let bytes = html.as_bytes();
+    let mut processor = asteria::streaming_parser::StreamingHtmlProcessor::new();
+    let _ = processor.receive_network_chunk(bytes, true);
+    let dom = processor.finish();
+
+    let stylesheet = Stylesheet::parse(b"");
+    let styled = resolve_styles(&dom, &stylesheet, bytes);
+
+    let html_node = &styled.children[0];
+    let body_node = &html_node.children[0];
+    let hr_node = &body_node.children[0];
+
+    // Specified margin-top is preserved
+    assert_eq!(hr_node.styles.margin.top, Some(24.0));
+    // Default margin-bottom (8px) is still applied independently
+    assert_eq!(hr_node.styles.margin.bottom, Some(8.0));
+}
+
+#[test]
+fn test_invalid_z_index_cascade_discard() {
+    let html = "<html><body><div id=\"target\" class=\"item\">Content</div></body></html>";
+    // .item sets valid z-index: 10
+    // Later rule sets invalid z-index: not-a-number, which should be discarded and not override 10
+    let css = ".item { z-index: 10; } #target { z-index: not-a-number; }";
+
+    let bytes = html.as_bytes();
+    let mut processor = asteria::streaming_parser::StreamingHtmlProcessor::new();
+    let _ = processor.receive_network_chunk(bytes, true);
+    let dom = processor.finish();
+
+    let stylesheet = Stylesheet::parse(css.as_bytes());
+    let styled = resolve_styles(&dom, &stylesheet, bytes);
+
+    let html_node = &styled.children[0];
+    let body_node = &html_node.children[0];
+    let target_node = &body_node.children[0];
+
+    assert_eq!(target_node.styles.z_index, Some(10));
+}
+
+#[test]
+fn test_nested_positioned_descendants_deferred_in_stacking_context() {
+    let html = r#"<html><body style="position: relative;">
+        <div id="in-flow-container">
+            <p id="in-flow-text">Normal Text</p>
+            <div id="nested-pos" style="position: absolute; z-index: 10; background-color: rgb(255, 0, 0);">Nested Pos</div>
+        </div>
+        <div id="later-in-flow" style="background-color: rgb(0, 255, 0);">Later In Flow</div>
+    </body></html>"#;
+
+    let bytes = html.as_bytes();
+    let mut processor = asteria::streaming_parser::StreamingHtmlProcessor::new();
+    let _ = processor.receive_network_chunk(bytes, true);
+    let dom = processor.finish();
+
+    let stylesheet = Stylesheet::parse(b"");
+    let styled = resolve_styles(&dom, &stylesheet, bytes);
+    let layout_root = layout_document(&styled, &dom, bytes, 800.0, 600.0).unwrap();
+    let display_list = asteria::paint::build_display_list(&layout_root, &dom, bytes);
+
+    let mut red_rect_idx = None;
+    let mut green_rect_idx = None;
+
+    for (idx, cmd) in display_list.commands.iter().enumerate() {
+        if let asteria::paint::DisplayCommand::SolidColor { color, .. } = cmd {
+            if color.r == 255 && color.g == 0 && color.b == 0 {
+                red_rect_idx = Some(idx);
+            } else if color.r == 0 && color.g == 255 && color.b == 0 {
+                green_rect_idx = Some(idx);
+            }
+        }
+    }
+
+    assert!(red_rect_idx.is_some(), "Red rect (nested-pos) should be in display list");
+    assert!(green_rect_idx.is_some(), "Green rect (later-in-flow) should be in display list");
+    // Positioned element with z-index: 10 should be painted AFTER in-flow green element
+    assert!(
+        red_rect_idx.unwrap() > green_rect_idx.unwrap(),
+        "Positioned z-index 10 should paint after normal in-flow content"
+    );
+}
+
+#[test]
+fn test_tls_parse_server_name_control_char_rejection() {
+    use asteria::net::tls::TlsConnector;
+
+    assert!(TlsConnector::parse_server_name("example.com").is_ok());
+    assert!(TlsConnector::parse_server_name("example.com\n").is_err());
+    assert!(TlsConnector::parse_server_name("example.com\r\n").is_err());
+    assert!(TlsConnector::parse_server_name("\texample.com").is_err());
+    assert!(TlsConnector::parse_server_name("ex\0ample.com").is_err());
 }
 

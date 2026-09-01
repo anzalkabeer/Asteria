@@ -139,11 +139,14 @@ impl<'a> LayoutBox<'a> {
         // Step 2: Calculate position (x, y) relative to document origin
         self.calculate_block_position(containing_block);
 
+        // Pre-calculate explicit height if specified so children can resolve percentage heights
+        self.calculate_block_height(containing_block);
+
         // Step 3: Lay out children (block stacking or inline line-box formatting context)
         self.layout_block_children(dom, source);
 
         // Step 4: Calculate explicit height if specified
-        self.calculate_block_height();
+        self.calculate_block_height(containing_block);
     }
 
     /// Calculate width, padding, border, and margins for a block box
@@ -152,8 +155,10 @@ impl<'a> LayoutBox<'a> {
         let style = self.styled_node.map(|n| &n.styles);
 
         // Read values or defaults
-        let auto_width = style.map(|s| s.width.is_none()).unwrap_or(true);
-        let specified_w = style.and_then(|s| s.width).unwrap_or(0.0);
+        let auto_width = style.map(|s| s.width.is_auto()).unwrap_or(true);
+        let specified_w = style
+            .and_then(|s| s.width.resolve_against(containing_block.content.width))
+            .unwrap_or(0.0);
 
         let left_is_auto = style.map_or(false, |s| s.margin.left.is_none());
         let right_is_auto = style.map_or(false, |s| s.margin.right.is_none());
@@ -253,7 +258,6 @@ impl<'a> LayoutBox<'a> {
             + self.dimensions.padding.left;
 
         self.dimensions.content.y = containing_block.content.y
-            + containing_block.content.height
             + self.dimensions.margin.top
             + self.dimensions.border.top
             + self.dimensions.padding.top;
@@ -283,48 +287,25 @@ impl<'a> LayoutBox<'a> {
                 let margin_top = style.and_then(|s| s.margin.top).unwrap_or(0.0);
                 let margin_bottom = style.and_then(|s| s.margin.bottom).unwrap_or(0.0);
 
-                let padding_left = style.map_or(0.0, |s| s.padding.left);
-                let padding_right = style.map_or(0.0, |s| s.padding.right);
-                let padding_top = style.map_or(0.0, |s| s.padding.top);
-                let padding_bottom = style.map_or(0.0, |s| s.padding.bottom);
+                let padding_left = style.map(|s| s.padding.left).unwrap_or(0.0);
+                let padding_right = style.map(|s| s.padding.right).unwrap_or(0.0);
+                let padding_top = style.map(|s| s.padding.top).unwrap_or(0.0);
+                let padding_bottom = style.map(|s| s.padding.bottom).unwrap_or(0.0);
 
-                let border_left = style.map_or(0.0, |s| s.border_width.left);
-                let border_right = style.map_or(0.0, |s| s.border_width.right);
-                let border_top = style.map_or(0.0, |s| s.border_width.top);
-                let border_bottom = style.map_or(0.0, |s| s.border_width.bottom);
+                let border_left = style.map(|s| s.border_width.left).unwrap_or(0.0);
+                let border_right = style.map(|s| s.border_width.right).unwrap_or(0.0);
+                let border_top = style.map(|s| s.border_width.top).unwrap_or(0.0);
+                let border_bottom = style.map(|s| s.border_width.bottom).unwrap_or(0.0);
 
+                // Compute intrinsic content width and height from text / child layout
                 let content_w = compute_intrinsic_inline_width(child.styled_node, dom, source);
-                let font_sz = child.styled_node.map_or(16.0, |n| n.styles.font_size);
-                let line_h = style.map_or(font_sz * 1.3, |s| s.line_height);
+                let font_size = style.map(|s| s.font_size).unwrap_or(16.0);
+                let content_h = style.map(|s| s.line_height).unwrap_or(font_size * 1.2);
 
-                let available_w = if container_max_w > 50.0 {
-                    (container_max_w - (cursor_x - self.dimensions.content.x)).max(100.0)
-                } else {
-                    760.0
-                };
-
-                let num_lines = if container_max_w > 0.0 && content_w > available_w {
-                    ((content_w / available_w).ceil() as usize).max(1)
-                } else {
-                    1
-                };
-
-                let content_h = (num_lines as f32) * line_h;
-
-                let outer_w = margin_left
-                    + border_left
-                    + padding_left
-                    + content_w.min(available_w)
-                    + padding_right
-                    + border_right
-                    + margin_right;
-                let outer_h = margin_top
-                    + border_top
-                    + padding_top
-                    + content_h
-                    + padding_bottom
-                    + border_bottom
-                    + margin_bottom;
+                let outer_w =
+                    content_w + margin_left + margin_right + border_left + border_right + padding_left + padding_right;
+                let outer_h =
+                    content_h + margin_top + margin_bottom + border_top + border_bottom + padding_top + padding_bottom;
 
                 // Horizontal Line Wrap Check
                 if container_max_w > 0.0
@@ -339,11 +320,7 @@ impl<'a> LayoutBox<'a> {
                 // Position child horizontally on the current line box
                 child.dimensions.content.x = cursor_x + margin_left + border_left + padding_left;
                 child.dimensions.content.y = cursor_y + margin_top + border_top + padding_top;
-                child.dimensions.content.width = if container_max_w > 0.0 {
-                    content_w.min(container_max_w)
-                } else {
-                    content_w
-                };
+                child.dimensions.content.width = content_w;
                 child.dimensions.content.height = content_h;
 
                 child.dimensions.margin = EdgeSizes {
@@ -382,6 +359,7 @@ impl<'a> LayoutBox<'a> {
             let mut prev_border_box_bottom = 0.0;
             let mut prev_margin_bottom = 0.0;
             let mut is_first = true;
+            let parent_content_height = self.dimensions.content.height;
 
             for child in &mut self.children {
                 let child_margin_top = child
@@ -390,8 +368,10 @@ impl<'a> LayoutBox<'a> {
                     .unwrap_or(0.0);
 
                 let mut container = self.dimensions;
+                container.content.height = parent_content_height;
+
                 if is_first {
-                    container.content.height = 0.0;
+                    container.content.y = self.dimensions.content.y;
                     child.layout(container, dom, source);
 
                     prev_border_box_bottom =
@@ -401,8 +381,10 @@ impl<'a> LayoutBox<'a> {
                 } else {
                     // Vertical margin collapsing: CSS 2.1 §8.3.1 (positive/negative/mixed)
                     let collapsed_margin = collapse_margins(prev_margin_bottom, child_margin_top);
-                    container.content.height =
-                        prev_border_box_bottom + collapsed_margin - child_margin_top;
+                    container.content.y = self.dimensions.content.y
+                        + prev_border_box_bottom
+                        + collapsed_margin
+                        - child_margin_top;
                     child.layout(container, dom, source);
 
                     prev_border_box_bottom +=
@@ -420,8 +402,11 @@ impl<'a> LayoutBox<'a> {
     }
 
     /// Override content height if explicitly specified on the element's style
-    fn calculate_block_height(&mut self) {
-        if let Some(h) = self.styled_node.and_then(|n| n.styles.height) {
+    fn calculate_block_height(&mut self, containing_block: Dimensions) {
+        if let Some(h) = self
+            .styled_node
+            .and_then(|n| n.styles.height.resolve_against(containing_block.content.height))
+        {
             self.dimensions.content.height = h;
         }
     }
@@ -458,7 +443,10 @@ impl<'a> LayoutBox<'a> {
             });
             let extra = margin_w + padding_w + border_w;
 
-            if let Some(w) = child.styled_node.and_then(|n| n.styles.width) {
+            if let Some(w) = child
+                .styled_node
+                .and_then(|n| n.styles.width.resolve_against(self.dimensions.content.width))
+            {
                 fixed_or_intrinsic_width += w + extra;
             } else {
                 let intrinsic = compute_intrinsic_inline_width(child.styled_node, dom, source);
@@ -499,7 +487,7 @@ impl<'a> LayoutBox<'a> {
             // divide remaining container space equally among auto-width children
             let child_w = child
                 .styled_node
-                .and_then(|n| n.styles.width)
+                .and_then(|n| n.styles.width.resolve_against(self.dimensions.content.width))
                 .unwrap_or_else(|| {
                     // Compute intrinsic width from text/child content
                     let intrinsic = compute_intrinsic_inline_width(child.styled_node, dom, source);
@@ -536,7 +524,7 @@ impl<'a> LayoutBox<'a> {
         }
 
         self.dimensions.content.height = total_flex_height + max_line_height;
-        self.calculate_block_height();
+        self.calculate_block_height(containing_block);
     }
 
     // ─── Grid Layout Algorithm ──────────────────────────────────────
@@ -549,7 +537,7 @@ impl<'a> LayoutBox<'a> {
 
         if style.grid_template_columns.is_empty() && style.grid_template_rows.is_empty() {
             self.layout_block_children(dom, source);
-            self.calculate_block_height();
+            self.calculate_block_height(containing_block);
             return;
         }
 
@@ -666,7 +654,7 @@ impl<'a> LayoutBox<'a> {
         }
 
         self.dimensions.content.height = total_h;
-        self.calculate_block_height();
+        self.calculate_block_height(containing_block);
     }
 
     // ─── Inline Layout Handling ────────────────────────────────────
@@ -719,7 +707,7 @@ impl<'a> LayoutBox<'a> {
         self.layout_block_children(dom, source);
 
         // Height: explicit or content-driven
-        if let Some(h) = style.and_then(|s| s.height) {
+        if let Some(h) = style.and_then(|s| s.height.resolve_against(containing_block.content.height)) {
             self.dimensions.content.height = h;
         }
     }
@@ -735,7 +723,7 @@ fn compute_intrinsic_inline_width(
         return 0.0;
     };
 
-    if let Some(w) = styled.styles.width {
+    if let Some(w) = styled.styles.width.resolve_against(0.0) {
         return w;
     }
 
@@ -911,7 +899,7 @@ pub fn layout_document<'a>(
     dom: &Dom,
     source: &[u8],
     viewport_width: f32,
-    _viewport_height: f32,
+    viewport_height: f32,
 ) -> Option<LayoutBox<'a>> {
     let mut layout_root = build_layout_tree(styled_root, dom, source)?;
 
@@ -920,7 +908,7 @@ pub fn layout_document<'a>(
             x: 0.0,
             y: 0.0,
             width: viewport_width,
-            height: 0.0,
+            height: viewport_height,
         },
         ..Default::default()
     };

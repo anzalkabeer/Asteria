@@ -11,8 +11,8 @@
 
 use asteria::css_parser::Stylesheet;
 use asteria::dom::Dom;
-use asteria::style::{StyledNode, resolve_styles};
-use asteria::values::{Color, Display, Edges, TextAlign};
+use asteria::style::{resolve_styles, StyledNode};
+use asteria::values::{Color, Display, Edges, LengthOrPercentage, Margin, TextAlign};
 
 /// Helper: parse HTML + CSS → styled tree
 fn styled_tree(html: &str, css: &str) -> (StyledNode, Dom, Vec<u8>) {
@@ -58,7 +58,7 @@ fn test_full_page_styling() {
     assert_eq!(header.styles.background_color, Color::rgb(240, 240, 240));
     // .section { color: red } — specificity (0,1,0) — sets color
     assert_eq!(header.styles.color, Color::rgb(255, 0, 0));
-    assert_eq!(header.styles.margin, Edges::uniform(20.0));
+    assert_eq!(header.styles.margin, Margin::uniform(20.0));
 
     // h1 inside #header: font-size: 2em relative to inherited 18px = 36px
     let h1 = &header.children[0];
@@ -70,7 +70,7 @@ fn test_full_page_styling() {
     // p inside #header: inherits color=red from parent, own margin=10px
     let p_subtitle = &header.children[1];
     assert_eq!(p_subtitle.styles.color, Color::rgb(255, 0, 0)); // inherited
-    assert_eq!(p_subtitle.styles.margin, Edges::uniform(10.0)); // own rule
+    assert_eq!(p_subtitle.styles.margin, Margin::uniform(10.0)); // own rule
 
     // .content div: inherits color=navy from body (no own color rule)
     let content = &body.children[1];
@@ -81,7 +81,7 @@ fn test_full_page_styling() {
     assert_eq!(intro.styles.color, Color::rgb(0, 128, 0));
     assert_eq!(intro.styles.text_align, TextAlign::Center);
     // margin comes from p { margin: 10px }
-    assert_eq!(intro.styles.margin, Edges::uniform(10.0));
+    assert_eq!(intro.styles.margin, Margin::uniform(10.0));
 }
 
 // ─── Specificity Cascade Test ────────────────────────────────────
@@ -132,7 +132,7 @@ fn test_deep_inheritance_chain() {
     assert_eq!(p.styles.font_size, 20.0);
 
     // margin should NOT inherit (stays at default 0)
-    assert_eq!(p.styles.margin, Edges::ZERO);
+    assert_eq!(p.styles.margin, Margin::ZERO);
 }
 
 // ─── em Computation Through Inheritance ──────────────────────────
@@ -183,12 +183,12 @@ fn test_non_inherited_defaults() {
 
     // div has explicit values
     assert_eq!(div.styles.display, Display::Block);
-    assert_eq!(div.styles.width, Some(500.0));
+    assert_eq!(div.styles.width, LengthOrPercentage::Px(500.0));
     assert_eq!(div.styles.padding, Edges::uniform(15.0));
 
     // span: display, width, padding do NOT inherit — get initial values
     assert_eq!(span.styles.display, Display::Inline); // initial
-    assert_eq!(span.styles.width, None); // initial = auto
+    assert_eq!(span.styles.width, LengthOrPercentage::Auto); // initial = auto
     assert_eq!(span.styles.padding, Edges::ZERO); // initial
 }
 
@@ -203,11 +203,11 @@ fn test_shorthand_with_longhand_override() {
     );
 
     let div = &styled.children[0];
-    assert_eq!(div.styles.margin.top, 10.0);
-    assert_eq!(div.styles.margin.right, 10.0);
-    assert_eq!(div.styles.margin.bottom, 10.0);
+    assert_eq!(div.styles.margin.top, Some(10.0));
+    assert_eq!(div.styles.margin.right, Some(10.0));
+    assert_eq!(div.styles.margin.bottom, Some(10.0));
     // longhand override
-    assert_eq!(div.styles.margin.left, 30.0);
+    assert_eq!(div.styles.margin.left, Some(30.0));
 }
 
 // ─── Display None Test ───────────────────────────────────────────

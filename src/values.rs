@@ -294,8 +294,8 @@ pub struct ComputedStyle {
     pub display: Display,
     pub position: Position,
     pub z_index: Option<i32>,   // None = auto
-    pub width: Option<f32>,     // None = auto
-    pub height: Option<f32>,    // None = auto
+    pub width: LengthOrPercentage,
+    pub height: LengthOrPercentage,
     pub box_sizing: BoxSizing,  // content-box | border-box
 
     // Margins (px or auto)
@@ -340,8 +340,8 @@ impl Default for ComputedStyle {
             display: Display::Inline,
             position: Position::Static,
             z_index: None,
-            width: None,
-            height: None,
+            width: LengthOrPercentage::Auto,
+            height: LengthOrPercentage::Auto,
             box_sizing: BoxSizing::ContentBox,
             margin: Margin::ZERO,
             padding: Edges::ZERO,
@@ -380,12 +380,14 @@ impl ComputedStyle {
                 None => "auto".to_string(),
             },
             PropertyId::Width => match self.width {
-                Some(v) => format!("{}px", v),
-                None => "auto".to_string(),
+                LengthOrPercentage::Px(v) => format!("{}px", v),
+                LengthOrPercentage::Percentage(p) => format!("{}%", p),
+                LengthOrPercentage::Auto => "auto".to_string(),
             },
             PropertyId::Height => match self.height {
-                Some(v) => format!("{}px", v),
-                None => "auto".to_string(),
+                LengthOrPercentage::Px(v) => format!("{}px", v),
+                LengthOrPercentage::Percentage(p) => format!("{}%", p),
+                LengthOrPercentage::Auto => "auto".to_string(),
             },
             PropertyId::BoxSizing => match self.box_sizing {
                 BoxSizing::ContentBox => "content-box".to_string(),
@@ -461,12 +463,19 @@ impl ComputedStyle {
         match prop {
             PropertyId::Display => self.display = parse_display(value),
             PropertyId::Position => self.position = parse_position(value),
-            PropertyId::ZIndex => self.z_index = parse_z_index(value),
+            PropertyId::ZIndex => {
+                if let Some(zi) = try_parse_z_index(value) {
+                    self.z_index = match zi {
+                        ZIndex::Auto => None,
+                        ZIndex::Integer(n) => Some(n),
+                    };
+                }
+            }
             PropertyId::Width => {
-                self.width = parse_optional_length(value, self.font_size, root_font_size)
+                self.width = parse_length_or_percentage(value, self.font_size, root_font_size)
             }
             PropertyId::Height => {
-                self.height = parse_optional_length(value, self.font_size, root_font_size)
+                self.height = parse_length_or_percentage(value, self.font_size, root_font_size)
             }
             PropertyId::BoxSizing => self.box_sizing = parse_box_sizing(value),
             PropertyId::MarginTop => {
@@ -599,6 +608,22 @@ pub enum LengthOrPercentage {
     Auto,
 }
 
+impl LengthOrPercentage {
+    #[inline]
+    pub fn is_auto(&self) -> bool {
+        matches!(self, LengthOrPercentage::Auto)
+    }
+
+    #[inline]
+    pub fn resolve_against(&self, base: f32) -> Option<f32> {
+        match *self {
+            LengthOrPercentage::Px(px) => Some(px),
+            LengthOrPercentage::Percentage(pct) => Some(pct / 100.0 * base),
+            LengthOrPercentage::Auto => None,
+        }
+    }
+}
+
 /// Parse a length or percentage value without collapsing percentages to px.
 pub fn parse_length_or_percentage(value: &str, em_base: f32, rem_base: f32) -> LengthOrPercentage {
     let s = value.trim();
@@ -613,13 +638,32 @@ pub fn parse_length_or_percentage(value: &str, em_base: f32, rem_base: f32) -> L
     LengthOrPercentage::Px(parse_length(s, em_base, rem_base))
 }
 
-/// Parse a CSS z-index value (integer or 'auto').
-pub fn parse_z_index(value: &str) -> Option<i32> {
+/// Represents a valid CSS z-index value: integer or auto.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ZIndex {
+    Auto,
+    Integer(i32),
+}
+
+/// Try to parse a CSS z-index value (integer or 'auto').
+/// Returns Some(ZIndex::Auto) for 'auto', Some(ZIndex::Integer(n)) for valid integers,
+/// and None if the syntax is invalid.
+pub fn try_parse_z_index(value: &str) -> Option<ZIndex> {
     let s = value.trim();
     if s.eq_ignore_ascii_case("auto") {
-        None
+        Some(ZIndex::Auto)
+    } else if let Ok(n) = s.parse::<i32>() {
+        Some(ZIndex::Integer(n))
     } else {
-        s.parse::<i32>().ok()
+        None
+    }
+}
+
+/// Parse a CSS z-index value returning Some(i32) for numeric values and None for auto/invalid.
+pub fn parse_z_index(value: &str) -> Option<i32> {
+    match try_parse_z_index(value) {
+        Some(ZIndex::Integer(n)) => Some(n),
+        _ => None,
     }
 }
 
@@ -1238,8 +1282,8 @@ mod tests {
         assert_eq!(s.font_weight, 400.0);
         assert_eq!(s.margin, Margin::ZERO);
         assert_eq!(s.padding, Edges::ZERO);
-        assert_eq!(s.width, None);
-        assert_eq!(s.height, None);
+        assert_eq!(s.width, LengthOrPercentage::Auto);
+        assert_eq!(s.height, LengthOrPercentage::Auto);
     }
 
     #[test]

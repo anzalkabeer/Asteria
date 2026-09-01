@@ -430,7 +430,16 @@ fn build_styled_node(
                 let is_css_wide =
                     val_lower == "inherit" || val_lower == "initial" || val_lower == "unset";
 
-                if prop == "margin" || prop == "padding" {
+                if prop == "z-index" {
+                    if !is_css_wide
+                        && !val_trimmed.contains("var(")
+                        && values::try_parse_z_index(val_trimmed).is_none()
+                    {
+                        // Discard invalid z-index declaration before cascade sorting
+                        continue;
+                    }
+                    normalized_decls.push(decl);
+                } else if prop == "margin" || prop == "padding" {
                     let prefix = if prop == "margin" { "margin" } else { "padding" };
                     if is_css_wide {
                         for edge in &["top", "right", "bottom", "left"] {
@@ -748,24 +757,24 @@ fn apply_user_agent_defaults(
     }
 
     // Default sizing for replaced / form / media elements
-    if computed.width.is_none() && !specified.contains_key("width") {
+    if computed.width.is_auto() && !specified.contains_key("width") {
         match tag_name {
-            "img" => computed.width = Some(160.0),
-            "video" | "canvas" => computed.width = Some(300.0),
-            "iframe" => computed.width = Some(300.0),
-            "textarea" => computed.width = Some(200.0),
-            "select" | "input" | "button" => computed.width = Some(120.0),
+            "img" => computed.width = values::LengthOrPercentage::Px(160.0),
+            "video" | "canvas" => computed.width = values::LengthOrPercentage::Px(300.0),
+            "iframe" => computed.width = values::LengthOrPercentage::Px(300.0),
+            "textarea" => computed.width = values::LengthOrPercentage::Px(200.0),
+            "select" | "input" | "button" => computed.width = values::LengthOrPercentage::Px(120.0),
             _ => {}
         }
     }
-    if computed.height.is_none() && !specified.contains_key("height") {
+    if computed.height.is_auto() && !specified.contains_key("height") {
         match tag_name {
-            "img" => computed.height = Some(100.0),
-            "video" => computed.height = Some(150.0),
-            "canvas" => computed.height = Some(150.0),
-            "iframe" => computed.height = Some(150.0),
-            "textarea" => computed.height = Some(80.0),
-            "select" | "input" | "button" => computed.height = Some(24.0),
+            "img" => computed.height = values::LengthOrPercentage::Px(100.0),
+            "video" => computed.height = values::LengthOrPercentage::Px(150.0),
+            "canvas" => computed.height = values::LengthOrPercentage::Px(150.0),
+            "iframe" => computed.height = values::LengthOrPercentage::Px(150.0),
+            "textarea" => computed.height = values::LengthOrPercentage::Px(80.0),
+            "select" | "input" | "button" => computed.height = values::LengthOrPercentage::Px(24.0),
             _ => {}
         }
     }
@@ -826,17 +835,17 @@ fn apply_user_agent_defaults(
         computed.border_style = values::BorderStyleValue::Solid;
     }
 
-    if computed.height.is_none() && !specified.contains_key("height") && tag_name == "hr" {
-        computed.height = Some(0.0);
+    if computed.height.is_auto() && !specified.contains_key("height") && tag_name == "hr" {
+        computed.height = values::LengthOrPercentage::Px(0.0);
     }
 
-    if !specified.contains_key("margin")
-        && !specified.contains_key("margin-top")
-        && !specified.contains_key("margin-bottom")
-        && tag_name == "hr"
-    {
-        computed.margin.top = Some(8.0);
-        computed.margin.bottom = Some(8.0);
+    if tag_name == "hr" {
+        if !specified.contains_key("margin") && !specified.contains_key("margin-top") {
+            computed.margin.top = Some(8.0);
+        }
+        if !specified.contains_key("margin") && !specified.contains_key("margin-bottom") {
+            computed.margin.bottom = Some(8.0);
+        }
     }
 
     if !specified.contains_key("margin")
@@ -1271,17 +1280,21 @@ impl StyledNode {
         if s.width != d.width {
             entries.push((
                 "width",
-                s.width
-                    .map(|v| format!("{}px", v))
-                    .unwrap_or("auto".to_string()),
+                match s.width {
+                    values::LengthOrPercentage::Px(v) => format!("{}px", v),
+                    values::LengthOrPercentage::Percentage(p) => format!("{}%", p),
+                    values::LengthOrPercentage::Auto => "auto".to_string(),
+                },
             ));
         }
         if s.height != d.height {
             entries.push((
                 "height",
-                s.height
-                    .map(|v| format!("{}px", v))
-                    .unwrap_or("auto".to_string()),
+                match s.height {
+                    values::LengthOrPercentage::Px(v) => format!("{}px", v),
+                    values::LengthOrPercentage::Percentage(p) => format!("{}%", p),
+                    values::LengthOrPercentage::Auto => "auto".to_string(),
+                },
             ));
         }
         if s.text_align != d.text_align {
@@ -1389,7 +1402,7 @@ mod tests {
             "#container { width: 960px; }",
         );
         let div = &styled.children[0];
-        assert_eq!(div.styles.width, Some(960.0));
+        assert_eq!(div.styles.width, values::LengthOrPercentage::Px(960.0));
     }
 
     #[test]

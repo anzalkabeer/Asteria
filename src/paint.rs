@@ -86,18 +86,17 @@ impl DisplayList {
 
 pub fn build_display_list(layout_root: &LayoutBox, dom: &Dom, source: &[u8]) -> DisplayList {
     let mut list = DisplayList::new();
-    render_layout_box(layout_root, dom, source, &mut list);
+    render_stacking_context(layout_root, dom, source, &mut list);
     list
 }
 
-fn render_layout_box(
+fn render_stacking_context(
     layout_box: &LayoutBox,
     dom: &Dom,
     source: &[u8],
     display_list: &mut DisplayList,
 ) {
-    // Anonymous blocks (styled_node = None) skip their own rendering
-    // but MUST still recurse into children to paint wrapped inline content.
+    // 1. Render stacking context root element's background and borders
     if layout_box.styled_node.is_some() {
         render_background(layout_box, display_list, dom, source);
         render_borders(layout_box, display_list, dom, source);
@@ -108,19 +107,53 @@ fn render_layout_box(
         }
     }
 
-    // Paint stacking context order:
-    // 1. Positioned children with negative z-index (< 0)
-    // 2. Normal in-flow children
-    // 3. Positioned children with auto / non-negative z-index (>= 0), ordered by z-index
+    // 2. Partition descendants of this stacking context:
+    //    - Negative z-index positioned descendants (< 0)
+    //    - In-flow descendants (commands recorded recursively)
+    //    - Non-negative / auto z-index positioned descendants (>= 0)
     let mut neg_positioned = Vec::new();
-    let mut normal_children = Vec::new();
+    let mut in_flow_commands = DisplayList::new();
     let mut pos_positioned = Vec::new();
 
-    for child in &layout_box.children {
+    collect_stacking_context_descendants(
+        layout_box,
+        &mut neg_positioned,
+        &mut in_flow_commands,
+        &mut pos_positioned,
+        dom,
+        source,
+    );
+
+    // 3. Negative z-index positioned descendants (< 0), sorted by z-index
+    neg_positioned.sort_by_key(|(z, _)| *z);
+    for (_, child) in neg_positioned {
+        render_stacking_context(child, dom, source, display_list);
+    }
+
+    // 4. Normal in-flow descendant content
+    display_list.commands.extend(in_flow_commands.commands);
+
+    // 5. Auto / non-negative z-index positioned descendants (>= 0), sorted by z-index
+    pos_positioned.sort_by_key(|(z, _)| *z);
+    for (_, child) in pos_positioned {
+        render_stacking_context(child, dom, source, display_list);
+    }
+}
+
+fn collect_stacking_context_descendants<'a>(
+    parent: &'a LayoutBox<'a>,
+    neg_positioned: &mut Vec<(i32, &'a LayoutBox<'a>)>,
+    in_flow_commands: &mut DisplayList,
+    pos_positioned: &mut Vec<(i32, &'a LayoutBox<'a>)>,
+    dom: &Dom,
+    source: &[u8],
+) {
+    for child in &parent.children {
         let is_positioned = child
             .styled_node
             .map(|n| n.styles.position != crate::values::Position::Static)
             .unwrap_or(false);
+
         if is_positioned {
             let z = child.styled_node.and_then(|n| n.styles.z_index).unwrap_or(0);
             if z < 0 {
@@ -129,21 +162,27 @@ fn render_layout_box(
                 pos_positioned.push((z, child));
             }
         } else {
-            normal_children.push(child);
+            // Normal flow: render in-flow box decorations and text
+            if child.styled_node.is_some() {
+                render_background(child, in_flow_commands, dom, source);
+                render_borders(child, in_flow_commands, dom, source);
+
+                if child.children.is_empty() {
+                    render_text(child, dom, source, in_flow_commands);
+                    render_image(child, dom, source, in_flow_commands);
+                }
+            }
+
+            // Recurse into in-flow descendants to collect further nested content
+            collect_stacking_context_descendants(
+                child,
+                neg_positioned,
+                in_flow_commands,
+                pos_positioned,
+                dom,
+                source,
+            );
         }
-    }
-
-    neg_positioned.sort_by_key(|(z, _)| *z);
-    pos_positioned.sort_by_key(|(z, _)| *z);
-
-    for (_, child) in neg_positioned {
-        render_layout_box(child, dom, source, display_list);
-    }
-    for child in normal_children {
-        render_layout_box(child, dom, source, display_list);
-    }
-    for (_, child) in pos_positioned {
-        render_layout_box(child, dom, source, display_list);
     }
 }
 
