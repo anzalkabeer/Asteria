@@ -293,6 +293,7 @@ pub struct ComputedStyle {
     // Box model
     pub display: Display,
     pub position: Position,
+    pub z_index: Option<i32>,   // None = auto
     pub width: Option<f32>,     // None = auto
     pub height: Option<f32>,    // None = auto
     pub box_sizing: BoxSizing,  // content-box | border-box
@@ -338,6 +339,7 @@ impl Default for ComputedStyle {
         ComputedStyle {
             display: Display::Inline,
             position: Position::Static,
+            z_index: None,
             width: None,
             height: None,
             box_sizing: BoxSizing::ContentBox,
@@ -373,6 +375,10 @@ impl ComputedStyle {
         match prop {
             PropertyId::Display => format!("{}", self.display),
             PropertyId::Position => format!("{:?}", self.position).to_ascii_lowercase(),
+            PropertyId::ZIndex => match self.z_index {
+                Some(z) => format!("{}", z),
+                None => "auto".to_string(),
+            },
             PropertyId::Width => match self.width {
                 Some(v) => format!("{}px", v),
                 None => "auto".to_string(),
@@ -455,6 +461,7 @@ impl ComputedStyle {
         match prop {
             PropertyId::Display => self.display = parse_display(value),
             PropertyId::Position => self.position = parse_position(value),
+            PropertyId::ZIndex => self.z_index = parse_z_index(value),
             PropertyId::Width => {
                 self.width = parse_optional_length(value, self.font_size, root_font_size)
             }
@@ -581,6 +588,38 @@ pub fn parse_optional_length(value: &str, em_base: f32, rem_base: f32) -> Option
         None
     } else {
         Some(parse_length(s, em_base, rem_base))
+    }
+}
+
+/// Represents either a definite pixel length, a percentage value (0.0..100.0), or auto.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum LengthOrPercentage {
+    Px(f32),
+    Percentage(f32),
+    Auto,
+}
+
+/// Parse a length or percentage value without collapsing percentages to px.
+pub fn parse_length_or_percentage(value: &str, em_base: f32, rem_base: f32) -> LengthOrPercentage {
+    let s = value.trim();
+    if s.eq_ignore_ascii_case("auto") {
+        return LengthOrPercentage::Auto;
+    }
+    if let Some(num) = s.strip_suffix('%') {
+        if let Ok(p) = num.trim().parse::<f32>() {
+            return LengthOrPercentage::Percentage(p);
+        }
+    }
+    LengthOrPercentage::Px(parse_length(s, em_base, rem_base))
+}
+
+/// Parse a CSS z-index value (integer or 'auto').
+pub fn parse_z_index(value: &str) -> Option<i32> {
+    let s = value.trim();
+    if s.eq_ignore_ascii_case("auto") {
+        None
+    } else {
+        s.parse::<i32>().ok()
     }
 }
 

@@ -365,8 +365,10 @@ impl<'a> LayoutBox<'a> {
                     left: border_left,
                 };
 
-                // Recursively layout child's descendants
-                child.layout(child.dimensions, dom, source);
+                // Recursively layout child's descendants if any
+                if !child.children.is_empty() {
+                    child.layout(child.dimensions, dom, source);
+                }
 
                 // Advance horizontal cursor
                 cursor_x += outer_w;

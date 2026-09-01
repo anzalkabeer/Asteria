@@ -108,9 +108,13 @@ fn render_layout_box(
         }
     }
 
-    // Paint normal flow children first, then positioned overlay children on top
+    // Paint stacking context order:
+    // 1. Positioned children with negative z-index (< 0)
+    // 2. Normal in-flow children
+    // 3. Positioned children with auto / non-negative z-index (>= 0), ordered by z-index
+    let mut neg_positioned = Vec::new();
     let mut normal_children = Vec::new();
-    let mut positioned_children = Vec::new();
+    let mut pos_positioned = Vec::new();
 
     for child in &layout_box.children {
         let is_positioned = child
@@ -118,16 +122,27 @@ fn render_layout_box(
             .map(|n| n.styles.position != crate::values::Position::Static)
             .unwrap_or(false);
         if is_positioned {
-            positioned_children.push(child);
+            let z = child.styled_node.and_then(|n| n.styles.z_index).unwrap_or(0);
+            if z < 0 {
+                neg_positioned.push((z, child));
+            } else {
+                pos_positioned.push((z, child));
+            }
         } else {
             normal_children.push(child);
         }
     }
 
+    neg_positioned.sort_by_key(|(z, _)| *z);
+    pos_positioned.sort_by_key(|(z, _)| *z);
+
+    for (_, child) in neg_positioned {
+        render_layout_box(child, dom, source, display_list);
+    }
     for child in normal_children {
         render_layout_box(child, dom, source, display_list);
     }
-    for child in positioned_children {
+    for (_, child) in pos_positioned {
         render_layout_box(child, dom, source, display_list);
     }
 }

@@ -917,3 +917,125 @@ fn test_horizontal_constraint_negative_underflow_residual() {
         800.0
     );
 }
+
+#[test]
+fn test_z_index_stacking_order_in_display_list() {
+    let html = r#"<html><body>
+        <div id="container">
+            <div id="pos_high" style="position: relative; z-index: 10; background-color: rgb(1, 1, 1);"></div>
+            <div id="in_flow" style="background-color: rgb(2, 2, 2);"></div>
+            <div id="pos_neg" style="position: relative; z-index: -5; background-color: rgb(3, 3, 3);"></div>
+            <div id="pos_low" style="position: relative; z-index: 2; background-color: rgb(4, 4, 4);"></div>
+        </div>
+    </body></html>"#;
+    let css = "div { width: 100px; height: 20px; }";
+
+    let bytes = html.as_bytes().to_vec();
+    let mut processor = asteria::streaming_parser::StreamingHtmlProcessor::new();
+    let _ = processor.receive_network_chunk(&bytes, true);
+    let dom = processor.finish();
+
+    let stylesheet = Stylesheet::parse(css.as_bytes());
+    let styled = resolve_styles(&dom, &stylesheet, &bytes);
+    let layout = asteria::layout::layout_document(&styled, &dom, &bytes, 800.0, 600.0).unwrap();
+
+    let display_list = asteria::paint::build_display_list(&layout, &dom, &bytes);
+
+    // Extract SolidColor command colors in paint order
+    let colors: Vec<Color> = display_list
+        .commands
+        .iter()
+        .filter_map(|cmd| match cmd {
+            asteria::paint::DisplayCommand::SolidColor { color, .. } => Some(*color),
+            _ => None,
+        })
+        .collect();
+
+    // Stacking order within container:
+    // 1. pos_neg (z-index: -5) -> rgb(3, 3, 3)
+    // 2. in_flow (normal flow) -> rgb(2, 2, 2)
+    // 3. pos_low (z-index: 2) -> rgb(4, 4, 4)
+    // 4. pos_high (z-index: 10) -> rgb(1, 1, 1)
+    let relevant_colors: Vec<Color> = colors
+        .into_iter()
+        .filter(|c| *c != Color::rgb(248, 250, 252)) // filter UA body background if any
+        .collect();
+
+    assert_eq!(
+        relevant_colors,
+        vec![
+            Color::rgb(3, 3, 3), // negative z-index painted first
+            Color::rgb(2, 2, 2), // in-flow content painted next
+            Color::rgb(4, 4, 4), // lower positive z-index
+            Color::rgb(1, 1, 1), // higher positive z-index painted on top
+        ]
+    );
+}
+
+#[test]
+fn test_hr_user_agent_stylesheet_defaults() {
+    let html = "<html><body><hr id=\"divider\"></body></html>";
+    let css = "";
+
+    let bytes = html.as_bytes();
+    let mut processor = asteria::streaming_parser::StreamingHtmlProcessor::new();
+    let _ = processor.receive_network_chunk(bytes, true);
+    let dom = processor.finish();
+
+    let stylesheet = Stylesheet::parse(css.as_bytes());
+    let styled = resolve_styles(&dom, &stylesheet, bytes);
+
+    let html_node = &styled.children[0];
+    let body_node = &html_node.children[0];
+    let hr_node = &body_node.children[0];
+
+    assert_eq!(hr_node.styles.display, asteria::values::Display::Block);
+    assert_eq!(hr_node.styles.border_style, asteria::values::BorderStyleValue::Solid);
+    assert_eq!(hr_node.styles.height, Some(0.0));
+    assert_eq!(hr_node.styles.margin.top, Some(8.0));
+    assert_eq!(hr_node.styles.margin.bottom, Some(8.0));
+}
+
+#[test]
+fn test_shorthand_em_font_size_dependency_ordering() {
+    let html = "<html><body><div id=\"box\">Text</div></body></html>";
+    // Element has font-size: 20px and margin: 2em
+    // 2em in margin must resolve against the element's own computed font-size (20px * 2 = 40px), not parent default (16px)
+    let css = "#box { font-size: 20px; margin: 2em; padding: 1.5em; }";
+
+    let bytes = html.as_bytes();
+    let mut processor = asteria::streaming_parser::StreamingHtmlProcessor::new();
+    let _ = processor.receive_network_chunk(bytes, true);
+    let dom = processor.finish();
+
+    let stylesheet = Stylesheet::parse(css.as_bytes());
+    let styled = resolve_styles(&dom, &stylesheet, bytes);
+
+    let html_node = &styled.children[0];
+    let body_node = &html_node.children[0];
+    let box_node = &body_node.children[0];
+
+    assert_eq!(box_node.styles.font_size, 20.0);
+    assert_eq!(box_node.styles.margin.top, Some(40.0));
+    assert_eq!(box_node.styles.margin.right, Some(40.0));
+    assert_eq!(box_node.styles.margin.bottom, Some(40.0));
+    assert_eq!(box_node.styles.margin.left, Some(40.0));
+    assert_eq!(box_node.styles.padding.top, 30.0);
+    assert_eq!(box_node.styles.padding.left, 30.0);
+}
+
+#[test]
+fn test_length_or_percentage_and_z_index_parsing() {
+    use asteria::values::{parse_length_or_percentage, parse_z_index, LengthOrPercentage};
+
+    assert_eq!(parse_z_index("auto"), None);
+    assert_eq!(parse_z_index("10"), Some(10));
+    assert_eq!(parse_z_index("-5"), Some(-5));
+    assert_eq!(parse_z_index("invalid"), None);
+
+    assert_eq!(parse_length_or_percentage("auto", 16.0, 16.0), LengthOrPercentage::Auto);
+    assert_eq!(parse_length_or_percentage("50%", 16.0, 16.0), LengthOrPercentage::Percentage(50.0));
+    assert_eq!(parse_length_or_percentage("25px", 16.0, 16.0), LengthOrPercentage::Px(25.0));
+    assert_eq!(parse_length_or_percentage("2em", 20.0, 16.0), LengthOrPercentage::Px(40.0));
+}
+

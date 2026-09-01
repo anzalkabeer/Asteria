@@ -18,6 +18,7 @@ pub enum PropertyId {
     // Box model
     Display,
     Position,
+    ZIndex,
     Width,
     Height,
     /// CSS box-sizing: content-box | border-box
@@ -70,6 +71,7 @@ pub enum PropertyId {
 pub const ALL_PROPERTIES: &[PropertyId] = &[
     PropertyId::Display,
     PropertyId::Position,
+    PropertyId::ZIndex,
     PropertyId::Width,
     PropertyId::Height,
     PropertyId::BoxSizing,
@@ -123,6 +125,7 @@ pub fn is_inherited(id: PropertyId) -> bool {
         // Everything else does NOT inherit
         PropertyId::Display => false,
         PropertyId::Position => false,
+        PropertyId::ZIndex => false,
         PropertyId::Width => false,
         PropertyId::Height => false,
         PropertyId::BoxSizing => false,
@@ -179,6 +182,7 @@ pub fn property_from_name(name: &str) -> Option<PropertyId> {
     match name {
         "display" => Some(PropertyId::Display),
         "position" => Some(PropertyId::Position),
+        "z-index" => Some(PropertyId::ZIndex),
         "width" => Some(PropertyId::Width),
         "height" => Some(PropertyId::Height),
         "box-sizing" => Some(PropertyId::BoxSizing),
@@ -228,6 +232,7 @@ pub fn property_id_to_name(id: PropertyId) -> &'static str {
     match id {
         PropertyId::Display => "display",
         PropertyId::Position => "position",
+        PropertyId::ZIndex => "z-index",
         PropertyId::Width => "width",
         PropertyId::Height => "height",
         PropertyId::BoxSizing => "box-sizing",
@@ -310,6 +315,8 @@ mod tests {
     #[test]
     fn test_non_inherited_properties() {
         assert!(!is_inherited(PropertyId::Display));
+        assert!(!is_inherited(PropertyId::Position));
+        assert!(!is_inherited(PropertyId::ZIndex));
         assert!(!is_inherited(PropertyId::MarginTop));
         assert!(!is_inherited(PropertyId::PaddingTop));
         assert!(!is_inherited(PropertyId::Width));
@@ -320,8 +327,11 @@ mod tests {
     fn test_property_from_name() {
         assert_eq!(property_from_name("color"), Some(PropertyId::Color));
         assert_eq!(property_from_name("display"), Some(PropertyId::Display));
+        assert_eq!(property_from_name("position"), Some(PropertyId::Position));
+        assert_eq!(property_from_name("z-index"), Some(PropertyId::ZIndex));
         assert_eq!(property_from_name("font-size"), Some(PropertyId::FontSize));
         assert_eq!(property_from_name("unknown-prop"), None);
+        assert_eq!(PropertyId::ZIndex.name(), "z-index");
     }
 
     #[test]
@@ -362,6 +372,6 @@ mod tests {
         for &prop in ALL_PROPERTIES {
             let _ = is_inherited(prop);
         }
-        assert_eq!(ALL_PROPERTIES.len(), 34);
+        assert_eq!(ALL_PROPERTIES.len(), 35);
     }
 }

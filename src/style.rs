@@ -822,6 +822,23 @@ fn apply_user_agent_defaults(
         }
     }
 
+    if !specified.contains_key("border") && !specified.contains_key("border-style") && tag_name == "hr" {
+        computed.border_style = values::BorderStyleValue::Solid;
+    }
+
+    if computed.height.is_none() && !specified.contains_key("height") && tag_name == "hr" {
+        computed.height = Some(0.0);
+    }
+
+    if !specified.contains_key("margin")
+        && !specified.contains_key("margin-top")
+        && !specified.contains_key("margin-bottom")
+        && tag_name == "hr"
+    {
+        computed.margin.top = Some(8.0);
+        computed.margin.bottom = Some(8.0);
+    }
+
     if !specified.contains_key("margin")
         && !specified.contains_key("margin-top")
         && tag_name == "body"
@@ -857,6 +874,7 @@ fn copy_property(child: &mut ComputedStyle, parent: &ComputedStyle, prop: Proper
     match prop {
         PropertyId::Display => child.display = parent.display,
         PropertyId::Position => child.position = parent.position,
+        PropertyId::ZIndex => child.z_index = parent.z_index,
         PropertyId::Width => child.width = parent.width,
         PropertyId::Height => child.height = parent.height,
         PropertyId::BoxSizing => child.box_sizing = parent.box_sizing,
@@ -955,32 +973,16 @@ fn selector_matches(selector: &Selector, node_id: NodeId, dom: &Dom, source: &[u
         return false;
     }
 
-    let last = &selector.parts[selector.parts.len() - 1];
-    if !compound_matches(last, node_id, dom, source) {
-        return false;
-    }
-
-    if selector.parts.len() == 1 {
-        return true;
-    }
-
-    let mut current = dom.get(node_id).parent;
-    let mut part_idx = selector.parts.len() - 2;
-
-    loop {
-        match current {
-            None => return false,
-            Some(ancestor_id) => {
-                if compound_matches(&selector.parts[part_idx], ancestor_id, dom, source) {
-                    if part_idx == 0 {
-                        return true;
-                    }
-                    part_idx -= 1;
-                }
-                current = dom.get(ancestor_id).parent;
-            }
-        }
-    }
+    // Fallback: build steps with descendant combinators if only legacy parts are present
+    let steps: Vec<crate::css_parser::SelectorStep> = selector
+        .parts
+        .iter()
+        .map(|p| crate::css_parser::SelectorStep {
+            combinator: crate::css_parser::Combinator::Descendant,
+            compound: p.clone(),
+        })
+        .collect();
+    selector_steps_match(&steps, node_id, dom, source)
 }
 
 fn match_selector_from_step(
@@ -1302,7 +1304,7 @@ impl StyledNode {
 mod tests {
     use super::*;
     use crate::css_parser::Stylesheet;
-    use crate::values::{Color, Display, Edges, TextAlign};
+    use crate::values::{Color, Display, TextAlign};
 
     /// Helper: parse HTML and CSS, resolve styles, return the styled tree
     fn styled_tree(html: &str, css: &str) -> (StyledNode, Dom, Vec<u8>) {

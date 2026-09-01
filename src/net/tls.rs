@@ -73,8 +73,12 @@ impl TlsConnector {
             .unwrap_or(domain)
             .trim_end_matches('.');
 
-        if clean.is_empty() {
-            return Err(NetworkError::TlsError("Domain name is empty".to_string()));
+        if clean.is_empty()
+            || clean.starts_with('.')
+            || clean.contains("..")
+            || clean.chars().any(|c| c.is_control() || c == '\0')
+        {
+            return Err(NetworkError::TlsError(format!("Invalid TLS server name '{}'", clean)));
         }
 
         ServerName::try_from(clean.to_string()).map_err(|e| {
@@ -117,7 +121,9 @@ mod tests {
     fn test_parse_server_name_invalid() {
         assert!(TlsConnector::parse_server_name("").is_err());
         assert!(TlsConnector::parse_server_name("   ").is_err());
+        assert!(TlsConnector::parse_server_name(".example.com").is_err());
         assert!(TlsConnector::parse_server_name("invalid..domain").is_err());
         assert!(TlsConnector::parse_server_name("domain with spaces.com").is_err());
+        assert!(TlsConnector::parse_server_name("example\0.com").is_err());
     }
 }
