@@ -492,3 +492,134 @@ fn test_flex_align_items_and_self() {
         container.dimensions.content.y + 140.0
     );
 }
+
+#[test]
+fn test_nested_positioned_ancestor_propagation() {
+    let mut dom_store = None;
+    let mut bytes_store = Vec::new();
+    let mut styled_store = None;
+
+    // Grandparent is relative; Parent is static in-flow wrapper; Child is absolute
+    let html = r#"<html><body><div id="grandparent"><div id="parent"><div id="child"></div></div></div></body></html>"#;
+    let css = r#"
+        div { margin: 0px; padding: 0px; border: 0px; }
+        #grandparent { position: relative; width: 400px; height: 300px; padding: 20px; }
+        #parent { width: 200px; height: 150px; padding: 10px; margin: 5px; }
+        #child { position: absolute; top: 15px; left: 25px; width: 80px; height: 50px; }
+    "#;
+
+    let layout = parse_and_layout(
+        html,
+        css,
+        800.0,
+        600.0,
+        &mut dom_store,
+        &mut bytes_store,
+        &mut styled_store,
+    );
+
+    let html_box = &layout.children[0];
+    let body_box = &html_box.children[0];
+    let gp_box = &body_box.children[0];
+    let p_box = &gp_box.children[0];
+    let child_box = &p_box.children[0];
+
+    // Child must be positioned relative to grandparent's padding box, NOT parent!
+    let gp_pad = gp_box.dimensions.padding_box();
+    assert_eq!(child_box.dimensions.content.x, gp_pad.x + 25.0);
+    assert_eq!(child_box.dimensions.content.y, gp_pad.y + 15.0);
+    assert_eq!(child_box.dimensions.content.width, 80.0);
+    assert_eq!(child_box.dimensions.content.height, 50.0);
+}
+
+#[test]
+fn test_deeply_nested_fixed_position_uses_document_viewport() {
+    let mut dom_store = None;
+    let mut bytes_store = Vec::new();
+    let mut styled_store = None;
+
+    let html =
+        r#"<html><body><div id="c1"><div id="c2"><div id="fixed"></div></div></div></body></html>"#;
+    let css = r#"
+        div { margin: 0px; padding: 0px; border: 0px; }
+        #c1 { width: 300px; height: 200px; margin: 40px; }
+        #c2 { width: 150px; height: 100px; margin: 20px; }
+        #fixed { position: fixed; top: 30px; left: 40px; width: 50%; height: 25%; }
+    "#;
+
+    let layout = parse_and_layout(
+        html,
+        css,
+        800.0,
+        600.0,
+        &mut dom_store,
+        &mut bytes_store,
+        &mut styled_store,
+    );
+
+    let html_box = &layout.children[0];
+    let body_box = &html_box.children[0];
+    let c1 = &body_box.children[0];
+    let c2 = &c1.children[0];
+    let fixed_child = &c2.children[0];
+
+    // Fixed child must resolve against document viewport (800x600):
+    // top = 30px, left = 40px, width = 50% of 800 = 400px, height = 25% of 600 = 150px
+    assert_eq!(fixed_child.dimensions.content.x, 40.0);
+    assert_eq!(fixed_child.dimensions.content.y, 30.0);
+    assert_eq!(fixed_child.dimensions.content.width, 400.0);
+    assert_eq!(fixed_child.dimensions.content.height, 150.0);
+}
+
+#[test]
+fn test_flex_justify_content_start_and_end_in_row_reverse() {
+    let mut dom_store = None;
+    let mut bytes_store = Vec::new();
+    let mut styled_store = None;
+
+    let html = r#"<html><body><div id="c_start"><div id="s1"></div><div id="s2"></div></div><div id="c_flex_start"><div id="fs1"></div><div id="fs2"></div></div></body></html>"#;
+    let css = r#"
+        div { margin: 0px; padding: 0px; border: 0px; }
+        #c_start { display: flex; flex-direction: row-reverse; justify-content: start; width: 400px; }
+        #c_flex_start { display: flex; flex-direction: row-reverse; justify-content: flex-start; width: 400px; }
+        #s1, #s2, #fs1, #fs2 { width: 100px; height: 50px; }
+    "#;
+
+    let layout = parse_and_layout(
+        html,
+        css,
+        800.0,
+        600.0,
+        &mut dom_store,
+        &mut bytes_store,
+        &mut styled_store,
+    );
+
+    let html_box = &layout.children[0];
+    let body_box = &html_box.children[0];
+    let c_start = &body_box.children[0];
+    let c_flex_start = &body_box.children[1];
+
+    let s1 = &c_start.children[0];
+    let s2 = &c_start.children[1];
+    let fs1 = &c_flex_start.children[0];
+    let fs2 = &c_flex_start.children[1];
+
+    // In row-reverse:
+    // flex-start keeps existing Asteria behavior: items start at container left, with last item (fs2) placed first
+    assert_eq!(fs2.dimensions.content.x, c_flex_start.dimensions.content.x);
+    assert_eq!(
+        fs1.dimensions.content.x,
+        c_flex_start.dimensions.content.x + 100.0
+    );
+
+    // start in row-reverse inverts offset to unused_main (400 - 200 = 200)
+    assert_eq!(
+        s2.dimensions.content.x,
+        c_start.dimensions.content.x + 200.0
+    );
+    assert_eq!(
+        s1.dimensions.content.x,
+        c_start.dimensions.content.x + 300.0
+    );
+}

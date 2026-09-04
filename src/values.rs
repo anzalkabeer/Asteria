@@ -230,6 +230,8 @@ pub enum JustifyContent {
     SpaceBetween,
     SpaceAround,
     SpaceEvenly,
+    Start,
+    End,
 }
 
 impl std::fmt::Display for JustifyContent {
@@ -241,6 +243,8 @@ impl std::fmt::Display for JustifyContent {
             JustifyContent::SpaceBetween => write!(f, "space-between"),
             JustifyContent::SpaceAround => write!(f, "space-around"),
             JustifyContent::SpaceEvenly => write!(f, "space-evenly"),
+            JustifyContent::Start => write!(f, "start"),
+            JustifyContent::End => write!(f, "end"),
         }
     }
 }
@@ -1176,11 +1180,14 @@ pub fn parse_flex_wrap(value: &str) -> FlexWrap {
 /// Parse a CSS justify-content value.
 pub fn parse_justify_content(value: &str) -> JustifyContent {
     match value.trim().to_ascii_lowercase().as_str() {
-        "flex-end" | "end" => JustifyContent::FlexEnd,
+        "flex-start" => JustifyContent::FlexStart,
+        "flex-end" => JustifyContent::FlexEnd,
         "center" => JustifyContent::Center,
         "space-between" => JustifyContent::SpaceBetween,
         "space-around" => JustifyContent::SpaceAround,
         "space-evenly" => JustifyContent::SpaceEvenly,
+        "start" => JustifyContent::Start,
+        "end" => JustifyContent::End,
         _ => JustifyContent::FlexStart,
     }
 }
@@ -1693,6 +1700,13 @@ mod tests {
             parse_justify_content("space-evenly"),
             JustifyContent::SpaceEvenly
         );
+        assert_eq!(parse_justify_content("start"), JustifyContent::Start);
+        assert_eq!(parse_justify_content("end"), JustifyContent::End);
+        assert_eq!(
+            parse_justify_content("flex-start"),
+            JustifyContent::FlexStart
+        );
+        assert_eq!(parse_justify_content("flex-end"), JustifyContent::FlexEnd);
 
         assert_eq!(parse_align_items("center"), AlignItems::Center);
         assert_eq!(parse_align_items("flex-end"), AlignItems::FlexEnd);

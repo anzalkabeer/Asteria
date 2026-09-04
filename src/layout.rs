@@ -264,8 +264,9 @@ impl<'a> LayoutBox<'a> {
 
         // 5. Layout children with self as their containing block
         let self_dim = self.dimensions;
+        let self_cb = self.dimensions.padding_box();
         for child in &mut self.children {
-            child.layout(self_dim, dom, source);
+            child.layout_internal(self_dim, Some(self_cb), viewport, dom, source);
         }
 
         // 6. If height is content-driven, calculate height from children
@@ -292,28 +293,35 @@ impl<'a> LayoutBox<'a> {
 
     /// Recursively compute geometry and position for this box and its subtree.
     pub fn layout(&mut self, containing_block: Dimensions, dom: &Dom, source: &[u8]) {
-        self.layout_internal(containing_block, None, dom, source);
+        let viewport = Rect {
+            x: 0.0,
+            y: 0.0,
+            width: containing_block.content.width,
+            height: containing_block.content.height,
+        };
+        self.layout_internal(containing_block, None, viewport, dom, source);
     }
 
     fn layout_internal(
         &mut self,
         containing_block: Dimensions,
         positioned_cb: Option<Rect>,
+        viewport: Rect,
         dom: &Dom,
         source: &[u8],
     ) {
         match self.box_type {
             BoxType::BlockNode | BoxType::AnonymousBlock => {
-                self.layout_block(containing_block, dom, source);
+                self.layout_block(containing_block, positioned_cb, viewport, dom, source);
             }
             BoxType::FlexNode => {
-                self.layout_flex(containing_block, dom, source);
+                self.layout_flex(containing_block, positioned_cb, viewport, dom, source);
             }
             BoxType::GridNode => {
-                self.layout_grid(containing_block, dom, source);
+                self.layout_grid(containing_block, positioned_cb, viewport, dom, source);
             }
             BoxType::InlineNode => {
-                self.layout_inline(containing_block, dom, source);
+                self.layout_inline(containing_block, positioned_cb, viewport, dom, source);
             }
         }
 
@@ -333,13 +341,6 @@ impl<'a> LayoutBox<'a> {
             positioned_cb.unwrap_or_else(|| containing_block.padding_box())
         };
 
-        let viewport = Rect {
-            x: 0.0,
-            y: 0.0,
-            width: containing_block.content.width,
-            height: containing_block.content.height,
-        };
-
         for child in &mut self.children {
             if child.is_out_of_flow() {
                 child.layout_positioned_child(next_cb, viewport, dom, source);
@@ -347,25 +348,40 @@ impl<'a> LayoutBox<'a> {
         }
     }
 
-    fn layout_children_of_sized_box(&mut self, dom: &Dom, source: &[u8]) {
+    fn layout_children_of_sized_box(
+        &mut self,
+        positioned_cb: Option<Rect>,
+        viewport: Rect,
+        dom: &Dom,
+        source: &[u8],
+    ) {
+        let is_positioned_ancestor = self
+            .styled_node
+            .is_some_and(|n| n.styles.position != values::Position::Static);
+        let next_cb = if is_positioned_ancestor {
+            self.dimensions.padding_box()
+        } else {
+            positioned_cb.unwrap_or_else(|| self.dimensions.padding_box())
+        };
+
         let saved_height = self.dimensions.content.height;
         let saved_width = self.dimensions.content.width;
         match self.box_type {
             BoxType::BlockNode | BoxType::AnonymousBlock => {
-                self.layout_block_children(dom, source);
+                self.layout_block_children(Some(next_cb), viewport, dom, source);
             }
             BoxType::FlexNode => {
                 let dim = self.dimensions;
-                self.layout_flex(dim, dom, source);
+                self.layout_flex(dim, Some(next_cb), viewport, dom, source);
             }
             BoxType::GridNode => {
                 let dim = self.dimensions;
-                self.layout_grid(dim, dom, source);
+                self.layout_grid(dim, Some(next_cb), viewport, dom, source);
             }
             BoxType::InlineNode => {
                 let dim = self.dimensions;
                 for child in &mut self.children {
-                    child.layout(dim, dom, source);
+                    child.layout_internal(dim, Some(next_cb), viewport, dom, source);
                 }
             }
         }
@@ -383,23 +399,23 @@ impl<'a> LayoutBox<'a> {
         }
 
         // Layout out-of-flow positioned children
-        let cb = self.dimensions.padding_box();
-        let viewport = Rect {
-            x: 0.0,
-            y: 0.0,
-            width: self.dimensions.content.width,
-            height: self.dimensions.content.height,
-        };
         for child in &mut self.children {
             if child.is_out_of_flow() {
-                child.layout_positioned_child(cb, viewport, dom, source);
+                child.layout_positioned_child(next_cb, viewport, dom, source);
             }
         }
     }
 
     // ─── Block Layout Algorithm ───────────────────────────────────
 
-    fn layout_block(&mut self, containing_block: Dimensions, dom: &Dom, source: &[u8]) {
+    fn layout_block(
+        &mut self,
+        containing_block: Dimensions,
+        positioned_cb: Option<Rect>,
+        viewport: Rect,
+        dom: &Dom,
+        source: &[u8],
+    ) {
         // Step 1: Calculate horizontal width and margins
         self.calculate_block_width(containing_block);
 
@@ -409,8 +425,17 @@ impl<'a> LayoutBox<'a> {
         // Pre-calculate explicit height if specified so children can resolve percentage heights
         self.calculate_block_height(containing_block);
 
+        let is_positioned_ancestor = self
+            .styled_node
+            .is_some_and(|n| n.styles.position != values::Position::Static);
+        let next_cb = if is_positioned_ancestor {
+            self.dimensions.padding_box()
+        } else {
+            positioned_cb.unwrap_or_else(|| containing_block.padding_box())
+        };
+
         // Step 3: Lay out children (block stacking or inline line-box formatting context)
-        self.layout_block_children(dom, source);
+        self.layout_block_children(Some(next_cb), viewport, dom, source);
 
         // Step 4: Calculate explicit height if specified
         self.calculate_block_height(containing_block);
@@ -534,7 +559,13 @@ impl<'a> LayoutBox<'a> {
 
     /// Layout children inside this box.
     /// If children are InlineNodes, format them in a horizontal line box context.
-    fn layout_block_children(&mut self, dom: &Dom, source: &[u8]) {
+    fn layout_block_children(
+        &mut self,
+        positioned_cb: Option<Rect>,
+        viewport: Rect,
+        dom: &Dom,
+        source: &[u8],
+    ) {
         let is_inline_context = self
             .children
             .iter()
@@ -626,7 +657,7 @@ impl<'a> LayoutBox<'a> {
 
                 // Recursively layout child's descendants if any
                 if !child.children.is_empty() {
-                    child.layout(child.dimensions, dom, source);
+                    child.layout_internal(child.dimensions, positioned_cb, viewport, dom, source);
                 }
 
                 // Advance horizontal cursor
@@ -657,7 +688,7 @@ impl<'a> LayoutBox<'a> {
 
                 if is_first {
                     container.content.y = self.dimensions.content.y;
-                    child.layout(container, dom, source);
+                    child.layout_internal(container, positioned_cb, viewport, dom, source);
 
                     prev_border_box_bottom =
                         child.dimensions.margin.top + child.dimensions.border_box().height;
@@ -669,7 +700,7 @@ impl<'a> LayoutBox<'a> {
                     container.content.y =
                         self.dimensions.content.y + prev_border_box_bottom + collapsed_margin
                             - child_margin_top;
-                    child.layout(container, dom, source);
+                    child.layout_internal(container, positioned_cb, viewport, dom, source);
 
                     prev_border_box_bottom +=
                         collapsed_margin + child.dimensions.border_box().height;
@@ -698,7 +729,14 @@ impl<'a> LayoutBox<'a> {
 
     // ─── Flexbox Layout Handling ────────────────────────────────────
 
-    fn layout_flex(&mut self, containing_block: Dimensions, dom: &Dom, source: &[u8]) {
+    fn layout_flex(
+        &mut self,
+        containing_block: Dimensions,
+        positioned_cb: Option<Rect>,
+        viewport: Rect,
+        dom: &Dom,
+        source: &[u8],
+    ) {
         self.calculate_block_width(containing_block);
         self.calculate_block_position(containing_block);
         self.calculate_block_height(containing_block);
@@ -968,7 +1006,7 @@ impl<'a> LayoutBox<'a> {
                 } else {
                     let mut temp_container = self.dimensions;
                     temp_container.content.width = final_main;
-                    child.layout(temp_container, dom, source);
+                    child.layout_internal(temp_container, positioned_cb, viewport, dom, source);
                     child.dimensions.content.height.max(
                         child
                             .styled_node
@@ -992,9 +1030,24 @@ impl<'a> LayoutBox<'a> {
                 .sum();
             let unused_main = (container_main_size - total_used_main - total_gaps).max(0.0);
 
+            let is_row_reverse = flex_dir == values::FlexDirection::RowReverse;
             let (start_offset, extra_gap) = match justify_content {
                 values::JustifyContent::FlexStart => (0.0, 0.0),
                 values::JustifyContent::FlexEnd => (unused_main, 0.0),
+                values::JustifyContent::Start => {
+                    if is_row_reverse {
+                        (unused_main, 0.0)
+                    } else {
+                        (0.0, 0.0)
+                    }
+                }
+                values::JustifyContent::End => {
+                    if is_row_reverse {
+                        (0.0, 0.0)
+                    } else {
+                        (unused_main, 0.0)
+                    }
+                }
                 values::JustifyContent::Center => (unused_main / 2.0, 0.0),
                 values::JustifyContent::SpaceBetween => {
                     if num_items > 1 {
@@ -1117,7 +1170,7 @@ impl<'a> LayoutBox<'a> {
                     child.dimensions.content.height = final_cross;
                 }
 
-                child.layout_children_of_sized_box(dom, source);
+                child.layout_children_of_sized_box(positioned_cb, viewport, dom, source);
 
                 main_cursor += final_main + m.extra_main + gap_main + extra_gap;
             }
@@ -1147,14 +1200,30 @@ impl<'a> LayoutBox<'a> {
 
     // ─── Grid Layout Algorithm ──────────────────────────────────────
 
-    fn layout_grid(&mut self, containing_block: Dimensions, dom: &Dom, source: &[u8]) {
+    fn layout_grid(
+        &mut self,
+        containing_block: Dimensions,
+        positioned_cb: Option<Rect>,
+        viewport: Rect,
+        dom: &Dom,
+        source: &[u8],
+    ) {
         self.calculate_block_width(containing_block);
         self.calculate_block_position(containing_block);
+
+        let is_positioned_ancestor = self
+            .styled_node
+            .is_some_and(|n| n.styles.position != values::Position::Static);
+        let next_cb = if is_positioned_ancestor {
+            self.dimensions.padding_box()
+        } else {
+            positioned_cb.unwrap_or_else(|| containing_block.padding_box())
+        };
 
         let style = self.styled_node.unwrap().styles.clone();
 
         if style.grid_template_columns.is_empty() && style.grid_template_rows.is_empty() {
-            self.layout_block_children(dom, source);
+            self.layout_block_children(Some(next_cb), viewport, dom, source);
             self.calculate_block_height(containing_block);
             return;
         }
@@ -1252,7 +1321,7 @@ impl<'a> LayoutBox<'a> {
             item_container.content.y = child_y;
             item_container.content.width = child_w;
 
-            child.layout(item_container, dom, source);
+            child.layout_internal(item_container, Some(next_cb), viewport, dom, source);
 
             let actual_h = child.dimensions.margin_box().height;
             let current_max = *max_row_heights.get(&current_row).unwrap_or(&0.0);
@@ -1280,7 +1349,14 @@ impl<'a> LayoutBox<'a> {
 
     // ─── Inline Layout Handling ────────────────────────────────────
 
-    fn layout_inline(&mut self, containing_block: Dimensions, dom: &Dom, source: &[u8]) {
+    fn layout_inline(
+        &mut self,
+        containing_block: Dimensions,
+        positioned_cb: Option<Rect>,
+        viewport: Rect,
+        dom: &Dom,
+        source: &[u8],
+    ) {
         let style = self.styled_node.map(|n| &n.styles);
 
         // Compute edge sizes from style
@@ -1324,8 +1400,17 @@ impl<'a> LayoutBox<'a> {
         self.dimensions.content.width = containing_block.content.width;
         self.dimensions.content.height = containing_block.content.height;
 
+        let is_positioned_ancestor = self
+            .styled_node
+            .is_some_and(|n| n.styles.position != values::Position::Static);
+        let next_cb = if is_positioned_ancestor {
+            self.dimensions.padding_box()
+        } else {
+            positioned_cb.unwrap_or_else(|| containing_block.padding_box())
+        };
+
         // Layout children
-        self.layout_block_children(dom, source);
+        self.layout_block_children(Some(next_cb), viewport, dom, source);
 
         // Height: explicit or content-driven
         if let Some(h) =
@@ -1538,7 +1623,14 @@ pub fn layout_document<'a>(
         ..Default::default()
     };
 
-    layout_root.layout(initial_containing_block, dom, source);
+    let viewport = Rect {
+        x: 0.0,
+        y: 0.0,
+        width: viewport_width,
+        height: viewport_height,
+    };
+
+    layout_root.layout_internal(initial_containing_block, None, viewport, dom, source);
     Some(layout_root)
 }
 
