@@ -562,6 +562,54 @@ fn build_styled_node(
                             });
                         }
                     }
+                } else if prop == "flex" {
+                    if is_css_wide {
+                        for longhand in &["flex-grow", "flex-shrink", "flex-basis"] {
+                            normalized_decls.push(MatchedDeclaration {
+                                property: Cow::Borrowed(longhand),
+                                value: Cow::Owned(val_lower.clone()),
+                                specificity: decl.specificity,
+                                source_order: decl.source_order,
+                                origin: decl.origin,
+                                important: decl.important,
+                            });
+                        }
+                    } else {
+                        let (grow, shrink, basis) = values::parse_flex_shorthand(val_trimmed);
+                        normalized_decls.push(MatchedDeclaration {
+                            property: Cow::Borrowed("flex-grow"),
+                            value: Cow::Owned(grow),
+                            specificity: decl.specificity,
+                            source_order: decl.source_order,
+                            origin: decl.origin,
+                            important: decl.important,
+                        });
+                        normalized_decls.push(MatchedDeclaration {
+                            property: Cow::Borrowed("flex-shrink"),
+                            value: Cow::Owned(shrink),
+                            specificity: decl.specificity,
+                            source_order: decl.source_order,
+                            origin: decl.origin,
+                            important: decl.important,
+                        });
+                        normalized_decls.push(MatchedDeclaration {
+                            property: Cow::Borrowed("flex-basis"),
+                            value: Cow::Owned(basis),
+                            specificity: decl.specificity,
+                            source_order: decl.source_order,
+                            origin: decl.origin,
+                            important: decl.important,
+                        });
+                    }
+                } else if prop == "gap" {
+                    normalized_decls.push(MatchedDeclaration {
+                        property: Cow::Borrowed("grid-gap"),
+                        value: decl.value,
+                        specificity: decl.specificity,
+                        source_order: decl.source_order,
+                        origin: decl.origin,
+                        important: decl.important,
+                    });
                 } else {
                     normalized_decls.push(decl);
                 }
@@ -664,7 +712,15 @@ fn build_styled_node(
 
                 let prop_name = prop_id.name();
 
-                if let Some(raw_value) = specified.get(prop_name) {
+                let maybe_raw = specified.get(prop_name).or_else(|| {
+                    if prop_id == PropertyId::GridGap {
+                        specified.get("gap")
+                    } else {
+                        None
+                    }
+                });
+
+                if let Some(raw_value) = maybe_raw {
                     let value = substitute_vars(raw_value, &current_variables);
                     if value == "inherit" {
                         copy_property(&mut computed, parent_style, prop_id);
@@ -939,6 +995,18 @@ fn copy_property(child: &mut ComputedStyle, parent: &ComputedStyle, prop: Proper
         PropertyId::AnimationIterationCount => {
             child.animation_iteration_count = parent.animation_iteration_count
         }
+        PropertyId::Top => child.top = parent.top,
+        PropertyId::Right => child.right = parent.right,
+        PropertyId::Bottom => child.bottom = parent.bottom,
+        PropertyId::Left => child.left = parent.left,
+        PropertyId::FlexDirection => child.flex_direction = parent.flex_direction,
+        PropertyId::FlexWrap => child.flex_wrap = parent.flex_wrap,
+        PropertyId::JustifyContent => child.justify_content = parent.justify_content,
+        PropertyId::AlignItems => child.align_items = parent.align_items,
+        PropertyId::AlignSelf => child.align_self = parent.align_self,
+        PropertyId::FlexGrow => child.flex_grow = parent.flex_grow,
+        PropertyId::FlexShrink => child.flex_shrink = parent.flex_shrink,
+        PropertyId::FlexBasis => child.flex_basis = parent.flex_basis,
     }
 }
 

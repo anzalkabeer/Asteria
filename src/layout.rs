@@ -112,8 +112,196 @@ impl<'a> LayoutBox<'a> {
         1 + self.children.iter().map(|c| c.box_count()).sum::<usize>()
     }
 
+    pub fn is_out_of_flow(&self) -> bool {
+        self.styled_node
+            .map(|n| {
+                matches!(
+                    n.styles.position,
+                    values::Position::Absolute | values::Position::Fixed
+                )
+            })
+            .unwrap_or(false)
+    }
+
+    pub fn apply_offset_to_tree(&mut self, dx: f32, dy: f32) {
+        self.dimensions.content.x += dx;
+        self.dimensions.content.y += dy;
+        for child in &mut self.children {
+            child.apply_offset_to_tree(dx, dy);
+        }
+    }
+
+    fn calculate_relative_offset(&self, containing_block: Dimensions) -> (f32, f32) {
+        let Some(styles) = self.styled_node.map(|n| &n.styles) else {
+            return (0.0, 0.0);
+        };
+        if styles.position != values::Position::Relative {
+            return (0.0, 0.0);
+        }
+        let dx = if let Some(left) = styles.left.resolve_against(containing_block.content.width) {
+            left
+        } else if let Some(right) = styles.right.resolve_against(containing_block.content.width) {
+            -right
+        } else {
+            0.0
+        };
+
+        let dy = if let Some(top) = styles.top.resolve_against(containing_block.content.height) {
+            top
+        } else if let Some(bottom) = styles
+            .bottom
+            .resolve_against(containing_block.content.height)
+        {
+            -bottom
+        } else {
+            0.0
+        };
+
+        (dx, dy)
+    }
+
+    fn layout_positioned_child(
+        &mut self,
+        containing_block: Rect,
+        viewport: Rect,
+        dom: &Dom,
+        source: &[u8],
+    ) {
+        let style = self.styled_node.map(|n| &n.styles);
+        let pos = style.map_or(values::Position::Static, |s| s.position);
+        let cb = if pos == values::Position::Fixed {
+            viewport
+        } else {
+            containing_block
+        };
+
+        let ml = style.and_then(|s| s.margin.left).unwrap_or(0.0);
+        let mr = style.and_then(|s| s.margin.right).unwrap_or(0.0);
+        let mt = style.and_then(|s| s.margin.top).unwrap_or(0.0);
+        let mb = style.and_then(|s| s.margin.bottom).unwrap_or(0.0);
+
+        let pl = style.map_or(0.0, |s| s.padding.left);
+        let pr = style.map_or(0.0, |s| s.padding.right);
+        let pt = style.map_or(0.0, |s| s.padding.top);
+        let pb = style.map_or(0.0, |s| s.padding.bottom);
+
+        let bl = style.map_or(0.0, |s| s.border_width.left);
+        let br = style.map_or(0.0, |s| s.border_width.right);
+        let bt = style.map_or(0.0, |s| s.border_width.top);
+        let bb = style.map_or(0.0, |s| s.border_width.bottom);
+
+        self.dimensions.margin = EdgeSizes {
+            top: mt,
+            right: mr,
+            bottom: mb,
+            left: ml,
+        };
+        self.dimensions.padding = EdgeSizes {
+            top: pt,
+            right: pr,
+            bottom: pb,
+            left: pl,
+        };
+        self.dimensions.border = EdgeSizes {
+            top: bt,
+            right: br,
+            bottom: bb,
+            left: bl,
+        };
+
+        let extra_w = ml + mr + pl + pr + bl + br;
+        let extra_h = mt + mb + pt + pb + bt + bb;
+
+        let left_opt = style.and_then(|s| s.left.resolve_against(cb.width));
+        let right_opt = style.and_then(|s| s.right.resolve_against(cb.width));
+        let top_opt = style.and_then(|s| s.top.resolve_against(cb.height));
+        let bottom_opt = style.and_then(|s| s.bottom.resolve_against(cb.height));
+
+        // 1. Resolve content width
+        let width = if let Some(w) = style.and_then(|s| s.width.resolve_against(cb.width)) {
+            if style.is_some_and(|s| s.box_sizing == values::BoxSizing::BorderBox) {
+                (w - pl - pr - bl - br).max(0.0)
+            } else {
+                w
+            }
+        } else if let (Some(l), Some(r)) = (left_opt, right_opt) {
+            (cb.width - l - r - extra_w).max(0.0)
+        } else {
+            compute_intrinsic_inline_width(self.styled_node, dom, source)
+        };
+        self.dimensions.content.width = width;
+
+        // 2. Resolve X position
+        let x = if let Some(l) = left_opt {
+            cb.x + l + ml + bl + pl
+        } else if let Some(r) = right_opt {
+            cb.x + cb.width - r - mr - br - pr - width
+        } else {
+            cb.x + ml + bl + pl
+        };
+        self.dimensions.content.x = x;
+
+        // 3. Resolve explicit or stretched height
+        let explicit_h = style.and_then(|s| s.height.resolve_against(cb.height));
+        if let Some(h) = explicit_h {
+            let ch = if style.is_some_and(|s| s.box_sizing == values::BoxSizing::BorderBox) {
+                (h - pt - pb - bt - bb).max(0.0)
+            } else {
+                h
+            };
+            self.dimensions.content.height = ch;
+        } else if let (Some(t), Some(b)) = (top_opt, bottom_opt) {
+            self.dimensions.content.height = (cb.height - t - b - extra_h).max(0.0);
+        }
+
+        // 4. Resolve preliminary Y position
+        let initial_y = if let Some(t) = top_opt {
+            cb.y + t + mt + bt + pt
+        } else {
+            cb.y + mt + bt + pt
+        };
+        self.dimensions.content.y = initial_y;
+
+        // 5. Layout children with self as their containing block
+        let self_dim = self.dimensions;
+        for child in &mut self.children {
+            child.layout(self_dim, dom, source);
+        }
+
+        // 6. If height is content-driven, calculate height from children
+        if explicit_h.is_none() && (top_opt.is_none() || bottom_opt.is_none()) {
+            let mut max_bottom: f32 = 0.0;
+            for child in &self.children {
+                let bottom_y =
+                    child.dimensions.margin_box().y + child.dimensions.margin_box().height;
+                let rel_bottom = bottom_y - self.dimensions.content.y;
+                max_bottom = max_bottom.max(rel_bottom);
+            }
+            self.dimensions.content.height = max_bottom;
+        }
+
+        // 7. If top is None and bottom is specified, position relative to bottom edge
+        if let (None, Some(b)) = (top_opt, bottom_opt) {
+            let final_y = cb.y + cb.height - b - mb - bb - pb - self.dimensions.content.height;
+            let dy = final_y - initial_y;
+            if dy != 0.0 {
+                self.apply_offset_to_tree(0.0, dy);
+            }
+        }
+    }
+
     /// Recursively compute geometry and position for this box and its subtree.
     pub fn layout(&mut self, containing_block: Dimensions, dom: &Dom, source: &[u8]) {
+        self.layout_internal(containing_block, None, dom, source);
+    }
+
+    fn layout_internal(
+        &mut self,
+        containing_block: Dimensions,
+        positioned_cb: Option<Rect>,
+        dom: &Dom,
+        source: &[u8],
+    ) {
         match self.box_type {
             BoxType::BlockNode | BoxType::AnonymousBlock => {
                 self.layout_block(containing_block, dom, source);
@@ -126,6 +314,85 @@ impl<'a> LayoutBox<'a> {
             }
             BoxType::InlineNode => {
                 self.layout_inline(containing_block, dom, source);
+            }
+        }
+
+        // Apply relative positioning shift if applicable
+        let (dx, dy) = self.calculate_relative_offset(containing_block);
+        if dx != 0.0 || dy != 0.0 {
+            self.apply_offset_to_tree(dx, dy);
+        }
+
+        // Layout out-of-flow positioned children
+        let is_positioned_ancestor = self
+            .styled_node
+            .is_some_and(|n| n.styles.position != values::Position::Static);
+        let next_cb = if is_positioned_ancestor {
+            self.dimensions.padding_box()
+        } else {
+            positioned_cb.unwrap_or_else(|| containing_block.padding_box())
+        };
+
+        let viewport = Rect {
+            x: 0.0,
+            y: 0.0,
+            width: containing_block.content.width,
+            height: containing_block.content.height,
+        };
+
+        for child in &mut self.children {
+            if child.is_out_of_flow() {
+                child.layout_positioned_child(next_cb, viewport, dom, source);
+            }
+        }
+    }
+
+    fn layout_children_of_sized_box(&mut self, dom: &Dom, source: &[u8]) {
+        let saved_height = self.dimensions.content.height;
+        let saved_width = self.dimensions.content.width;
+        match self.box_type {
+            BoxType::BlockNode | BoxType::AnonymousBlock => {
+                self.layout_block_children(dom, source);
+            }
+            BoxType::FlexNode => {
+                let dim = self.dimensions;
+                self.layout_flex(dim, dom, source);
+            }
+            BoxType::GridNode => {
+                let dim = self.dimensions;
+                self.layout_grid(dim, dom, source);
+            }
+            BoxType::InlineNode => {
+                let dim = self.dimensions;
+                for child in &mut self.children {
+                    child.layout(dim, dom, source);
+                }
+            }
+        }
+        if saved_height > 0.0 {
+            self.dimensions.content.height = saved_height;
+        }
+        if saved_width > 0.0 {
+            self.dimensions.content.width = saved_width;
+        }
+
+        // Apply relative positioning shift if applicable
+        let (dx, dy) = self.calculate_relative_offset(self.dimensions);
+        if dx != 0.0 || dy != 0.0 {
+            self.apply_offset_to_tree(dx, dy);
+        }
+
+        // Layout out-of-flow positioned children
+        let cb = self.dimensions.padding_box();
+        let viewport = Rect {
+            x: 0.0,
+            y: 0.0,
+            width: self.dimensions.content.width,
+            height: self.dimensions.content.height,
+        };
+        for child in &mut self.children {
+            if child.is_out_of_flow() {
+                child.layout_positioned_child(cb, viewport, dom, source);
             }
         }
     }
@@ -267,11 +534,11 @@ impl<'a> LayoutBox<'a> {
 
     /// Layout children inside this box.
     /// If children are InlineNodes, format them in a horizontal line box context.
-    /// If children are BlockNodes, stack them vertically.
     fn layout_block_children(&mut self, dom: &Dom, source: &[u8]) {
         let is_inline_context = self
             .children
             .iter()
+            .filter(|c| !c.is_out_of_flow())
             .all(|c| c.box_type == BoxType::InlineNode);
 
         if is_inline_context && !self.children.is_empty() {
@@ -282,6 +549,9 @@ impl<'a> LayoutBox<'a> {
             let container_max_w = self.dimensions.content.width;
 
             for child in &mut self.children {
+                if child.is_out_of_flow() {
+                    continue;
+                }
                 let style = child.styled_node.map(|n| &n.styles);
 
                 let margin_left = style.and_then(|s| s.margin.left).unwrap_or(0.0);
@@ -374,6 +644,9 @@ impl<'a> LayoutBox<'a> {
             let parent_content_height = self.dimensions.content.height;
 
             for child in &mut self.children {
+                if child.is_out_of_flow() {
+                    continue;
+                }
                 let child_margin_top = child
                     .styled_node
                     .and_then(|n| n.styles.margin.top)
@@ -428,119 +701,447 @@ impl<'a> LayoutBox<'a> {
     fn layout_flex(&mut self, containing_block: Dimensions, dom: &Dom, source: &[u8]) {
         self.calculate_block_width(containing_block);
         self.calculate_block_position(containing_block);
+        self.calculate_block_height(containing_block);
 
-        let start_x = self.dimensions.content.x;
-        let container_max_x = start_x + self.dimensions.content.width;
+        let Some(flex_styles) = self.styled_node.map(|n| n.styles.clone()) else {
+            return;
+        };
 
-        let mut cursor_x = start_x;
-        let mut cursor_y = self.dimensions.content.y;
-        let mut max_line_height: f32 = 0.0;
-        let mut total_flex_height: f32 = 0.0;
-        let gap = self
-            .styled_node
-            .map(|s| s.styles.grid_gap.right)
-            .unwrap_or(0.0);
+        let flex_dir = flex_styles.flex_direction;
+        let flex_wrap = flex_styles.flex_wrap;
+        let justify_content = flex_styles.justify_content;
+        let align_items = flex_styles.align_items;
 
-        let mut unconstrained_auto_count = 0;
-        let mut fixed_or_intrinsic_width = 0.0;
-        for child in &self.children {
-            let margin_w = child.styled_node.map_or(0.0, |n| {
-                n.styles.margin.left.unwrap_or(0.0) + n.styles.margin.right.unwrap_or(0.0)
-            });
-            let padding_w = child
-                .styled_node
-                .map_or(0.0, |n| n.styles.padding.left + n.styles.padding.right);
-            let border_w = child.styled_node.map_or(0.0, |n| {
-                n.styles.border_width.left + n.styles.border_width.right
-            });
-            let extra = margin_w + padding_w + border_w;
+        let is_column = matches!(
+            flex_dir,
+            values::FlexDirection::Column | values::FlexDirection::ColumnReverse
+        );
+        let is_reverse = matches!(
+            flex_dir,
+            values::FlexDirection::RowReverse | values::FlexDirection::ColumnReverse
+        );
 
-            if let Some(w) = child.styled_node.and_then(|n| {
-                n.styles
-                    .width
-                    .resolve_against(self.dimensions.content.width)
-            }) {
-                fixed_or_intrinsic_width += w + extra;
+        let gap_main = if is_column {
+            flex_styles.grid_gap.bottom
+        } else {
+            flex_styles.grid_gap.right
+        };
+        let gap_cross = if is_column {
+            flex_styles.grid_gap.right
+        } else {
+            flex_styles.grid_gap.bottom
+        };
+
+        let container_main_size = if is_column {
+            flex_styles
+                .height
+                .resolve_against(containing_block.content.height)
+                .unwrap_or(0.0)
+        } else {
+            self.dimensions.content.width
+        };
+
+        let container_cross_size = if is_column {
+            self.dimensions.content.width
+        } else {
+            flex_styles
+                .height
+                .resolve_against(containing_block.content.height)
+                .unwrap_or(0.0)
+        };
+
+        // Collect in-flow item indices
+        let mut item_indices: Vec<usize> = self
+            .children
+            .iter()
+            .enumerate()
+            .filter(|(_, c)| !c.is_out_of_flow())
+            .map(|(i, _)| i)
+            .collect();
+
+        if is_reverse {
+            item_indices.reverse();
+        }
+
+        if item_indices.is_empty() {
+            if is_column && container_main_size == 0.0 {
+                self.dimensions.content.height = 0.0;
+            }
+            self.calculate_block_height(containing_block);
+            return;
+        }
+
+        // Measure item base sizes
+        struct ItemMeasure {
+            index: usize,
+            base_main: f32,
+            extra_main: f32,
+            extra_cross: f32,
+            flex_grow: f32,
+            flex_shrink: f32,
+            explicit_cross: Option<f32>,
+            align_self: values::AlignSelf,
+        }
+
+        let mut measures = Vec::with_capacity(item_indices.len());
+        for &idx in &item_indices {
+            let child = &self.children[idx];
+            let style = child.styled_node.map(|n| &n.styles);
+
+            let ml = style.and_then(|s| s.margin.left).unwrap_or(0.0);
+            let mr = style.and_then(|s| s.margin.right).unwrap_or(0.0);
+            let mt = style.and_then(|s| s.margin.top).unwrap_or(0.0);
+            let mb = style.and_then(|s| s.margin.bottom).unwrap_or(0.0);
+
+            let pl = style.map_or(0.0, |s| s.padding.left);
+            let pr = style.map_or(0.0, |s| s.padding.right);
+            let pt = style.map_or(0.0, |s| s.padding.top);
+            let pb = style.map_or(0.0, |s| s.padding.bottom);
+
+            let bl = style.map_or(0.0, |s| s.border_width.left);
+            let br = style.map_or(0.0, |s| s.border_width.right);
+            let bt = style.map_or(0.0, |s| s.border_width.top);
+            let bb = style.map_or(0.0, |s| s.border_width.bottom);
+
+            let (extra_main, extra_cross) = if is_column {
+                (mt + mb + pt + pb + bt + bb, ml + mr + pl + pr + bl + br)
             } else {
-                let intrinsic = compute_intrinsic_inline_width(child.styled_node, dom, source);
-                if intrinsic > 0.0 {
-                    fixed_or_intrinsic_width += intrinsic + extra;
-                } else {
-                    unconstrained_auto_count += 1;
-                    fixed_or_intrinsic_width += extra; // just extra
+                (ml + mr + pl + pr + bl + br, mt + mb + pt + pb + bt + bb)
+            };
+
+            let grow = style.map_or(0.0, |s| s.flex_grow);
+            let shrink = style.map_or(1.0, |s| s.flex_shrink);
+            let align_self = style.map_or(values::AlignSelf::Auto, |s| s.align_self);
+
+            let (base_main, explicit_cross) = if is_column {
+                let cross = style.and_then(|s| s.width.resolve_against(container_cross_size));
+                let base = match style.map(|s| s.flex_basis) {
+                    Some(values::LengthOrPercentage::Px(v)) => v,
+                    Some(values::LengthOrPercentage::Percentage(p)) => {
+                        if container_main_size > 0.0 {
+                            p / 100.0 * container_main_size
+                        } else {
+                            0.0
+                        }
+                    }
+                    _ => style
+                        .and_then(|s| s.height.resolve_against(container_main_size))
+                        .unwrap_or_else(|| style.map_or(16.0 * 1.2, |s| s.font_size * 1.2)),
+                };
+                (base, cross)
+            } else {
+                let cross = style.and_then(|s| s.height.resolve_against(container_cross_size));
+                let base = match style.map(|s| s.flex_basis) {
+                    Some(values::LengthOrPercentage::Px(v)) => v,
+                    Some(values::LengthOrPercentage::Percentage(p)) => {
+                        p / 100.0 * container_main_size
+                    }
+                    _ => style
+                        .and_then(|s| s.width.resolve_against(container_main_size))
+                        .unwrap_or_else(|| {
+                            let intrinsic =
+                                compute_intrinsic_inline_width(child.styled_node, dom, source);
+                            if intrinsic > 0.0 { intrinsic } else { 0.0 }
+                        }),
+                };
+                (base, cross)
+            };
+
+            measures.push(ItemMeasure {
+                index: idx,
+                base_main,
+                extra_main,
+                extra_cross,
+                flex_grow: grow,
+                flex_shrink: shrink,
+                explicit_cross,
+                align_self,
+            });
+        }
+
+        // Collect into flex lines
+        let can_wrap = matches!(
+            flex_wrap,
+            values::FlexWrap::Wrap | values::FlexWrap::WrapReverse
+        );
+        let mut lines: Vec<Vec<usize>> = Vec::new();
+        let mut current_line: Vec<usize> = Vec::new();
+        let mut current_line_main: f32 = 0.0;
+
+        for (m_idx, m) in measures.iter().enumerate() {
+            let outer_main = m.base_main + m.extra_main;
+            if can_wrap
+                && !current_line.is_empty()
+                && container_main_size > 0.0
+                && current_line_main + gap_main + outer_main > container_main_size
+            {
+                lines.push(std::mem::take(&mut current_line));
+                current_line_main = 0.0;
+            }
+            if !current_line.is_empty() {
+                current_line_main += gap_main;
+            }
+            current_line_main += outer_main;
+            current_line.push(m_idx);
+        }
+        if !current_line.is_empty() {
+            lines.push(current_line);
+        }
+
+        if flex_wrap == values::FlexWrap::WrapReverse {
+            lines.reverse();
+        }
+
+        let mut cross_cursor = if is_column {
+            self.dimensions.content.x
+        } else {
+            self.dimensions.content.y
+        };
+
+        let mut total_cross_accum = 0.0;
+
+        for (line_idx, line) in lines.iter().enumerate() {
+            if line_idx > 0 {
+                cross_cursor += gap_cross;
+                total_cross_accum += gap_cross;
+            }
+
+            // Step A: Resolve flex-grow / flex-shrink
+            let num_items = line.len();
+            let total_item_base_outer: f32 = line
+                .iter()
+                .map(|&i| measures[i].base_main + measures[i].extra_main)
+                .sum();
+            let total_gaps = if num_items > 1 {
+                gap_main * (num_items - 1) as f32
+            } else {
+                0.0
+            };
+            let free_space = container_main_size - total_item_base_outer - total_gaps;
+
+            let mut final_mains: Vec<f32> = Vec::with_capacity(num_items);
+
+            if free_space > 0.0 && container_main_size > 0.0 {
+                let total_grow: f32 = line.iter().map(|&i| measures[i].flex_grow).sum();
+                for &i in line {
+                    let m = &measures[i];
+                    let delta = if total_grow > 0.0 {
+                        free_space * (m.flex_grow / total_grow)
+                    } else {
+                        0.0
+                    };
+                    final_mains.push(m.base_main + delta);
+                }
+            } else if free_space < 0.0 && container_main_size > 0.0 {
+                let total_shrink_scaled: f32 = line
+                    .iter()
+                    .map(|&i| measures[i].flex_shrink * measures[i].base_main)
+                    .sum();
+                for &i in line {
+                    let m = &measures[i];
+                    let delta = if total_shrink_scaled > 0.0 {
+                        (-free_space) * (m.flex_shrink * m.base_main / total_shrink_scaled)
+                    } else {
+                        0.0
+                    };
+                    final_mains.push((m.base_main - delta).max(0.0));
+                }
+            } else {
+                for &i in line {
+                    final_mains.push(measures[i].base_main);
                 }
             }
-        }
 
-        let total_gaps = if self.children.is_empty() {
-            0.0
-        } else {
-            gap * (self.children.len() - 1) as f32
-        };
-        let available_for_auto =
-            (self.dimensions.content.width - fixed_or_intrinsic_width - total_gaps).max(0.0);
-        let fair_share = if unconstrained_auto_count > 0 {
-            available_for_auto / unconstrained_auto_count as f32
-        } else {
-            0.0
-        };
+            // Step B: Determine line cross size
+            let mut line_cross_size: f32 = 0.0;
+            let mut measured_cross_sizes: Vec<f32> = Vec::with_capacity(num_items);
 
-        for child in &mut self.children {
-            let margin_w = child.styled_node.map_or(0.0, |n| {
-                n.styles.margin.left.unwrap_or(0.0) + n.styles.margin.right.unwrap_or(0.0)
-            });
-            let padding_w = child
-                .styled_node
-                .map_or(0.0, |n| n.styles.padding.left + n.styles.padding.right);
-            let border_w = child.styled_node.map_or(0.0, |n| {
-                n.styles.border_width.left + n.styles.border_width.right
-            });
+            for (pos_in_line, &i) in line.iter().enumerate() {
+                let m = &measures[i];
+                let final_main = final_mains[pos_in_line];
+                let child = &mut self.children[m.index];
 
-            // If no explicit width, use intrinsic content width or
-            // divide remaining container space equally among auto-width children
-            let child_w = child
-                .styled_node
-                .and_then(|n| {
-                    n.styles
-                        .width
-                        .resolve_against(self.dimensions.content.width)
-                })
-                .unwrap_or_else(|| {
-                    // Compute intrinsic width from text/child content
-                    let intrinsic = compute_intrinsic_inline_width(child.styled_node, dom, source);
-                    if intrinsic > 0.0 {
-                        intrinsic
-                    } else {
-                        // Fallback: fair share of remaining container width
-                        fair_share
-                    }
-                });
+                let item_cross = if let Some(exp_c) = m.explicit_cross {
+                    exp_c
+                } else if is_column {
+                    container_cross_size
+                } else {
+                    let mut temp_container = self.dimensions;
+                    temp_container.content.width = final_main;
+                    child.layout(temp_container, dom, source);
+                    child.dimensions.content.height.max(
+                        child
+                            .styled_node
+                            .map_or(16.0 * 1.2, |s| s.styles.font_size * 1.2),
+                    )
+                };
 
-            let outer_item_w = child_w + margin_w + padding_w + border_w;
-
-            // Flex Row Line Wrap Check: if adding child exceeds container max width, wrap to next flex row!
-            if cursor_x > start_x && (cursor_x + outer_item_w > container_max_x) {
-                cursor_x = start_x;
-                cursor_y += max_line_height + gap;
-                total_flex_height += max_line_height + gap;
-                max_line_height = 0.0;
+                measured_cross_sizes.push(item_cross);
+                line_cross_size = line_cross_size.max(item_cross + m.extra_cross);
             }
 
-            let mut item_container = self.dimensions;
-            item_container.content.x = cursor_x;
-            item_container.content.y = cursor_y;
-            item_container.content.width = child_w;
+            if !is_column && container_cross_size > line_cross_size && lines.len() == 1 {
+                line_cross_size = container_cross_size;
+            }
 
-            child.layout(item_container, dom, source);
+            // Step C: Main axis justify-content
+            let total_used_main: f32 = line
+                .iter()
+                .enumerate()
+                .map(|(pos, &i)| final_mains[pos] + measures[i].extra_main)
+                .sum();
+            let unused_main = (container_main_size - total_used_main - total_gaps).max(0.0);
 
-            let actual_w = child.dimensions.margin_box().width;
-            let actual_h = child.dimensions.margin_box().height;
+            let (start_offset, extra_gap) = match justify_content {
+                values::JustifyContent::FlexStart => (0.0, 0.0),
+                values::JustifyContent::FlexEnd => (unused_main, 0.0),
+                values::JustifyContent::Center => (unused_main / 2.0, 0.0),
+                values::JustifyContent::SpaceBetween => {
+                    if num_items > 1 {
+                        (0.0, unused_main / (num_items - 1) as f32)
+                    } else {
+                        (0.0, 0.0)
+                    }
+                }
+                values::JustifyContent::SpaceAround => {
+                    if num_items > 0 {
+                        let unit = unused_main / num_items as f32;
+                        (unit / 2.0, unit)
+                    } else {
+                        (0.0, 0.0)
+                    }
+                }
+                values::JustifyContent::SpaceEvenly => {
+                    if num_items > 0 {
+                        let unit = unused_main / (num_items + 1) as f32;
+                        (unit, unit)
+                    } else {
+                        (0.0, 0.0)
+                    }
+                }
+            };
 
-            cursor_x += actual_w + gap;
-            max_line_height = max_line_height.max(actual_h);
+            // Step D: Position each item in this line
+            let mut main_cursor = if is_column {
+                self.dimensions.content.y + start_offset
+            } else {
+                self.dimensions.content.x + start_offset
+            };
+
+            for (pos_in_line, &i) in line.iter().enumerate() {
+                let m = &measures[i];
+                let final_main = final_mains[pos_in_line];
+                let measured_cross = measured_cross_sizes[pos_in_line];
+                let child = &mut self.children[m.index];
+                let style = child.styled_node.map(|n| &n.styles);
+
+                let ml = style.and_then(|s| s.margin.left).unwrap_or(0.0);
+                let mr = style.and_then(|s| s.margin.right).unwrap_or(0.0);
+                let mt = style.and_then(|s| s.margin.top).unwrap_or(0.0);
+                let mb = style.and_then(|s| s.margin.bottom).unwrap_or(0.0);
+
+                let pl = style.map_or(0.0, |s| s.padding.left);
+                let pr = style.map_or(0.0, |s| s.padding.right);
+                let pt = style.map_or(0.0, |s| s.padding.top);
+                let pb = style.map_or(0.0, |s| s.padding.bottom);
+
+                let bl = style.map_or(0.0, |s| s.border_width.left);
+                let br = style.map_or(0.0, |s| s.border_width.right);
+                let bt = style.map_or(0.0, |s| s.border_width.top);
+                let bb = style.map_or(0.0, |s| s.border_width.bottom);
+
+                child.dimensions.margin = EdgeSizes {
+                    top: mt,
+                    right: mr,
+                    bottom: mb,
+                    left: ml,
+                };
+                child.dimensions.padding = EdgeSizes {
+                    top: pt,
+                    right: pr,
+                    bottom: pb,
+                    left: pl,
+                };
+                child.dimensions.border = EdgeSizes {
+                    top: bt,
+                    right: br,
+                    bottom: bb,
+                    left: bl,
+                };
+
+                let align = if m.align_self != values::AlignSelf::Auto {
+                    m.align_self
+                } else {
+                    match align_items {
+                        values::AlignItems::Stretch => values::AlignSelf::Stretch,
+                        values::AlignItems::FlexStart => values::AlignSelf::FlexStart,
+                        values::AlignItems::FlexEnd => values::AlignSelf::FlexEnd,
+                        values::AlignItems::Center => values::AlignSelf::Center,
+                        values::AlignItems::Baseline => values::AlignSelf::Baseline,
+                    }
+                };
+
+                let (final_cross, cross_offset) = match align {
+                    values::AlignSelf::Stretch => {
+                        let stretched = if m.explicit_cross.is_none() {
+                            (line_cross_size - m.extra_cross).max(0.0)
+                        } else {
+                            measured_cross
+                        };
+                        (stretched, 0.0)
+                    }
+                    values::AlignSelf::FlexStart | values::AlignSelf::Baseline => {
+                        (measured_cross, 0.0)
+                    }
+                    values::AlignSelf::FlexEnd => {
+                        let off = (line_cross_size - (measured_cross + m.extra_cross)).max(0.0);
+                        (measured_cross, off)
+                    }
+                    values::AlignSelf::Center => {
+                        let off =
+                            ((line_cross_size - (measured_cross + m.extra_cross)) / 2.0).max(0.0);
+                        (measured_cross, off)
+                    }
+                    values::AlignSelf::Auto => (measured_cross, 0.0),
+                };
+
+                if is_column {
+                    child.dimensions.content.x = cross_cursor + cross_offset + ml + bl + pl;
+                    child.dimensions.content.y = main_cursor + mt + bt + pt;
+                    child.dimensions.content.width = final_cross;
+                    child.dimensions.content.height = final_main;
+                } else {
+                    child.dimensions.content.x = main_cursor + ml + bl + pl;
+                    child.dimensions.content.y = cross_cursor + cross_offset + mt + bt + pt;
+                    child.dimensions.content.width = final_main;
+                    child.dimensions.content.height = final_cross;
+                }
+
+                child.layout_children_of_sized_box(dom, source);
+
+                main_cursor += final_main + m.extra_main + gap_main + extra_gap;
+            }
+
+            cross_cursor += line_cross_size;
+            total_cross_accum += line_cross_size;
         }
 
-        self.dimensions.content.height = total_flex_height + max_line_height;
+        if is_column {
+            if flex_styles.height.is_auto() {
+                let mut max_y = self.dimensions.content.y;
+                for child in &self.children {
+                    if !child.is_out_of_flow() {
+                        let child_bot =
+                            child.dimensions.margin_box().y + child.dimensions.margin_box().height;
+                        max_y = max_y.max(child_bot);
+                    }
+                }
+                self.dimensions.content.height = (max_y - self.dimensions.content.y).max(0.0);
+            }
+        } else if flex_styles.height.is_auto() {
+            self.dimensions.content.height = total_cross_accum;
+        }
+
         self.calculate_block_height(containing_block);
     }
 
@@ -607,6 +1208,9 @@ impl<'a> LayoutBox<'a> {
         let start_y = self.dimensions.content.y;
 
         for child in &mut self.children {
+            if child.is_out_of_flow() {
+                continue;
+            }
             let mut col_span = 1;
 
             if let Some(child_style) = child.styled_node {
@@ -874,10 +1478,11 @@ pub fn build_layout_tree<'a>(
     } else {
         // Process children to wrap inline nodes in anonymous block boxes if mixed
         let contains_blocks = child_boxes.iter().any(|b| {
-            b.box_type == BoxType::BlockNode
-                || b.box_type == BoxType::AnonymousBlock
-                || b.box_type == BoxType::FlexNode
-                || b.box_type == BoxType::GridNode
+            !b.is_out_of_flow()
+                && (b.box_type == BoxType::BlockNode
+                    || b.box_type == BoxType::AnonymousBlock
+                    || b.box_type == BoxType::FlexNode
+                    || b.box_type == BoxType::GridNode)
         });
 
         if contains_blocks {
@@ -885,7 +1490,8 @@ pub fn build_layout_tree<'a>(
             let mut anonymous_buffer: Option<LayoutBox<'a>> = None;
 
             for child in child_boxes {
-                if child.box_type == BoxType::BlockNode
+                if child.is_out_of_flow()
+                    || child.box_type == BoxType::BlockNode
                     || child.box_type == BoxType::AnonymousBlock
                     || child.box_type == BoxType::FlexNode
                     || child.box_type == BoxType::GridNode

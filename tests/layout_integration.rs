@@ -210,3 +210,285 @@ fn test_content_box_sizing_specified_width() {
     assert_eq!(box_node.dimensions.border.left, 1.0);
     assert_eq!(box_node.dimensions.border_box().width, 234.0);
 }
+
+#[test]
+fn test_relative_positioning_offsets() {
+    let mut dom_store = None;
+    let mut bytes_store = Vec::new();
+    let mut styled_store = None;
+
+    let html = r#"<html><body><div id="first"></div><div id="rel"></div><div id="third"></div></body></html>"#;
+    let css = r#"
+        div { margin: 0px; padding: 0px; border: 0px; }
+        #first { width: 100px; height: 50px; }
+        #rel { position: relative; top: 15px; left: 25px; width: 100px; height: 50px; }
+        #third { width: 100px; height: 50px; }
+    "#;
+
+    let layout = parse_and_layout(
+        html,
+        css,
+        800.0,
+        600.0,
+        &mut dom_store,
+        &mut bytes_store,
+        &mut styled_store,
+    );
+
+    let html_box = &layout.children[0];
+    let body_box = &html_box.children[0];
+    let first = &body_box.children[0];
+    let rel = &body_box.children[1];
+    let third = &body_box.children[2];
+
+    let body_x = body_box.dimensions.content.x;
+    let body_y = body_box.dimensions.content.y;
+
+    assert_eq!(first.dimensions.content.x, body_x);
+    assert_eq!(first.dimensions.content.y, body_y);
+
+    assert_eq!(rel.dimensions.content.x, body_x + 25.0);
+    assert_eq!(rel.dimensions.content.y, body_y + 50.0 + 15.0);
+
+    assert_eq!(third.dimensions.content.x, body_x);
+    assert_eq!(third.dimensions.content.y, body_y + 100.0);
+}
+
+#[test]
+fn test_absolute_positioning_insets() {
+    let mut dom_store = None;
+    let mut bytes_store = Vec::new();
+    let mut styled_store = None;
+
+    let html = r#"<html><body><div id="parent"><div id="child"></div></div></body></html>"#;
+    let css = r#"
+        div { margin: 0px; border: 0px; }
+        #parent { position: relative; width: 400px; height: 300px; padding: 10px; }
+        #child { position: absolute; top: 20px; right: 30px; width: 100px; height: 60px; padding: 0px; }
+    "#;
+
+    let layout = parse_and_layout(
+        html,
+        css,
+        800.0,
+        600.0,
+        &mut dom_store,
+        &mut bytes_store,
+        &mut styled_store,
+    );
+
+    let html_box = &layout.children[0];
+    let body_box = &html_box.children[0];
+    let parent_box = &body_box.children[0];
+    let child_box = &parent_box.children[0];
+
+    let pad_box = parent_box.dimensions.padding_box();
+    assert_eq!(child_box.dimensions.content.y, pad_box.y + 20.0);
+    assert_eq!(
+        child_box.dimensions.content.x,
+        pad_box.x + pad_box.width - 30.0 - 100.0
+    );
+    assert_eq!(child_box.dimensions.content.width, 100.0);
+    assert_eq!(child_box.dimensions.content.height, 60.0);
+}
+
+#[test]
+fn test_fixed_positioning_viewport_anchor() {
+    let mut dom_store = None;
+    let mut bytes_store = Vec::new();
+    let mut styled_store = None;
+
+    let html = r#"<html><body><div id="nested"><div id="fixed"></div></div></body></html>"#;
+    let css = r#"
+        div { margin: 0px; padding: 0px; border: 0px; }
+        #nested { margin: 50px; padding: 20px; }
+        #fixed { position: fixed; top: 10px; left: 15px; width: 120px; height: 40px; }
+    "#;
+
+    let layout = parse_and_layout(
+        html,
+        css,
+        800.0,
+        600.0,
+        &mut dom_store,
+        &mut bytes_store,
+        &mut styled_store,
+    );
+
+    let html_box = &layout.children[0];
+    let body_box = &html_box.children[0];
+    let nested = &body_box.children[0];
+    let fixed_child = &nested.children[0];
+
+    assert_eq!(fixed_child.dimensions.content.x, 15.0);
+    assert_eq!(fixed_child.dimensions.content.y, 10.0);
+    assert_eq!(fixed_child.dimensions.content.width, 120.0);
+    assert_eq!(fixed_child.dimensions.content.height, 40.0);
+}
+
+#[test]
+fn test_flex_grow_distribution() {
+    let mut dom_store = None;
+    let mut bytes_store = Vec::new();
+    let mut styled_store = None;
+
+    let html = r#"<html><body><div id="container"><div id="b1"></div><div id="b2"></div></div></body></html>"#;
+    let css = r#"
+        div { margin: 0px; padding: 0px; border: 0px; }
+        #container { display: flex; width: 600px; }
+        #b1 { width: 100px; flex-grow: 1; }
+        #b2 { width: 200px; flex-grow: 2; }
+    "#;
+
+    let layout = parse_and_layout(
+        html,
+        css,
+        800.0,
+        600.0,
+        &mut dom_store,
+        &mut bytes_store,
+        &mut styled_store,
+    );
+
+    let html_box = &layout.children[0];
+    let body_box = &html_box.children[0];
+    let container = &body_box.children[0];
+    let box1 = &container.children[0];
+    let box2 = &container.children[1];
+
+    assert_eq!(box1.dimensions.content.width, 200.0);
+    assert_eq!(box2.dimensions.content.width, 400.0);
+}
+
+#[test]
+fn test_flex_direction_column() {
+    let mut dom_store = None;
+    let mut bytes_store = Vec::new();
+    let mut styled_store = None;
+
+    let html = r#"<html><body><div id="container"><div id="item1"></div><div id="item2"></div></div></body></html>"#;
+    let css = r#"
+        div { margin: 0px; padding: 0px; border: 0px; }
+        #container { display: flex; flex-direction: column; width: 300px; height: 400px; gap: 10px; }
+        #item1 { height: 50px; }
+        #item2 { height: 70px; }
+    "#;
+
+    let layout = parse_and_layout(
+        html,
+        css,
+        800.0,
+        600.0,
+        &mut dom_store,
+        &mut bytes_store,
+        &mut styled_store,
+    );
+
+    let html_box = &layout.children[0];
+    let body_box = &html_box.children[0];
+    let container = &body_box.children[0];
+    let item1 = &container.children[0];
+    let item2 = &container.children[1];
+
+    assert_eq!(item1.dimensions.content.y, container.dimensions.content.y);
+    assert_eq!(
+        item2.dimensions.content.y,
+        container.dimensions.content.y + 50.0 + 10.0
+    );
+    assert_eq!(item1.dimensions.content.height, 50.0);
+    assert_eq!(item2.dimensions.content.height, 70.0);
+    assert_eq!(item1.dimensions.content.width, 300.0);
+    assert_eq!(item2.dimensions.content.width, 300.0);
+}
+
+#[test]
+fn test_flex_justify_content() {
+    let mut dom_store = None;
+    let mut bytes_store = Vec::new();
+    let mut styled_store = None;
+
+    let html = r#"<html><body><div id="c_center"><div class="item"></div><div class="item"></div></div><div id="c_between"><div class="item"></div><div class="item"></div></div></body></html>"#;
+    let css = r#"
+        div { margin: 0px; padding: 0px; border: 0px; }
+        #c_center { display: flex; justify-content: center; width: 500px; }
+        #c_between { display: flex; justify-content: space-between; width: 500px; }
+        .item { width: 100px; height: 40px; }
+    "#;
+
+    let layout = parse_and_layout(
+        html,
+        css,
+        800.0,
+        600.0,
+        &mut dom_store,
+        &mut bytes_store,
+        &mut styled_store,
+    );
+
+    let html_box = &layout.children[0];
+    let body_box = &html_box.children[0];
+    let c_center = &body_box.children[0];
+    let c_between = &body_box.children[1];
+
+    let center_item0 = &c_center.children[0];
+    let center_item1 = &c_center.children[1];
+    assert_eq!(
+        center_item0.dimensions.content.x,
+        c_center.dimensions.content.x + 150.0
+    );
+    assert_eq!(
+        center_item1.dimensions.content.x,
+        c_center.dimensions.content.x + 250.0
+    );
+
+    let between_item0 = &c_between.children[0];
+    let between_item1 = &c_between.children[1];
+    assert_eq!(
+        between_item0.dimensions.content.x,
+        c_between.dimensions.content.x
+    );
+    assert_eq!(
+        between_item1.dimensions.content.x,
+        c_between.dimensions.content.x + 400.0
+    );
+}
+
+#[test]
+fn test_flex_align_items_and_self() {
+    let mut dom_store = None;
+    let mut bytes_store = Vec::new();
+    let mut styled_store = None;
+
+    let html = r#"<html><body><div id="container"><div id="i1"></div><div id="i2"></div></div></body></html>"#;
+    let css = r#"
+        div { margin: 0px; padding: 0px; border: 0px; }
+        #container { display: flex; align-items: center; width: 400px; height: 200px; }
+        #i1 { width: 100px; height: 60px; }
+        #i2 { width: 100px; height: 60px; align-self: flex-end; }
+    "#;
+
+    let layout = parse_and_layout(
+        html,
+        css,
+        800.0,
+        600.0,
+        &mut dom_store,
+        &mut bytes_store,
+        &mut styled_store,
+    );
+
+    let html_box = &layout.children[0];
+    let body_box = &html_box.children[0];
+    let container = &body_box.children[0];
+    let i1 = &container.children[0];
+    let i2 = &container.children[1];
+
+    assert_eq!(
+        i1.dimensions.content.y,
+        container.dimensions.content.y + 70.0
+    );
+    assert_eq!(
+        i2.dimensions.content.y,
+        container.dimensions.content.y + 140.0
+    );
+}

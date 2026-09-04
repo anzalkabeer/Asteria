@@ -184,6 +184,111 @@ pub enum BoxSizing {
     BorderBox,
 }
 
+// ─── Flexbox Types ───────────────────────────────────────────────
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FlexDirection {
+    Row,
+    RowReverse,
+    Column,
+    ColumnReverse,
+}
+
+impl std::fmt::Display for FlexDirection {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            FlexDirection::Row => write!(f, "row"),
+            FlexDirection::RowReverse => write!(f, "row-reverse"),
+            FlexDirection::Column => write!(f, "column"),
+            FlexDirection::ColumnReverse => write!(f, "column-reverse"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FlexWrap {
+    NoWrap,
+    Wrap,
+    WrapReverse,
+}
+
+impl std::fmt::Display for FlexWrap {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            FlexWrap::NoWrap => write!(f, "nowrap"),
+            FlexWrap::Wrap => write!(f, "wrap"),
+            FlexWrap::WrapReverse => write!(f, "wrap-reverse"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum JustifyContent {
+    FlexStart,
+    FlexEnd,
+    Center,
+    SpaceBetween,
+    SpaceAround,
+    SpaceEvenly,
+}
+
+impl std::fmt::Display for JustifyContent {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            JustifyContent::FlexStart => write!(f, "flex-start"),
+            JustifyContent::FlexEnd => write!(f, "flex-end"),
+            JustifyContent::Center => write!(f, "center"),
+            JustifyContent::SpaceBetween => write!(f, "space-between"),
+            JustifyContent::SpaceAround => write!(f, "space-around"),
+            JustifyContent::SpaceEvenly => write!(f, "space-evenly"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AlignItems {
+    Stretch,
+    FlexStart,
+    FlexEnd,
+    Center,
+    Baseline,
+}
+
+impl std::fmt::Display for AlignItems {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            AlignItems::Stretch => write!(f, "stretch"),
+            AlignItems::FlexStart => write!(f, "flex-start"),
+            AlignItems::FlexEnd => write!(f, "flex-end"),
+            AlignItems::Center => write!(f, "center"),
+            AlignItems::Baseline => write!(f, "baseline"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AlignSelf {
+    Auto,
+    Stretch,
+    FlexStart,
+    FlexEnd,
+    Center,
+    Baseline,
+}
+
+impl std::fmt::Display for AlignSelf {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            AlignSelf::Auto => write!(f, "auto"),
+            AlignSelf::Stretch => write!(f, "stretch"),
+            AlignSelf::FlexStart => write!(f, "flex-start"),
+            AlignSelf::FlexEnd => write!(f, "flex-end"),
+            AlignSelf::Center => write!(f, "center"),
+            AlignSelf::Baseline => write!(f, "baseline"),
+        }
+    }
+}
+
 // ─── Edges (padding/border/gap) ──────────────────────────────────
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -298,6 +403,12 @@ pub struct ComputedStyle {
     pub height: LengthOrPercentage,
     pub box_sizing: BoxSizing, // content-box | border-box
 
+    // Insets (Positioning)
+    pub top: LengthOrPercentage,
+    pub right: LengthOrPercentage,
+    pub bottom: LengthOrPercentage,
+    pub left: LengthOrPercentage,
+
     // Margins (px or auto)
     pub margin: Margin,
     // Padding (px)
@@ -315,6 +426,16 @@ pub struct ComputedStyle {
     pub font_weight: f32, // 400 = normal, 700 = bold
     pub text_align: TextAlign,
     pub line_height: f32, // px
+
+    // Flexbox
+    pub flex_direction: FlexDirection,
+    pub flex_wrap: FlexWrap,
+    pub justify_content: JustifyContent,
+    pub align_items: AlignItems,
+    pub align_self: AlignSelf,
+    pub flex_grow: f32,
+    pub flex_shrink: f32,
+    pub flex_basis: LengthOrPercentage,
 
     // Grid
     pub grid_template_columns: Vec<GridTrack>,
@@ -343,6 +464,10 @@ impl Default for ComputedStyle {
             width: LengthOrPercentage::Auto,
             height: LengthOrPercentage::Auto,
             box_sizing: BoxSizing::ContentBox,
+            top: LengthOrPercentage::Auto,
+            right: LengthOrPercentage::Auto,
+            bottom: LengthOrPercentage::Auto,
+            left: LengthOrPercentage::Auto,
             margin: Margin::ZERO,
             padding: Edges::ZERO,
             border_width: Edges::ZERO,
@@ -354,6 +479,14 @@ impl Default for ComputedStyle {
             font_weight: 400.0, // normal
             text_align: TextAlign::Left,
             line_height: 19.2, // 1.2 * 16px default
+            flex_direction: FlexDirection::Row,
+            flex_wrap: FlexWrap::NoWrap,
+            justify_content: JustifyContent::FlexStart,
+            align_items: AlignItems::Stretch,
+            align_self: AlignSelf::Auto,
+            flex_grow: 0.0,
+            flex_shrink: 1.0,
+            flex_basis: LengthOrPercentage::Auto,
             grid_template_columns: Vec::new(),
             grid_template_rows: Vec::new(),
             grid_column: GridPlacement::Auto,
@@ -393,6 +526,26 @@ impl ComputedStyle {
                 BoxSizing::ContentBox => "content-box".to_string(),
                 BoxSizing::BorderBox => "border-box".to_string(),
             },
+            PropertyId::Top => match self.top {
+                LengthOrPercentage::Px(v) => format!("{}px", v),
+                LengthOrPercentage::Percentage(p) => format!("{}%", p),
+                LengthOrPercentage::Auto => "auto".to_string(),
+            },
+            PropertyId::Right => match self.right {
+                LengthOrPercentage::Px(v) => format!("{}px", v),
+                LengthOrPercentage::Percentage(p) => format!("{}%", p),
+                LengthOrPercentage::Auto => "auto".to_string(),
+            },
+            PropertyId::Bottom => match self.bottom {
+                LengthOrPercentage::Px(v) => format!("{}px", v),
+                LengthOrPercentage::Percentage(p) => format!("{}%", p),
+                LengthOrPercentage::Auto => "auto".to_string(),
+            },
+            PropertyId::Left => match self.left {
+                LengthOrPercentage::Px(v) => format!("{}px", v),
+                LengthOrPercentage::Percentage(p) => format!("{}%", p),
+                LengthOrPercentage::Auto => "auto".to_string(),
+            },
             PropertyId::MarginTop => match self.margin.top {
                 Some(v) => format!("{}px", v),
                 None => "auto".to_string(),
@@ -425,6 +578,18 @@ impl ComputedStyle {
             PropertyId::FontWeight => format!("{}", self.font_weight),
             PropertyId::TextAlign => format!("{}", self.text_align),
             PropertyId::LineHeight => format!("{}px", self.line_height),
+            PropertyId::FlexDirection => format!("{}", self.flex_direction),
+            PropertyId::FlexWrap => format!("{}", self.flex_wrap),
+            PropertyId::JustifyContent => format!("{}", self.justify_content),
+            PropertyId::AlignItems => format!("{}", self.align_items),
+            PropertyId::AlignSelf => format!("{}", self.align_self),
+            PropertyId::FlexGrow => format!("{}", self.flex_grow),
+            PropertyId::FlexShrink => format!("{}", self.flex_shrink),
+            PropertyId::FlexBasis => match self.flex_basis {
+                LengthOrPercentage::Px(v) => format!("{}px", v),
+                LengthOrPercentage::Percentage(p) => format!("{}%", p),
+                LengthOrPercentage::Auto => "auto".to_string(),
+            },
             PropertyId::GridTemplateColumns => "<grid-tracks>".to_string(),
             PropertyId::GridTemplateRows => "<grid-tracks>".to_string(),
             PropertyId::GridColumn => "<grid-placement>".to_string(),
@@ -478,6 +643,18 @@ impl ComputedStyle {
                 self.height = parse_length_or_percentage(value, self.font_size, root_font_size)
             }
             PropertyId::BoxSizing => self.box_sizing = parse_box_sizing(value),
+            PropertyId::Top => {
+                self.top = parse_length_or_percentage(value, self.font_size, root_font_size)
+            }
+            PropertyId::Right => {
+                self.right = parse_length_or_percentage(value, self.font_size, root_font_size)
+            }
+            PropertyId::Bottom => {
+                self.bottom = parse_length_or_percentage(value, self.font_size, root_font_size)
+            }
+            PropertyId::Left => {
+                self.left = parse_length_or_percentage(value, self.font_size, root_font_size)
+            }
             PropertyId::MarginTop => {
                 self.margin.top = parse_optional_length(value, self.font_size, root_font_size)
             }
@@ -533,6 +710,16 @@ impl ComputedStyle {
             PropertyId::TextAlign => self.text_align = parse_text_align(value),
             PropertyId::LineHeight => {
                 self.line_height = parse_line_height(value, self.font_size, root_font_size)
+            }
+            PropertyId::FlexDirection => self.flex_direction = parse_flex_direction(value),
+            PropertyId::FlexWrap => self.flex_wrap = parse_flex_wrap(value),
+            PropertyId::JustifyContent => self.justify_content = parse_justify_content(value),
+            PropertyId::AlignItems => self.align_items = parse_align_items(value),
+            PropertyId::AlignSelf => self.align_self = parse_align_self(value),
+            PropertyId::FlexGrow => self.flex_grow = parse_flex_grow(value),
+            PropertyId::FlexShrink => self.flex_shrink = parse_flex_shrink(value),
+            PropertyId::FlexBasis => {
+                self.flex_basis = parse_length_or_percentage(value, self.font_size, root_font_size)
             }
             PropertyId::GridTemplateColumns => {
                 self.grid_template_columns = parse_grid_tracks(value)
@@ -967,6 +1154,80 @@ pub fn parse_text_align(value: &str) -> TextAlign {
     }
 }
 
+/// Parse a CSS flex-direction value.
+pub fn parse_flex_direction(value: &str) -> FlexDirection {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "row-reverse" => FlexDirection::RowReverse,
+        "column" => FlexDirection::Column,
+        "column-reverse" => FlexDirection::ColumnReverse,
+        _ => FlexDirection::Row,
+    }
+}
+
+/// Parse a CSS flex-wrap value.
+pub fn parse_flex_wrap(value: &str) -> FlexWrap {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "wrap" => FlexWrap::Wrap,
+        "wrap-reverse" => FlexWrap::WrapReverse,
+        _ => FlexWrap::NoWrap,
+    }
+}
+
+/// Parse a CSS justify-content value.
+pub fn parse_justify_content(value: &str) -> JustifyContent {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "flex-end" | "end" => JustifyContent::FlexEnd,
+        "center" => JustifyContent::Center,
+        "space-between" => JustifyContent::SpaceBetween,
+        "space-around" => JustifyContent::SpaceAround,
+        "space-evenly" => JustifyContent::SpaceEvenly,
+        _ => JustifyContent::FlexStart,
+    }
+}
+
+/// Parse a CSS align-items value.
+pub fn parse_align_items(value: &str) -> AlignItems {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "flex-start" | "start" => AlignItems::FlexStart,
+        "flex-end" | "end" => AlignItems::FlexEnd,
+        "center" => AlignItems::Center,
+        "baseline" => AlignItems::Baseline,
+        _ => AlignItems::Stretch,
+    }
+}
+
+/// Parse a CSS align-self value.
+pub fn parse_align_self(value: &str) -> AlignSelf {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "stretch" => AlignSelf::Stretch,
+        "flex-start" | "start" => AlignSelf::FlexStart,
+        "flex-end" | "end" => AlignSelf::FlexEnd,
+        "center" => AlignSelf::Center,
+        "baseline" => AlignSelf::Baseline,
+        _ => AlignSelf::Auto,
+    }
+}
+
+/// Parse a CSS flex-grow value (non-negative number, default 0.0).
+pub fn parse_flex_grow(value: &str) -> f32 {
+    value
+        .trim()
+        .parse::<f32>()
+        .ok()
+        .filter(|&v| v >= 0.0)
+        .unwrap_or(0.0)
+}
+
+/// Parse a CSS flex-shrink value (non-negative number, default 1.0).
+pub fn parse_flex_shrink(value: &str) -> f32 {
+    value
+        .trim()
+        .parse::<f32>()
+        .ok()
+        .filter(|&v| v >= 0.0)
+        .unwrap_or(1.0)
+}
+
 /// Parse a CSS border-style value.
 pub fn parse_border_style(value: &str) -> BorderStyleValue {
     match value.trim().to_ascii_lowercase().as_str() {
@@ -1015,6 +1276,50 @@ pub fn parse_border_shorthand(value: &str) -> (Option<String>, Option<String>, O
         }
     }
     (width, style, color)
+}
+
+/// Parse a CSS flex shorthand value (e.g. "1", "1 0 auto", "none") into (flex-grow, flex-shrink, flex-basis) strings.
+pub fn parse_flex_shorthand(value: &str) -> (String, String, String) {
+    let s = value.trim().to_ascii_lowercase();
+    if s == "none" {
+        return ("0".to_string(), "0".to_string(), "auto".to_string());
+    }
+    if s == "auto" {
+        return ("1".to_string(), "1".to_string(), "auto".to_string());
+    }
+    if s == "initial" {
+        return ("0".to_string(), "1".to_string(), "auto".to_string());
+    }
+    let parts: Vec<&str> = s.split_whitespace().collect();
+    match parts.len() {
+        1 => {
+            let p0 = parts[0];
+            if p0.parse::<f32>().is_ok() {
+                // e.g. "flex: 1" -> grow 1, shrink 1, basis 0%
+                (p0.to_string(), "1".to_string(), "0%".to_string())
+            } else {
+                // e.g. "flex: 100px" -> grow 1, shrink 1, basis 100px
+                ("1".to_string(), "1".to_string(), p0.to_string())
+            }
+        }
+        2 => {
+            let p0 = parts[0];
+            let p1 = parts[1];
+            if p1.parse::<f32>().is_ok() {
+                // <grow> <shrink> -> basis is 0%
+                (p0.to_string(), p1.to_string(), "0%".to_string())
+            } else {
+                // <grow> <basis> -> shrink is 1
+                (p0.to_string(), "1".to_string(), p1.to_string())
+            }
+        }
+        3 => (
+            parts[0].to_string(),
+            parts[1].to_string(),
+            parts[2].to_string(),
+        ),
+        _ => ("0".to_string(), "1".to_string(), "auto".to_string()),
+    }
 }
 
 /// Parse a shorthand margin/padding value into 4 edge values.
@@ -1364,5 +1669,61 @@ mod tests {
         assert_eq!(m2.right, Some(0.0));
         assert_eq!(m2.bottom, Some(0.0));
         assert_eq!(m2.left, Some(0.0));
+    }
+
+    #[test]
+    fn test_flex_property_parsing() {
+        assert_eq!(parse_flex_direction("column"), FlexDirection::Column);
+        assert_eq!(
+            parse_flex_direction("row-reverse"),
+            FlexDirection::RowReverse
+        );
+        assert_eq!(parse_flex_direction("invalid"), FlexDirection::Row);
+
+        assert_eq!(parse_flex_wrap("wrap"), FlexWrap::Wrap);
+        assert_eq!(parse_flex_wrap("wrap-reverse"), FlexWrap::WrapReverse);
+        assert_eq!(parse_flex_wrap("nowrap"), FlexWrap::NoWrap);
+
+        assert_eq!(parse_justify_content("center"), JustifyContent::Center);
+        assert_eq!(
+            parse_justify_content("space-between"),
+            JustifyContent::SpaceBetween
+        );
+        assert_eq!(
+            parse_justify_content("space-evenly"),
+            JustifyContent::SpaceEvenly
+        );
+
+        assert_eq!(parse_align_items("center"), AlignItems::Center);
+        assert_eq!(parse_align_items("flex-end"), AlignItems::FlexEnd);
+        assert_eq!(parse_align_items("stretch"), AlignItems::Stretch);
+
+        assert_eq!(parse_align_self("auto"), AlignSelf::Auto);
+        assert_eq!(parse_align_self("center"), AlignSelf::Center);
+
+        assert_eq!(parse_flex_grow("2.5"), 2.5);
+        assert_eq!(parse_flex_grow("-1.0"), 0.0);
+        assert_eq!(parse_flex_shrink("0.5"), 0.5);
+        assert_eq!(parse_flex_shrink("invalid"), 1.0);
+    }
+
+    #[test]
+    fn test_flex_shorthand_parsing() {
+        assert_eq!(
+            parse_flex_shorthand("1"),
+            ("1".to_string(), "1".to_string(), "0%".to_string())
+        );
+        assert_eq!(
+            parse_flex_shorthand("none"),
+            ("0".to_string(), "0".to_string(), "auto".to_string())
+        );
+        assert_eq!(
+            parse_flex_shorthand("auto"),
+            ("1".to_string(), "1".to_string(), "auto".to_string())
+        );
+        assert_eq!(
+            parse_flex_shorthand("2 1 100px"),
+            ("2".to_string(), "1".to_string(), "100px".to_string())
+        );
     }
 }

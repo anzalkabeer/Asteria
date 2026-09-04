@@ -24,6 +24,12 @@ pub enum PropertyId {
     /// CSS box-sizing: content-box | border-box
     BoxSizing,
 
+    // Insets (Positioning)
+    Top,
+    Right,
+    Bottom,
+    Left,
+
     // Margins
     MarginTop,
     MarginRight,
@@ -52,6 +58,16 @@ pub enum PropertyId {
     TextAlign,
     LineHeight,
 
+    // Flexbox
+    FlexDirection,
+    FlexWrap,
+    JustifyContent,
+    AlignItems,
+    AlignSelf,
+    FlexGrow,
+    FlexShrink,
+    FlexBasis,
+
     // Grid
     GridTemplateColumns,
     GridTemplateRows,
@@ -75,6 +91,10 @@ pub const ALL_PROPERTIES: &[PropertyId] = &[
     PropertyId::Width,
     PropertyId::Height,
     PropertyId::BoxSizing,
+    PropertyId::Top,
+    PropertyId::Right,
+    PropertyId::Bottom,
+    PropertyId::Left,
     PropertyId::MarginTop,
     PropertyId::MarginRight,
     PropertyId::MarginBottom,
@@ -95,6 +115,14 @@ pub const ALL_PROPERTIES: &[PropertyId] = &[
     PropertyId::FontWeight,
     PropertyId::TextAlign,
     PropertyId::LineHeight,
+    PropertyId::FlexDirection,
+    PropertyId::FlexWrap,
+    PropertyId::JustifyContent,
+    PropertyId::AlignItems,
+    PropertyId::AlignSelf,
+    PropertyId::FlexGrow,
+    PropertyId::FlexShrink,
+    PropertyId::FlexBasis,
     PropertyId::GridTemplateColumns,
     PropertyId::GridTemplateRows,
     PropertyId::GridColumn,
@@ -129,6 +157,10 @@ pub fn is_inherited(id: PropertyId) -> bool {
         PropertyId::Width => false,
         PropertyId::Height => false,
         PropertyId::BoxSizing => false,
+        PropertyId::Top => false,
+        PropertyId::Right => false,
+        PropertyId::Bottom => false,
+        PropertyId::Left => false,
         PropertyId::MarginTop => false,
         PropertyId::MarginRight => false,
         PropertyId::MarginBottom => false,
@@ -144,6 +176,14 @@ pub fn is_inherited(id: PropertyId) -> bool {
         PropertyId::BorderColor => false,
         PropertyId::BorderStyle => false,
         PropertyId::BackgroundColor => false,
+        PropertyId::FlexDirection => false,
+        PropertyId::FlexWrap => false,
+        PropertyId::JustifyContent => false,
+        PropertyId::AlignItems => false,
+        PropertyId::AlignSelf => false,
+        PropertyId::FlexGrow => false,
+        PropertyId::FlexShrink => false,
+        PropertyId::FlexBasis => false,
         PropertyId::GridTemplateColumns => false,
         PropertyId::GridTemplateRows => false,
         PropertyId::GridColumn => false,
@@ -187,6 +227,12 @@ pub fn property_from_name(name: &str) -> Option<PropertyId> {
         "height" => Some(PropertyId::Height),
         "box-sizing" => Some(PropertyId::BoxSizing),
 
+        // Insets
+        "top" => Some(PropertyId::Top),
+        "right" => Some(PropertyId::Right),
+        "bottom" => Some(PropertyId::Bottom),
+        "left" => Some(PropertyId::Left),
+
         // Longhands
         "margin-top" => Some(PropertyId::MarginTop),
         "margin-right" => Some(PropertyId::MarginRight),
@@ -210,6 +256,16 @@ pub fn property_from_name(name: &str) -> Option<PropertyId> {
         "text-align" => Some(PropertyId::TextAlign),
         "line-height" => Some(PropertyId::LineHeight),
 
+        // Flexbox
+        "flex-direction" => Some(PropertyId::FlexDirection),
+        "flex-wrap" => Some(PropertyId::FlexWrap),
+        "justify-content" => Some(PropertyId::JustifyContent),
+        "align-items" => Some(PropertyId::AlignItems),
+        "align-self" => Some(PropertyId::AlignSelf),
+        "flex-grow" => Some(PropertyId::FlexGrow),
+        "flex-shrink" => Some(PropertyId::FlexShrink),
+        "flex-basis" => Some(PropertyId::FlexBasis),
+
         "grid-template-columns" => Some(PropertyId::GridTemplateColumns),
         "grid-template-rows" => Some(PropertyId::GridTemplateRows),
         "grid-column" => Some(PropertyId::GridColumn),
@@ -222,7 +278,7 @@ pub fn property_from_name(name: &str) -> Option<PropertyId> {
         "animation-iteration-count" => Some(PropertyId::AnimationIterationCount),
 
         // Shorthands — handled specially in style.rs
-        "margin" | "padding" => None,
+        "margin" | "padding" | "flex" => None,
         _ => None,
     }
 }
@@ -236,6 +292,10 @@ pub fn property_id_to_name(id: PropertyId) -> &'static str {
         PropertyId::Width => "width",
         PropertyId::Height => "height",
         PropertyId::BoxSizing => "box-sizing",
+        PropertyId::Top => "top",
+        PropertyId::Right => "right",
+        PropertyId::Bottom => "bottom",
+        PropertyId::Left => "left",
         PropertyId::MarginTop => "margin-top",
         PropertyId::MarginRight => "margin-right",
         PropertyId::MarginBottom => "margin-bottom",
@@ -256,6 +316,14 @@ pub fn property_id_to_name(id: PropertyId) -> &'static str {
         PropertyId::FontWeight => "font-weight",
         PropertyId::TextAlign => "text-align",
         PropertyId::LineHeight => "line-height",
+        PropertyId::FlexDirection => "flex-direction",
+        PropertyId::FlexWrap => "flex-wrap",
+        PropertyId::JustifyContent => "justify-content",
+        PropertyId::AlignItems => "align-items",
+        PropertyId::AlignSelf => "align-self",
+        PropertyId::FlexGrow => "flex-grow",
+        PropertyId::FlexShrink => "flex-shrink",
+        PropertyId::FlexBasis => "flex-basis",
         PropertyId::GridTemplateColumns => "grid-template-columns",
         PropertyId::GridTemplateRows => "grid-template-rows",
         PropertyId::GridColumn => "grid-column",
@@ -269,8 +337,8 @@ pub fn property_id_to_name(id: PropertyId) -> &'static str {
 }
 
 /// Returns true if the given property name is a shorthand that needs expansion.
-/// Note: `border` is handled by its own code path in `style.rs` (not via `expand_shorthand`)
-/// and is intentionally excluded here to preserve the is_shorthand/expand_shorthand contract:
+/// Note: `border` and `flex` are handled by their own code paths in `style.rs` (not via `expand_shorthand`)
+/// and are intentionally excluded here to preserve the is_shorthand/expand_shorthand contract:
 /// every name that returns true here must also return Some(...) from expand_shorthand.
 pub fn is_shorthand(name: &str) -> bool {
     matches!(name, "margin" | "padding")
@@ -321,6 +389,8 @@ mod tests {
         assert!(!is_inherited(PropertyId::PaddingTop));
         assert!(!is_inherited(PropertyId::Width));
         assert!(!is_inherited(PropertyId::BackgroundColor));
+        assert!(!is_inherited(PropertyId::Top));
+        assert!(!is_inherited(PropertyId::FlexDirection));
     }
 
     #[test]
@@ -328,10 +398,21 @@ mod tests {
         assert_eq!(property_from_name("color"), Some(PropertyId::Color));
         assert_eq!(property_from_name("display"), Some(PropertyId::Display));
         assert_eq!(property_from_name("position"), Some(PropertyId::Position));
+        assert_eq!(property_from_name("top"), Some(PropertyId::Top));
+        assert_eq!(
+            property_from_name("flex-direction"),
+            Some(PropertyId::FlexDirection)
+        );
+        assert_eq!(
+            property_from_name("justify-content"),
+            Some(PropertyId::JustifyContent)
+        );
         assert_eq!(property_from_name("z-index"), Some(PropertyId::ZIndex));
         assert_eq!(property_from_name("font-size"), Some(PropertyId::FontSize));
         assert_eq!(property_from_name("unknown-prop"), None);
         assert_eq!(PropertyId::ZIndex.name(), "z-index");
+        assert_eq!(PropertyId::Top.name(), "top");
+        assert_eq!(PropertyId::FlexDirection.name(), "flex-direction");
     }
 
     #[test]
@@ -375,6 +456,6 @@ mod tests {
         for &prop in ALL_PROPERTIES {
             let _ = is_inherited(prop);
         }
-        assert_eq!(ALL_PROPERTIES.len(), 35);
+        assert_eq!(ALL_PROPERTIES.len(), 47);
     }
 }
