@@ -350,6 +350,26 @@ pub fn resolve_styles_with_viewport(
     )
 }
 
+/// Split the inner content of a `var()` call into the variable name and an
+/// optional fallback value, correctly handling nested parentheses.
+/// e.g. `"--x, calc(1px + 2px)"` → `("--x", Some("calc(1px + 2px)"))`.
+fn split_var_args(inner: &str) -> (&str, Option<String>) {
+    let mut depth = 0;
+    for (i, ch) in inner.char_indices() {
+        match ch {
+            '(' => depth += 1,
+            ')' => depth -= 1,
+            ',' if depth == 0 => {
+                let name = inner[..i].trim();
+                let fallback = inner[i + 1..].trim();
+                return (name, Some(fallback.to_string()));
+            }
+            _ => {}
+        }
+    }
+    (inner.trim(), None)
+}
+
 /// Recursively build a StyledNode for a DOM node and its descendants.
 ///
 /// `parent_style` — the parent's computed style (for inheritance)
@@ -646,38 +666,72 @@ fn build_styled_node(
                 }
             }
 
-            // A helper to substitute `var()` in a value string
+            // A helper to substitute `var()` in a value string.
+            // Uses paren-aware scanning to correctly handle nested parens in
+            // fallback values (e.g. `var(--x, calc(1px + 2px))`).
+            // Detects cycles via a visited set to prevent infinite loops.
             let substitute_vars =
                 |val: &str, vars: &std::collections::HashMap<String, String>| -> String {
                     if !val.contains("var(") {
                         return val.to_string();
                     }
                     let mut result = val.to_string();
-                    let mut depth = 0;
-                    const MAX_VAR_DEPTH: usize = 16;
+                    let mut iterations = 0;
+                    const MAX_VAR_DEPTH: usize = 32;
+                    let mut visited: std::collections::HashSet<String> =
+                        std::collections::HashSet::new();
+
                     while let Some(start) = result.find("var(") {
-                        depth += 1;
-                        if depth > MAX_VAR_DEPTH {
-                            break; // Prevent infinite loops from circular var() references
+                        iterations += 1;
+                        if iterations > MAX_VAR_DEPTH {
+                            break; // Safety limit
                         }
-                        if let Some(end_offset) = result[start + 4..].find(')') {
-                            // Extract inner string by indexing (avoids borrowing `result`)
-                            let var_inner =
-                                result[start + 4..start + 4 + end_offset].trim().to_string();
-                            let parts: Vec<&str> = var_inner.splitn(2, ',').collect();
-                            let var_name = parts[0].trim();
-                            let fallback = if parts.len() > 1 { parts[1].trim() } else { "" };
 
-                            let resolved_val = if let Some(v) = vars.get(var_name) {
-                                v.clone()
-                            } else {
-                                fallback.to_string()
-                            };
+                        // Find matching close paren using depth tracking
+                        let inner_start = start + 4;
+                        let mut depth = 1;
+                        let mut end_pos = None;
+                        for (i, ch) in result[inner_start..].char_indices() {
+                            match ch {
+                                '(' => depth += 1,
+                                ')' => {
+                                    depth -= 1;
+                                    if depth == 0 {
+                                        end_pos = Some(inner_start + i);
+                                        break;
+                                    }
+                                }
+                                _ => {}
+                            }
+                        }
 
-                            result.replace_range(start..start + 4 + end_offset + 1, &resolved_val);
+                        let end = match end_pos {
+                            Some(e) => e,
+                            None => break, // Unmatched paren
+                        };
+
+                        let var_inner = result[inner_start..end].trim().to_string();
+
+                        // Split on the first comma (paren-aware) for fallback
+                        let (var_name, fallback) = split_var_args(&var_inner);
+                        let var_name = var_name.trim();
+
+                        // Cycle detection
+                        if visited.contains(var_name) {
+                            // Cycle detected — use fallback or empty string
+                            let resolved = fallback.unwrap_or_default();
+                            result.replace_range(start..=end, &resolved);
+                            continue;
+                        }
+                        visited.insert(var_name.to_string());
+
+                        let resolved_val = if let Some(v) = vars.get(var_name) {
+                            v.clone()
                         } else {
-                            break;
-                        }
+                            fallback.unwrap_or_default()
+                        };
+
+                        result.replace_range(start..=end, &resolved_val);
                     }
                     result
                 };
@@ -1366,6 +1420,7 @@ impl StyledNode {
                 match s.width {
                     values::LengthOrPercentage::Px(v) => format!("{}px", v),
                     values::LengthOrPercentage::Percentage(p) => format!("{}%", p),
+                    values::LengthOrPercentage::Calc { px, percentage } => format!("calc({}% + {}px)", percentage, px),
                     values::LengthOrPercentage::Auto => "auto".to_string(),
                 },
             ));
@@ -1376,6 +1431,7 @@ impl StyledNode {
                 match s.height {
                     values::LengthOrPercentage::Px(v) => format!("{}px", v),
                     values::LengthOrPercentage::Percentage(p) => format!("{}%", p),
+                    values::LengthOrPercentage::Calc { px, percentage } => format!("calc({}% + {}px)", percentage, px),
                     values::LengthOrPercentage::Auto => "auto".to_string(),
                 },
             ));

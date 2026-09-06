@@ -73,7 +73,13 @@ pub enum PropertyId {
     GridTemplateRows,
     GridColumn,
     GridRow,
+    GridColumnStart,
+    GridColumnEnd,
+    GridRowStart,
+    GridRowEnd,
     GridGap,
+    RowGap,
+    ColumnGap,
 
     // Animation
     AnimationName,
@@ -127,7 +133,13 @@ pub const ALL_PROPERTIES: &[PropertyId] = &[
     PropertyId::GridTemplateRows,
     PropertyId::GridColumn,
     PropertyId::GridRow,
+    PropertyId::GridColumnStart,
+    PropertyId::GridColumnEnd,
+    PropertyId::GridRowStart,
+    PropertyId::GridRowEnd,
     PropertyId::GridGap,
+    PropertyId::RowGap,
+    PropertyId::ColumnGap,
     PropertyId::AnimationName,
     PropertyId::AnimationDuration,
     PropertyId::AnimationTimingFunction,
@@ -188,7 +200,13 @@ pub fn is_inherited(id: PropertyId) -> bool {
         PropertyId::GridTemplateRows => false,
         PropertyId::GridColumn => false,
         PropertyId::GridRow => false,
+        PropertyId::GridColumnStart => false,
+        PropertyId::GridColumnEnd => false,
+        PropertyId::GridRowStart => false,
+        PropertyId::GridRowEnd => false,
         PropertyId::GridGap => false,
+        PropertyId::RowGap => false,
+        PropertyId::ColumnGap => false,
         PropertyId::AnimationName => false,
         PropertyId::AnimationDuration => false,
         PropertyId::AnimationTimingFunction => false,
@@ -270,7 +288,13 @@ pub fn property_from_name(name: &str) -> Option<PropertyId> {
         "grid-template-rows" => Some(PropertyId::GridTemplateRows),
         "grid-column" => Some(PropertyId::GridColumn),
         "grid-row" => Some(PropertyId::GridRow),
+        "grid-column-start" => Some(PropertyId::GridColumnStart),
+        "grid-column-end" => Some(PropertyId::GridColumnEnd),
+        "grid-row-start" => Some(PropertyId::GridRowStart),
+        "grid-row-end" => Some(PropertyId::GridRowEnd),
         "grid-gap" | "gap" => Some(PropertyId::GridGap),
+        "row-gap" => Some(PropertyId::RowGap),
+        "column-gap" => Some(PropertyId::ColumnGap),
 
         "animation-name" => Some(PropertyId::AnimationName),
         "animation-duration" => Some(PropertyId::AnimationDuration),
@@ -328,7 +352,13 @@ pub fn property_id_to_name(id: PropertyId) -> &'static str {
         PropertyId::GridTemplateRows => "grid-template-rows",
         PropertyId::GridColumn => "grid-column",
         PropertyId::GridRow => "grid-row",
+        PropertyId::GridColumnStart => "grid-column-start",
+        PropertyId::GridColumnEnd => "grid-column-end",
+        PropertyId::GridRowStart => "grid-row-start",
+        PropertyId::GridRowEnd => "grid-row-end",
         PropertyId::GridGap => "grid-gap",
+        PropertyId::RowGap => "row-gap",
+        PropertyId::ColumnGap => "column-gap",
         PropertyId::AnimationName => "animation-name",
         PropertyId::AnimationDuration => "animation-duration",
         PropertyId::AnimationTimingFunction => "animation-timing-function",
@@ -456,6 +486,6 @@ mod tests {
         for &prop in ALL_PROPERTIES {
             let _ = is_inherited(prop);
         }
-        assert_eq!(ALL_PROPERTIES.len(), 47);
+        assert_eq!(ALL_PROPERTIES.len(), 53);
     }
 }

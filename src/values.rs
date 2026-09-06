@@ -112,13 +112,24 @@ pub enum GridTrack {
     Fr(f32),
     Px(f32),
     Percent(f32),
+    MinMax(Box<GridTrack>, Box<GridTrack>),
 }
 
+/// A single grid line reference: auto, a numbered line, or a span count.
 #[derive(Debug, Clone, PartialEq)]
-pub enum GridPlacement {
+pub enum GridLine {
     Auto,
     Line(i32),
     Span(i32),
+}
+
+/// A grid placement consisting of start and end lines.
+/// For shorthand values like `grid-column: 2`, end defaults to Auto.
+/// For `grid-column: 1 / -1`, both start and end are populated.
+#[derive(Debug, Clone, PartialEq)]
+pub struct GridPlacement {
+    pub start: GridLine,
+    pub end: GridLine,
 }
 
 // ─── Animation Types ─────────────────────────────────────────────
@@ -446,6 +457,8 @@ pub struct ComputedStyle {
     pub grid_template_rows: Vec<GridTrack>,
     pub grid_column: GridPlacement,
     pub grid_row: GridPlacement,
+    pub grid_column_end: GridLine,
+    pub grid_row_end: GridLine,
     pub grid_gap: Edges,
 
     // Animation
@@ -493,8 +506,16 @@ impl Default for ComputedStyle {
             flex_basis: LengthOrPercentage::Auto,
             grid_template_columns: Vec::new(),
             grid_template_rows: Vec::new(),
-            grid_column: GridPlacement::Auto,
-            grid_row: GridPlacement::Auto,
+            grid_column: GridPlacement {
+                start: GridLine::Auto,
+                end: GridLine::Auto,
+            },
+            grid_row: GridPlacement {
+                start: GridLine::Auto,
+                end: GridLine::Auto,
+            },
+            grid_column_end: GridLine::Auto,
+            grid_row_end: GridLine::Auto,
             grid_gap: Edges::ZERO,
             animation_name: "none".to_string(),
             animation_duration: 0.0,
@@ -516,40 +537,16 @@ impl ComputedStyle {
                 Some(z) => format!("{}", z),
                 None => "auto".to_string(),
             },
-            PropertyId::Width => match self.width {
-                LengthOrPercentage::Px(v) => format!("{}px", v),
-                LengthOrPercentage::Percentage(p) => format!("{}%", p),
-                LengthOrPercentage::Auto => "auto".to_string(),
-            },
-            PropertyId::Height => match self.height {
-                LengthOrPercentage::Px(v) => format!("{}px", v),
-                LengthOrPercentage::Percentage(p) => format!("{}%", p),
-                LengthOrPercentage::Auto => "auto".to_string(),
-            },
+            PropertyId::Width => format_lop(&self.width),
+            PropertyId::Height => format_lop(&self.height),
             PropertyId::BoxSizing => match self.box_sizing {
                 BoxSizing::ContentBox => "content-box".to_string(),
                 BoxSizing::BorderBox => "border-box".to_string(),
             },
-            PropertyId::Top => match self.top {
-                LengthOrPercentage::Px(v) => format!("{}px", v),
-                LengthOrPercentage::Percentage(p) => format!("{}%", p),
-                LengthOrPercentage::Auto => "auto".to_string(),
-            },
-            PropertyId::Right => match self.right {
-                LengthOrPercentage::Px(v) => format!("{}px", v),
-                LengthOrPercentage::Percentage(p) => format!("{}%", p),
-                LengthOrPercentage::Auto => "auto".to_string(),
-            },
-            PropertyId::Bottom => match self.bottom {
-                LengthOrPercentage::Px(v) => format!("{}px", v),
-                LengthOrPercentage::Percentage(p) => format!("{}%", p),
-                LengthOrPercentage::Auto => "auto".to_string(),
-            },
-            PropertyId::Left => match self.left {
-                LengthOrPercentage::Px(v) => format!("{}px", v),
-                LengthOrPercentage::Percentage(p) => format!("{}%", p),
-                LengthOrPercentage::Auto => "auto".to_string(),
-            },
+            PropertyId::Top => format_lop(&self.top),
+            PropertyId::Right => format_lop(&self.right),
+            PropertyId::Bottom => format_lop(&self.bottom),
+            PropertyId::Left => format_lop(&self.left),
             PropertyId::MarginTop => match self.margin.top {
                 Some(v) => format!("{}px", v),
                 None => "auto".to_string(),
@@ -589,11 +586,7 @@ impl ComputedStyle {
             PropertyId::AlignSelf => format!("{}", self.align_self),
             PropertyId::FlexGrow => format!("{}", self.flex_grow),
             PropertyId::FlexShrink => format!("{}", self.flex_shrink),
-            PropertyId::FlexBasis => match self.flex_basis {
-                LengthOrPercentage::Px(v) => format!("{}px", v),
-                LengthOrPercentage::Percentage(p) => format!("{}%", p),
-                LengthOrPercentage::Auto => "auto".to_string(),
-            },
+            PropertyId::FlexBasis => format_lop(&self.flex_basis),
             PropertyId::GridTemplateColumns => "<grid-tracks>".to_string(),
             PropertyId::GridTemplateRows => "<grid-tracks>".to_string(),
             PropertyId::GridColumn => "<grid-placement>".to_string(),
@@ -746,8 +739,286 @@ impl ComputedStyle {
 
 // ─── Parsing Functions ───────────────────────────────────────────
 
+/// Strip a function call like `calc(...)` or `minmax(...)` from a value string.
+/// Returns the inner content between the parentheses if the value starts with `name(`.
+fn strip_function_call<'a>(value: &'a str, name: &str) -> Option<&'a str> {
+    let lower = value.to_ascii_lowercase();
+    if !lower.starts_with(name) {
+        return None;
+    }
+    let rest = &value[name.len()..];
+    let rest = rest.trim_start();
+    if !rest.starts_with('(') {
+        return None;
+    }
+    let inner = &rest[1..];
+    // Find matching close paren
+    let mut depth = 1;
+    let mut end = 0;
+    for (i, ch) in inner.char_indices() {
+        match ch {
+            '(' => depth += 1,
+            ')' => {
+                depth -= 1;
+                if depth == 0 {
+                    end = i;
+                    break;
+                }
+            }
+            _ => {}
+        }
+    }
+    if depth == 0 {
+        Some(inner[..end].trim())
+    } else {
+        None
+    }
+}
+
+/// Tokenize and evaluate a `calc()` expression returning `(px_value, percentage_value)`.
+/// Supports `+`, `-`, `*`, `/` with correct operator precedence, nested parentheses,
+/// and mixed units (`px`, `em`, `rem`, `%`, unitless numbers).
+///
+/// Returns `None` if the expression is malformed.
+pub fn evaluate_calc(expr: &str, em_base: f32, rem_base: f32) -> Option<(f32, f32)> {
+    // Tokenize the expression
+    let tokens = calc_tokenize(expr, em_base, rem_base)?;
+    let mut pos = 0;
+    let result = calc_parse_expr(&tokens, &mut pos)?;
+    if pos != tokens.len() {
+        return None; // Unexpected trailing tokens
+    }
+    Some(result)
+}
+
+/// Calc token types
+#[derive(Debug, Clone, Copy)]
+enum CalcToken {
+    /// A value with px and percentage components
+    Value(f32, f32), // (px, percentage)
+    Plus,
+    Minus,
+    Star,
+    Slash,
+    OpenParen,
+    CloseParen,
+}
+
+/// Tokenize a calc expression into CalcTokens.
+fn calc_tokenize(expr: &str, em_base: f32, rem_base: f32) -> Option<Vec<CalcToken>> {
+    let mut tokens = Vec::new();
+    let bytes = expr.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        let b = bytes[i];
+        match b {
+            b' ' | b'\t' | b'\n' | b'\r' => {
+                i += 1;
+            }
+            b'+' => {
+                tokens.push(CalcToken::Plus);
+                i += 1;
+            }
+            b'-' => {
+                // Check if this is a negative number or a minus operator
+                let is_unary = tokens.is_empty()
+                    || matches!(
+                        tokens.last(),
+                        Some(CalcToken::Plus)
+                            | Some(CalcToken::Minus)
+                            | Some(CalcToken::Star)
+                            | Some(CalcToken::Slash)
+                            | Some(CalcToken::OpenParen)
+                    );
+                if is_unary {
+                    // Parse as negative number
+                    let start = i;
+                    i += 1; // skip '-'
+                    while i < bytes.len() && (bytes[i].is_ascii_digit() || bytes[i] == b'.') {
+                        i += 1;
+                    }
+                    // Check for unit suffix
+                    let num_end = i;
+                    let unit_start = i;
+                    while i < bytes.len() && bytes[i].is_ascii_alphabetic() {
+                        i += 1;
+                    }
+                    // Check for % suffix
+                    if i < bytes.len() && bytes[i] == b'%' {
+                        i += 1;
+                    }
+                    let token_str = &expr[start..i];
+                    let (px, pct) = calc_parse_value_token(token_str, em_base, rem_base)?;
+                    tokens.push(CalcToken::Value(px, pct));
+                    let _ = (num_end, unit_start); // suppress unused warnings
+                } else {
+                    tokens.push(CalcToken::Minus);
+                    i += 1;
+                }
+            }
+            b'*' => {
+                tokens.push(CalcToken::Star);
+                i += 1;
+            }
+            b'/' => {
+                tokens.push(CalcToken::Slash);
+                i += 1;
+            }
+            b'(' => {
+                tokens.push(CalcToken::OpenParen);
+                i += 1;
+            }
+            b')' => {
+                tokens.push(CalcToken::CloseParen);
+                i += 1;
+            }
+            _ if b.is_ascii_digit() || b == b'.' => {
+                let start = i;
+                while i < bytes.len() && (bytes[i].is_ascii_digit() || bytes[i] == b'.') {
+                    i += 1;
+                }
+                // Check for unit suffix or %
+                while i < bytes.len() && bytes[i].is_ascii_alphabetic() {
+                    i += 1;
+                }
+                if i < bytes.len() && bytes[i] == b'%' {
+                    i += 1;
+                }
+                let token_str = &expr[start..i];
+                let (px, pct) = calc_parse_value_token(token_str, em_base, rem_base)?;
+                tokens.push(CalcToken::Value(px, pct));
+            }
+            _ => {
+                // Skip unknown characters
+                i += 1;
+            }
+        }
+    }
+    Some(tokens)
+}
+
+/// Parse a single value token from calc (e.g. "10px", "50%", "2em", "3").
+/// Returns (px_component, percentage_component).
+fn calc_parse_value_token(token: &str, em_base: f32, rem_base: f32) -> Option<(f32, f32)> {
+    let s = token.trim();
+    if s.is_empty() {
+        return None;
+    }
+    if let Some(num) = s.strip_suffix('%') {
+        let val = num.trim().parse::<f32>().ok()?;
+        return Some((0.0, val));
+    }
+    if let Some(num) = s.strip_suffix("rem") {
+        let val = num.trim().parse::<f32>().ok()?;
+        return Some((val * rem_base, 0.0));
+    }
+    if let Some(num) = s.strip_suffix("px") {
+        let val = num.trim().parse::<f32>().ok()?;
+        return Some((val, 0.0));
+    }
+    if let Some(num) = s.strip_suffix("em") {
+        let val = num.trim().parse::<f32>().ok()?;
+        return Some((val * em_base, 0.0));
+    }
+    if let Some(num) = s.strip_suffix("pt") {
+        let val = num.trim().parse::<f32>().ok()?;
+        return Some((val * 4.0 / 3.0, 0.0)); // 1pt = 4/3 px
+    }
+    // Plain number (unitless scalar)
+    let val = s.parse::<f32>().ok()?;
+    Some((val, 0.0))
+}
+
+/// Parse an additive expression: term (('+' | '-') term)*
+fn calc_parse_expr(tokens: &[CalcToken], pos: &mut usize) -> Option<(f32, f32)> {
+    let mut result = calc_parse_term(tokens, pos)?;
+    while *pos < tokens.len() {
+        match tokens[*pos] {
+            CalcToken::Plus => {
+                *pos += 1;
+                let rhs = calc_parse_term(tokens, pos)?;
+                result.0 += rhs.0;
+                result.1 += rhs.1;
+            }
+            CalcToken::Minus => {
+                *pos += 1;
+                let rhs = calc_parse_term(tokens, pos)?;
+                result.0 -= rhs.0;
+                result.1 -= rhs.1;
+            }
+            _ => break,
+        }
+    }
+    Some(result)
+}
+
+/// Parse a multiplicative term: factor (('*' | '/') factor)*
+fn calc_parse_term(tokens: &[CalcToken], pos: &mut usize) -> Option<(f32, f32)> {
+    let mut result = calc_parse_factor(tokens, pos)?;
+    while *pos < tokens.len() {
+        match tokens[*pos] {
+            CalcToken::Star => {
+                *pos += 1;
+                let rhs = calc_parse_factor(tokens, pos)?;
+                // Multiplication: at least one side must be a pure scalar
+                if rhs.1 == 0.0 && result.1 == 0.0 {
+                    result.0 *= rhs.0;
+                } else if rhs.1 == 0.0 {
+                    result.0 *= rhs.0;
+                    result.1 *= rhs.0;
+                } else if result.1 == 0.0 {
+                    let scalar = result.0;
+                    result.0 = rhs.0 * scalar;
+                    result.1 = rhs.1 * scalar;
+                } else {
+                    return None; // Cannot multiply two percentage values
+                }
+            }
+            CalcToken::Slash => {
+                *pos += 1;
+                let rhs = calc_parse_factor(tokens, pos)?;
+                // Division: divisor must be a pure scalar
+                if rhs.1 != 0.0 {
+                    return None;
+                }
+                if rhs.0 == 0.0 {
+                    return None; // Division by zero
+                }
+                result.0 /= rhs.0;
+                result.1 /= rhs.0;
+            }
+            _ => break,
+        }
+    }
+    Some(result)
+}
+
+/// Parse a primary factor: a value literal or parenthesized expression.
+fn calc_parse_factor(tokens: &[CalcToken], pos: &mut usize) -> Option<(f32, f32)> {
+    if *pos >= tokens.len() {
+        return None;
+    }
+    match tokens[*pos] {
+        CalcToken::Value(px, pct) => {
+            *pos += 1;
+            Some((px, pct))
+        }
+        CalcToken::OpenParen => {
+            *pos += 1; // skip '('
+            let result = calc_parse_expr(tokens, pos)?;
+            if *pos < tokens.len() && matches!(tokens[*pos], CalcToken::CloseParen) {
+                *pos += 1; // skip ')'
+            } else {
+                return None; // Missing close paren
+            }
+            Some(result)
+        }
+        _ => None,
+    }
+}
+
 /// Parse a CSS length value into px.
-/// Supports: "16px", "2em", "1.5rem", "50%", plain numbers.
+/// Supports: "16px", "2em", "1.5rem", "50%", plain numbers, and `calc()` expressions.
 /// `em_base` is the reference for em units (element's own font-size,
 ///  or parent's font-size when resolving font-size itself).
 /// `rem_base` is the root element's font-size for rem units.
@@ -756,6 +1027,13 @@ pub fn parse_length(value: &str, em_base: f32, rem_base: f32) -> f32 {
 
     if s == "0" {
         return 0.0;
+    }
+
+    // Handle calc() expressions (collapses to px with percentage resolved against em_base)
+    if let Some(inner) = strip_function_call(s, "calc") {
+        if let Some((px, pct)) = evaluate_calc(inner, em_base, rem_base) {
+            return px + pct / 100.0 * em_base;
+        }
     }
 
     // Check rem BEFORE em (rem ends with "em" too)
@@ -789,11 +1067,14 @@ pub fn parse_optional_length(value: &str, em_base: f32, rem_base: f32) -> Option
     }
 }
 
-/// Represents either a definite pixel length, a percentage value (0.0..100.0), or auto.
+/// Represents either a definite pixel length, a percentage value (0.0..100.0),
+/// a linear combination of px and percentage (`calc()`), or auto.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum LengthOrPercentage {
     Px(f32),
     Percentage(f32),
+    /// Result of a `calc()` expression: `px + percentage/100 * base`.
+    Calc { px: f32, percentage: f32 },
     Auto,
 }
 
@@ -808,16 +1089,47 @@ impl LengthOrPercentage {
         match *self {
             LengthOrPercentage::Px(px) => Some(px),
             LengthOrPercentage::Percentage(pct) => Some(pct / 100.0 * base),
+            LengthOrPercentage::Calc { px, percentage } => {
+                Some(px + percentage / 100.0 * base)
+            }
             LengthOrPercentage::Auto => None,
         }
     }
 }
 
+/// Format a `LengthOrPercentage` for display.
+fn format_lop(lop: &LengthOrPercentage) -> String {
+    match lop {
+        LengthOrPercentage::Px(v) => format!("{}px", v),
+        LengthOrPercentage::Percentage(p) => format!("{}%", p),
+        LengthOrPercentage::Calc { px, percentage } => {
+            format!("calc({}% + {}px)", percentage, px)
+        }
+        LengthOrPercentage::Auto => "auto".to_string(),
+    }
+}
+
 /// Parse a length or percentage value without collapsing percentages to px.
+/// Supports `calc()` expressions that mix px and percentage values.
 pub fn parse_length_or_percentage(value: &str, em_base: f32, rem_base: f32) -> LengthOrPercentage {
     let s = value.trim();
     if s.eq_ignore_ascii_case("auto") {
         return LengthOrPercentage::Auto;
+    }
+    // Check for calc() expression
+    if let Some(inner) = strip_function_call(s, "calc") {
+        if let Some((px, pct)) = evaluate_calc(inner, em_base, rem_base) {
+            if pct == 0.0 {
+                return LengthOrPercentage::Px(px);
+            }
+            if px == 0.0 {
+                return LengthOrPercentage::Percentage(pct);
+            }
+            return LengthOrPercentage::Calc {
+                px,
+                percentage: pct,
+            };
+        }
     }
     if let Some(p) = s
         .strip_suffix('%')
@@ -1400,44 +1712,194 @@ pub fn parse_gap(value: &str, em_base: f32, rem_base: f32) -> Edges {
 }
 
 pub fn parse_grid_tracks(value: &str) -> Vec<GridTrack> {
+    parse_grid_tracks_inner(value.trim())
+}
+
+/// Inner recursive parser for grid tracks, handling `repeat()` and `minmax()`.
+fn parse_grid_tracks_inner(value: &str) -> Vec<GridTrack> {
     let mut tracks = Vec::new();
-    for part in value.split_whitespace() {
-        if part == "auto" {
-            tracks.push(GridTrack::Auto);
-        } else if let Some(num) = part.strip_suffix("fr") {
-            if let Ok(val) = num.parse::<f32>() {
-                tracks.push(GridTrack::Fr(val));
+    let mut chars = value.char_indices().peekable();
+    let mut token_start: Option<usize> = None;
+
+    while let Some(&(i, ch)) = chars.peek() {
+        if ch.is_whitespace() {
+            // Flush any current token
+            if let Some(start) = token_start.take() {
+                let token = value[start..i].trim();
+                if !token.is_empty() {
+                    tracks.push(parse_single_grid_track(token));
+                }
             }
-        } else if let Some(num) = part.strip_suffix("px") {
-            if let Ok(val) = num.parse::<f32>() {
-                tracks.push(GridTrack::Px(val));
+            chars.next();
+        } else if ch.is_ascii_alphabetic() || ch == '-' {
+            // Could be start of a function like repeat(...) or minmax(...)
+            if token_start.is_none() {
+                token_start = Some(i);
             }
-        } else if let Some(num) = part.strip_suffix("%") {
-            if let Ok(val) = num.parse::<f32>() {
-                tracks.push(GridTrack::Percent(val));
+            // Peek ahead to check for function call
+            let rest = &value[i..];
+            let lower = rest.to_ascii_lowercase();
+            if lower.starts_with("repeat(") || lower.starts_with("minmax(") {
+                // Find the matching close paren
+                let func_name_len = if lower.starts_with("repeat(") {
+                    7
+                } else {
+                    7 // "minmax(" is also 7 chars
+                };
+                let paren_start = i + func_name_len;
+                let mut depth = 1;
+                let mut end = paren_start;
+                for (j, c) in value[paren_start..].char_indices() {
+                    match c {
+                        '(' => depth += 1,
+                        ')' => {
+                            depth -= 1;
+                            if depth == 0 {
+                                end = paren_start + j;
+                                break;
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+                let func_str = &value[i..=end];
+                if lower.starts_with("repeat(") {
+                    tracks.extend(parse_repeat_function(func_str));
+                } else {
+                    tracks.push(parse_minmax_function(func_str));
+                }
+                token_start = None;
+                // Advance past the function
+                while chars.peek().is_some_and(|&(idx, _)| idx <= end) {
+                    chars.next();
+                }
+            } else {
+                chars.next();
             }
-        } else if part.parse::<f32>().is_ok_and(|val| val == 0.0) {
-            tracks.push(GridTrack::Px(0.0));
+        } else {
+            if token_start.is_none() {
+                token_start = Some(i);
+            }
+            chars.next();
         }
     }
+
+    // Flush trailing token
+    if let Some(start) = token_start {
+        let token = value[start..].trim();
+        if !token.is_empty() {
+            tracks.push(parse_single_grid_track(token));
+        }
+    }
+
     tracks
 }
 
+/// Parse a single grid track value (not a function).
+fn parse_single_grid_track(part: &str) -> GridTrack {
+    let part = part.trim();
+    if part.eq_ignore_ascii_case("auto") {
+        GridTrack::Auto
+    } else if let Some(num) = part.strip_suffix("fr") {
+        num.parse::<f32>()
+            .map(GridTrack::Fr)
+            .unwrap_or(GridTrack::Auto)
+    } else if let Some(num) = part.strip_suffix("px") {
+        num.parse::<f32>()
+            .map(GridTrack::Px)
+            .unwrap_or(GridTrack::Auto)
+    } else if let Some(num) = part.strip_suffix('%') {
+        num.parse::<f32>()
+            .map(GridTrack::Percent)
+            .unwrap_or(GridTrack::Auto)
+    } else if part.parse::<f32>().is_ok_and(|val| val == 0.0) {
+        GridTrack::Px(0.0)
+    } else {
+        GridTrack::Auto
+    }
+}
+
+/// Parse a `repeat(count, track_list)` function.
+/// e.g. `repeat(3, 1fr)` → [Fr(1.0), Fr(1.0), Fr(1.0)]
+/// e.g. `repeat(2, 100px 1fr)` → [Px(100.0), Fr(1.0), Px(100.0), Fr(1.0)]
+fn parse_repeat_function(func_str: &str) -> Vec<GridTrack> {
+    if let Some(inner) = strip_function_call(func_str, "repeat") {
+        // Split on first comma: count, track_list
+        if let Some(comma_pos) = inner.find(',') {
+            let count_str = inner[..comma_pos].trim();
+            let track_str = inner[comma_pos + 1..].trim();
+            if let Ok(count) = count_str.parse::<usize>() {
+                let pattern = parse_grid_tracks_inner(track_str);
+                let mut result = Vec::with_capacity(pattern.len() * count);
+                for _ in 0..count {
+                    result.extend(pattern.iter().cloned());
+                }
+                return result;
+            }
+        }
+    }
+    Vec::new()
+}
+
+/// Parse a `minmax(min, max)` function.
+/// e.g. `minmax(80px, 1fr)` → MinMax(Px(80.0), Fr(1.0))
+fn parse_minmax_function(func_str: &str) -> GridTrack {
+    if let Some(inner) = strip_function_call(func_str, "minmax") {
+        // Split on first comma
+        if let Some(comma_pos) = inner.find(',') {
+            let min_str = inner[..comma_pos].trim();
+            let max_str = inner[comma_pos + 1..].trim();
+            let min_track = parse_single_grid_track(min_str);
+            let max_track = parse_single_grid_track(max_str);
+            return GridTrack::MinMax(Box::new(min_track), Box::new(max_track));
+        }
+    }
+    GridTrack::Auto
+}
+
+/// Parse a CSS grid-column / grid-row value into a `GridPlacement`.
+/// Supports: `auto`, `<line>`, `span <N>`, `<start> / <end>`, `<start> / span <N>`,
+/// and negative line indices (e.g. `-1`).
 pub fn parse_grid_placement(value: &str) -> GridPlacement {
     let s = value.trim();
-    if s == "auto" {
-        return GridPlacement::Auto;
+
+    // Check for start / end syntax
+    if let Some(slash_pos) = s.find('/') {
+        let start_str = s[..slash_pos].trim();
+        let end_str = s[slash_pos + 1..].trim();
+        let start = parse_grid_line(start_str);
+        let end = parse_grid_line(end_str);
+        return GridPlacement { start, end };
     }
-    if let Some(val) = s
-        .strip_prefix("span ")
-        .and_then(|span| span.trim().parse::<i32>().ok())
+
+    // Single value
+    let start = parse_grid_line(s);
+    GridPlacement {
+        start,
+        end: GridLine::Auto,
+    }
+}
+
+/// Parse a single grid line reference: `auto`, `span N`, or a line number (including negative).
+fn parse_grid_line(s: &str) -> GridLine {
+    let s = s.trim();
+    if s.eq_ignore_ascii_case("auto") || s.is_empty() {
+        return GridLine::Auto;
+    }
+    if let Some(span_str) = s
+        .to_ascii_lowercase()
+        .strip_prefix("span")
+        .map(|rest| rest.trim().to_string())
     {
-        return GridPlacement::Span(val);
+        if let Ok(val) = span_str.parse::<i32>() {
+            return GridLine::Span(val.max(1));
+        }
+        return GridLine::Span(1);
     }
     if let Ok(val) = s.parse::<i32>() {
-        return GridPlacement::Line(val);
+        return GridLine::Line(val);
     }
-    GridPlacement::Auto
+    GridLine::Auto
 }
 
 pub fn parse_time(value: &str) -> f32 {
@@ -1739,5 +2201,294 @@ mod tests {
             parse_flex_shorthand("2 1 100px"),
             ("2".to_string(), "1".to_string(), "100px".to_string())
         );
+    }
+
+    // ─── calc() Tests ────────────────────────────────────────────
+
+    #[test]
+    fn test_calc_simple_addition() {
+        let result = evaluate_calc("10px + 20px", 16.0, 16.0);
+        assert_eq!(result, Some((30.0, 0.0)));
+    }
+
+    #[test]
+    fn test_calc_px_and_percentage() {
+        let result = evaluate_calc("50% + 10px", 16.0, 16.0);
+        assert_eq!(result, Some((10.0, 50.0)));
+    }
+
+    #[test]
+    fn test_calc_subtraction() {
+        let result = evaluate_calc("100px - 30px", 16.0, 16.0);
+        assert_eq!(result, Some((70.0, 0.0)));
+    }
+
+    #[test]
+    fn test_calc_multiplication() {
+        let result = evaluate_calc("10px * 3", 16.0, 16.0);
+        assert_eq!(result, Some((30.0, 0.0)));
+    }
+
+    #[test]
+    fn test_calc_division() {
+        let result = evaluate_calc("100px / 4", 16.0, 16.0);
+        assert_eq!(result, Some((25.0, 0.0)));
+    }
+
+    #[test]
+    fn test_calc_operator_precedence() {
+        // 10px + 2px * 5 = 10 + 10 = 20
+        let result = evaluate_calc("10px + 2px * 5", 16.0, 16.0);
+        assert_eq!(result, Some((20.0, 0.0)));
+    }
+
+    #[test]
+    fn test_calc_nested_parens() {
+        // (10px + 20px) * 2 = 60
+        let result = evaluate_calc("(10px + 20px) * 2", 16.0, 16.0);
+        assert_eq!(result, Some((60.0, 0.0)));
+    }
+
+    #[test]
+    fn test_calc_em_units() {
+        // 2em with em_base=16 = 32px
+        let result = evaluate_calc("2em + 10px", 16.0, 16.0);
+        assert_eq!(result, Some((42.0, 0.0)));
+    }
+
+    #[test]
+    fn test_calc_rem_units() {
+        // 1rem with rem_base=20 = 20px
+        let result = evaluate_calc("1rem + 5px", 16.0, 20.0);
+        assert_eq!(result, Some((25.0, 0.0)));
+    }
+
+    #[test]
+    fn test_calc_negative_value() {
+        let result = evaluate_calc("-10px + 30px", 16.0, 16.0);
+        assert_eq!(result, Some((20.0, 0.0)));
+    }
+
+    #[test]
+    fn test_calc_percentage_multiply_by_scalar() {
+        // 50% * 2 = 100%
+        let result = evaluate_calc("50% * 2", 16.0, 16.0);
+        assert_eq!(result, Some((0.0, 100.0)));
+    }
+
+    #[test]
+    fn test_calc_division_by_zero_returns_none() {
+        let result = evaluate_calc("10px / 0", 16.0, 16.0);
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn test_parse_length_with_calc() {
+        let result = parse_length("calc(10px + 20px)", 16.0, 16.0);
+        assert!((result - 30.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_parse_length_or_percentage_with_calc_mixed() {
+        let result = parse_length_or_percentage("calc(50% + 10px)", 16.0, 16.0);
+        match result {
+            LengthOrPercentage::Calc { px, percentage } => {
+                assert!((px - 10.0).abs() < 0.001);
+                assert!((percentage - 50.0).abs() < 0.001);
+            }
+            _ => panic!("Expected Calc variant, got {:?}", result),
+        }
+    }
+
+    #[test]
+    fn test_parse_length_or_percentage_calc_pure_px() {
+        // calc(10px + 20px) should simplify to Px(30)
+        let result = parse_length_or_percentage("calc(10px + 20px)", 16.0, 16.0);
+        assert_eq!(result, LengthOrPercentage::Px(30.0));
+    }
+
+    #[test]
+    fn test_parse_length_or_percentage_calc_pure_pct() {
+        // calc(30% + 20%) should simplify to Percentage(50)
+        let result = parse_length_or_percentage("calc(30% + 20%)", 16.0, 16.0);
+        assert_eq!(result, LengthOrPercentage::Percentage(50.0));
+    }
+
+    #[test]
+    fn test_calc_resolve_against() {
+        let lop = LengthOrPercentage::Calc {
+            px: 10.0,
+            percentage: 50.0,
+        };
+        // With base=200: 10 + 50/100 * 200 = 10 + 100 = 110
+        assert_eq!(lop.resolve_against(200.0), Some(110.0));
+    }
+
+    // ─── Grid Track Enhanced Parsing Tests ────────────────────────
+
+    #[test]
+    fn test_parse_grid_tracks_basic() {
+        let tracks = parse_grid_tracks("100px 1fr auto");
+        assert_eq!(
+            tracks,
+            vec![GridTrack::Px(100.0), GridTrack::Fr(1.0), GridTrack::Auto]
+        );
+    }
+
+    #[test]
+    fn test_parse_grid_tracks_repeat() {
+        let tracks = parse_grid_tracks("repeat(3, 1fr)");
+        assert_eq!(
+            tracks,
+            vec![GridTrack::Fr(1.0), GridTrack::Fr(1.0), GridTrack::Fr(1.0)]
+        );
+    }
+
+    #[test]
+    fn test_parse_grid_tracks_repeat_multi_pattern() {
+        let tracks = parse_grid_tracks("repeat(2, 100px 1fr)");
+        assert_eq!(
+            tracks,
+            vec![
+                GridTrack::Px(100.0),
+                GridTrack::Fr(1.0),
+                GridTrack::Px(100.0),
+                GridTrack::Fr(1.0),
+            ]
+        );
+    }
+
+    #[test]
+    fn test_parse_grid_tracks_minmax() {
+        let tracks = parse_grid_tracks("minmax(80px, 1fr)");
+        assert_eq!(
+            tracks,
+            vec![GridTrack::MinMax(
+                Box::new(GridTrack::Px(80.0)),
+                Box::new(GridTrack::Fr(1.0))
+            )]
+        );
+    }
+
+    #[test]
+    fn test_parse_grid_tracks_mixed() {
+        let tracks = parse_grid_tracks("100px minmax(50px, 1fr) auto");
+        assert_eq!(
+            tracks,
+            vec![
+                GridTrack::Px(100.0),
+                GridTrack::MinMax(
+                    Box::new(GridTrack::Px(50.0)),
+                    Box::new(GridTrack::Fr(1.0))
+                ),
+                GridTrack::Auto,
+            ]
+        );
+    }
+
+    // ─── Grid Placement Enhanced Parsing Tests ────────────────────
+
+    #[test]
+    fn test_parse_grid_placement_auto() {
+        let p = parse_grid_placement("auto");
+        assert_eq!(
+            p,
+            GridPlacement {
+                start: GridLine::Auto,
+                end: GridLine::Auto
+            }
+        );
+    }
+
+    #[test]
+    fn test_parse_grid_placement_single_line() {
+        let p = parse_grid_placement("2");
+        assert_eq!(
+            p,
+            GridPlacement {
+                start: GridLine::Line(2),
+                end: GridLine::Auto
+            }
+        );
+    }
+
+    #[test]
+    fn test_parse_grid_placement_span() {
+        let p = parse_grid_placement("span 3");
+        assert_eq!(
+            p,
+            GridPlacement {
+                start: GridLine::Span(3),
+                end: GridLine::Auto
+            }
+        );
+    }
+
+    #[test]
+    fn test_parse_grid_placement_start_end() {
+        let p = parse_grid_placement("1 / 3");
+        assert_eq!(
+            p,
+            GridPlacement {
+                start: GridLine::Line(1),
+                end: GridLine::Line(3)
+            }
+        );
+    }
+
+    #[test]
+    fn test_parse_grid_placement_start_span() {
+        let p = parse_grid_placement("1 / span 2");
+        assert_eq!(
+            p,
+            GridPlacement {
+                start: GridLine::Line(1),
+                end: GridLine::Span(2)
+            }
+        );
+    }
+
+    #[test]
+    fn test_parse_grid_placement_negative_line() {
+        let p = parse_grid_placement("1 / -1");
+        assert_eq!(
+            p,
+            GridPlacement {
+                start: GridLine::Line(1),
+                end: GridLine::Line(-1)
+            }
+        );
+    }
+
+    // ─── strip_function_call Tests ───────────────────────────────
+
+    #[test]
+    fn test_strip_function_call_basic() {
+        assert_eq!(
+            strip_function_call("calc(10px + 20px)", "calc"),
+            Some("10px + 20px")
+        );
+    }
+
+    #[test]
+    fn test_strip_function_call_nested() {
+        assert_eq!(
+            strip_function_call("var(--x, calc(1px + 2px))", "var"),
+            Some("--x, calc(1px + 2px)")
+        );
+    }
+
+    #[test]
+    fn test_strip_function_call_no_match() {
+        assert_eq!(strip_function_call("10px", "calc"), None);
+    }
+
+    #[test]
+    fn test_format_lop_calc() {
+        let lop = LengthOrPercentage::Calc {
+            px: 10.0,
+            percentage: 50.0,
+        };
+        assert_eq!(format_lop(&lop), "calc(50% + 10px)");
     }
 }

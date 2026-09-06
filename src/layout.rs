@@ -1250,6 +1250,22 @@ impl<'a> LayoutBox<'a> {
                 }
                 crate::values::GridTrack::Auto => total_fr += 1.0,
                 crate::values::GridTrack::Fr(val) => total_fr += *val,
+                crate::values::GridTrack::MinMax(min, max) => {
+                    // Use the minimum as the initial size
+                    let min_px = match min.as_ref() {
+                        crate::values::GridTrack::Px(v) => *v,
+                        crate::values::GridTrack::Percent(p) => container_w * (*p / 100.0),
+                        _ => 0.0,
+                    };
+                    col_px_sizes[i] = min_px;
+                    remaining_w -= min_px;
+                    // If max is fr or auto, it should participate in flexible sizing
+                    match max.as_ref() {
+                        crate::values::GridTrack::Fr(v) => total_fr += *v,
+                        crate::values::GridTrack::Auto => total_fr += 1.0,
+                        _ => {}
+                    }
+                }
             }
         }
 
@@ -1261,6 +1277,18 @@ impl<'a> LayoutBox<'a> {
                     }
                     crate::values::GridTrack::Auto => {
                         col_px_sizes[i] = remaining_w * (1.0 / total_fr)
+                    }
+                    crate::values::GridTrack::MinMax(_min, max) => {
+                        let flex_val = match max.as_ref() {
+                            crate::values::GridTrack::Fr(v) => *v,
+                            crate::values::GridTrack::Auto => 1.0,
+                            _ => 0.0,
+                        };
+                        if flex_val > 0.0 {
+                            let flex_size = remaining_w * (flex_val / total_fr);
+                            // Ensure we don't go below the minimum
+                            col_px_sizes[i] = col_px_sizes[i].max(flex_size);
+                        }
                     }
                     _ => {}
                 }
@@ -1283,13 +1311,17 @@ impl<'a> LayoutBox<'a> {
             let mut col_span = 1;
 
             if let Some(child_style) = child.styled_node {
-                match child_style.styles.grid_column {
-                    crate::values::GridPlacement::Span(s) => col_span = s.max(1) as usize,
-                    crate::values::GridPlacement::Line(l) => current_col = (l.max(1) - 1) as usize,
-                    _ => {}
+                match &child_style.styles.grid_column.start {
+                    crate::values::GridLine::Span(s) => col_span = (*s).max(1) as usize,
+                    crate::values::GridLine::Line(l) => current_col = ((*l).max(1) - 1) as usize,
+                    crate::values::GridLine::Auto => {}
                 }
-                if let crate::values::GridPlacement::Line(l) = child_style.styles.grid_row {
-                    current_row = (l.max(1) - 1) as usize;
+                // Check for end span
+                if let crate::values::GridLine::Span(s) = &child_style.styles.grid_column.end {
+                    col_span = (*s).max(1) as usize;
+                }
+                if let crate::values::GridLine::Line(l) = &child_style.styles.grid_row.start {
+                    current_row = ((*l).max(1) - 1) as usize;
                 }
             }
 
