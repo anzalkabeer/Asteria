@@ -1233,6 +1233,7 @@ impl<'a> LayoutBox<'a> {
         let gap_y = style.grid_gap.top;
 
         // 1. Resolve raw placements for in-flow children
+        const MAX_GRID_TRACKS: usize = 1000;
         let explicit_cols = style.grid_template_columns.len().max(1);
         let explicit_rows = style.grid_template_rows.len().max(1);
 
@@ -1241,7 +1242,7 @@ impl<'a> LayoutBox<'a> {
             if child.is_out_of_flow() {
                 continue;
             }
-            let (col_start, col_span) = if let Some(cs) = child.styled_node {
+            let (mut col_start, mut col_span) = if let Some(cs) = child.styled_node {
                 resolve_grid_line(
                     cs.styles.grid_column.start,
                     cs.styles.grid_column.end,
@@ -1251,7 +1252,7 @@ impl<'a> LayoutBox<'a> {
                 (None, 1)
             };
 
-            let (row_start, row_span) = if let Some(cs) = child.styled_node {
+            let (mut row_start, mut row_span) = if let Some(cs) = child.styled_node {
                 resolve_grid_line(
                     cs.styles.grid_row.start,
                     cs.styles.grid_row.end,
@@ -1260,6 +1261,25 @@ impl<'a> LayoutBox<'a> {
             } else {
                 (None, 1)
             };
+
+            col_span = col_span.clamp(1, MAX_GRID_TRACKS);
+            row_span = row_span.clamp(1, MAX_GRID_TRACKS);
+
+            if let Some(c) = col_start {
+                if c >= MAX_GRID_TRACKS {
+                    col_start = None;
+                } else if c + col_span > MAX_GRID_TRACKS {
+                    col_span = MAX_GRID_TRACKS - c;
+                }
+            }
+
+            if let Some(r) = row_start {
+                if r >= MAX_GRID_TRACKS {
+                    row_start = None;
+                } else if r + row_span > MAX_GRID_TRACKS {
+                    row_span = MAX_GRID_TRACKS - r;
+                }
+            }
 
             raw_placements.push((idx, col_start, col_span, row_start, row_span));
         }
@@ -1273,7 +1293,7 @@ impl<'a> LayoutBox<'a> {
                 num_cols = num_cols.max(col_span);
             }
         }
-        let num_cols = num_cols.max(1);
+        let num_cols = num_cols.clamp(1, MAX_GRID_TRACKS);
 
         // 2. 2D Occupancy Grid and Placement
         let mut occupied: std::collections::HashSet<(usize, usize)> =
@@ -1285,8 +1305,14 @@ impl<'a> LayoutBox<'a> {
         for item in raw_placements {
             let (idx, col_start, col_span, row_start, row_span) = item;
             if let (Some(c), Some(r)) = (col_start, row_start) {
-                for dr in 0..row_span {
-                    for dc in 0..col_span {
+                if c >= num_cols || r >= MAX_GRID_TRACKS {
+                    pending.push((idx, None, col_span, None, row_span));
+                    continue;
+                }
+                let c_span = col_span.min(num_cols - c);
+                let r_span = row_span.min(MAX_GRID_TRACKS - r);
+                for dr in 0..r_span {
+                    for dc in 0..c_span {
                         occupied.insert((r + dr, c + dc));
                     }
                 }
@@ -1294,8 +1320,8 @@ impl<'a> LayoutBox<'a> {
                     child_index: idx,
                     col: c,
                     row: r,
-                    col_span,
-                    row_span,
+                    col_span: c_span,
+                    row_span: r_span,
                 });
             } else {
                 pending.push(item);
@@ -1307,11 +1333,18 @@ impl<'a> LayoutBox<'a> {
         for item in pending {
             let (idx, col_start, col_span, row_start, row_span) = item;
             if let (None, Some(r)) = (col_start, row_start) {
+                if r >= MAX_GRID_TRACKS {
+                    pending_after_row.push((idx, None, col_span, None, row_span));
+                    continue;
+                }
+                let r_span = row_span.min(MAX_GRID_TRACKS - r);
                 let mut c = 0;
-                loop {
+                let mut placed = false;
+                while c < num_cols {
+                    let c_span = col_span.min(num_cols - c);
                     let mut fits = true;
-                    for dr in 0..row_span {
-                        for dc in 0..col_span {
+                    for dr in 0..r_span {
+                        for dc in 0..c_span {
                             if occupied.contains(&(r + dr, c + dc)) {
                                 fits = false;
                                 break;
@@ -1322,22 +1355,26 @@ impl<'a> LayoutBox<'a> {
                         }
                     }
                     if fits {
+                        for dr in 0..r_span {
+                            for dc in 0..c_span {
+                                occupied.insert((r + dr, c + dc));
+                            }
+                        }
+                        placed_items.push(PlacedChild {
+                            child_index: idx,
+                            col: c,
+                            row: r,
+                            col_span: c_span,
+                            row_span: r_span,
+                        });
+                        placed = true;
                         break;
                     }
                     c += 1;
                 }
-                for dr in 0..row_span {
-                    for dc in 0..col_span {
-                        occupied.insert((r + dr, c + dc));
-                    }
+                if !placed {
+                    pending_after_row.push((idx, None, col_span, None, row_span));
                 }
-                placed_items.push(PlacedChild {
-                    child_index: idx,
-                    col: c,
-                    row: r,
-                    col_span,
-                    row_span,
-                });
             } else {
                 pending_after_row.push(item);
             }
@@ -1348,11 +1385,18 @@ impl<'a> LayoutBox<'a> {
         for item in pending_after_row {
             let (idx, col_start, col_span, row_start, row_span) = item;
             if let (Some(c), None) = (col_start, row_start) {
+                if c >= num_cols {
+                    pending_auto.push((idx, None, col_span, None, row_span));
+                    continue;
+                }
+                let c_span = col_span.min(num_cols - c);
                 let mut r = 0;
-                loop {
+                let mut placed = false;
+                while r < MAX_GRID_TRACKS {
+                    let r_span = row_span.min(MAX_GRID_TRACKS - r);
                     let mut fits = true;
-                    for dr in 0..row_span {
-                        for dc in 0..col_span {
+                    for dr in 0..r_span {
+                        for dc in 0..c_span {
                             if occupied.contains(&(r + dr, c + dc)) {
                                 fits = false;
                                 break;
@@ -1363,22 +1407,26 @@ impl<'a> LayoutBox<'a> {
                         }
                     }
                     if fits {
+                        for dr in 0..r_span {
+                            for dc in 0..c_span {
+                                occupied.insert((r + dr, c + dc));
+                            }
+                        }
+                        placed_items.push(PlacedChild {
+                            child_index: idx,
+                            col: c,
+                            row: r,
+                            col_span: c_span,
+                            row_span: r_span,
+                        });
+                        placed = true;
                         break;
                     }
                     r += 1;
                 }
-                for dr in 0..row_span {
-                    for dc in 0..col_span {
-                        occupied.insert((r + dr, c + dc));
-                    }
+                if !placed {
+                    pending_auto.push((idx, None, col_span, None, row_span));
                 }
-                placed_items.push(PlacedChild {
-                    child_index: idx,
-                    col: c,
-                    row: r,
-                    col_span,
-                    row_span,
-                });
             } else {
                 pending_auto.push(item);
             }
@@ -1389,14 +1437,22 @@ impl<'a> LayoutBox<'a> {
         let mut cursor_col = 0;
         for item in pending_auto {
             let (idx, _, col_span, _, row_span) = item;
+            let c_span = col_span.min(num_cols);
             loop {
-                if cursor_col + col_span > num_cols {
+                if cursor_row >= MAX_GRID_TRACKS {
+                    break;
+                }
+                if cursor_col + c_span > num_cols {
                     cursor_col = 0;
                     cursor_row += 1;
+                    if cursor_row >= MAX_GRID_TRACKS {
+                        break;
+                    }
                 }
+                let r_span = row_span.min(MAX_GRID_TRACKS - cursor_row);
                 let mut fits = true;
-                for dr in 0..row_span {
-                    for dc in 0..col_span {
+                for dr in 0..r_span {
+                    for dc in 0..c_span {
                         if occupied.contains(&(cursor_row + dr, cursor_col + dc)) {
                             fits = false;
                             break;
@@ -1407,8 +1463,8 @@ impl<'a> LayoutBox<'a> {
                     }
                 }
                 if fits {
-                    for dr in 0..row_span {
-                        for dc in 0..col_span {
+                    for dr in 0..r_span {
+                        for dc in 0..c_span {
                             occupied.insert((cursor_row + dr, cursor_col + dc));
                         }
                     }
@@ -1416,10 +1472,10 @@ impl<'a> LayoutBox<'a> {
                         child_index: idx,
                         col: cursor_col,
                         row: cursor_row,
-                        col_span,
-                        row_span,
+                        col_span: c_span,
+                        row_span: r_span,
                     });
-                    cursor_col += col_span;
+                    cursor_col += c_span;
                     break;
                 } else {
                     cursor_col += 1;
@@ -1432,7 +1488,7 @@ impl<'a> LayoutBox<'a> {
         for item in &placed_items {
             num_rows = num_rows.max(item.row + item.row_span);
         }
-        let num_rows = num_rows.max(1);
+        let num_rows = num_rows.clamp(1, MAX_GRID_TRACKS);
 
         // 4. Track sizing for columns
         let mut col_tracks = style.grid_template_columns.clone();

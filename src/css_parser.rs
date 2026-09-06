@@ -150,21 +150,22 @@ impl Stylesheet {
     /// Prepend rules from an imported stylesheet, preserving cascade precedence.
     /// Imported rules precede rules defined in the current stylesheet.
     pub fn prepend_imported(&mut self, mut imported: Stylesheet) {
-        let imported_rules_count = imported.rules.len();
+        let total_imported_rules = imported.rules.len()
+            + imported
+                .media_rules
+                .iter()
+                .map(|m| m.rules.len())
+                .sum::<usize>();
+
         for rule in &mut self.rules {
-            rule.position += imported_rules_count;
+            rule.position += total_imported_rules;
         }
         imported.rules.append(&mut self.rules);
         self.rules = imported.rules;
 
-        let imported_media_rules_count = imported
-            .media_rules
-            .iter()
-            .map(|m| m.rules.len())
-            .sum::<usize>();
         for media_rule in &mut self.media_rules {
             for rule in &mut media_rule.rules {
-                rule.position += imported_media_rules_count;
+                rule.position += total_imported_rules;
             }
         }
         imported.media_rules.append(&mut self.media_rules);
@@ -350,7 +351,7 @@ impl<'a> CssParser<'a> {
         self.skip_whitespace();
 
         if self.current_kind() != CssTokenKind::Ident {
-            self.skip_at_rule();
+            self.skip_at_rule_body();
             return None;
         }
 
@@ -359,7 +360,7 @@ impl<'a> CssParser<'a> {
 
         self.skip_whitespace();
         if self.current_kind() != CssTokenKind::OpenBrace {
-            self.skip_at_rule();
+            self.skip_at_rule_body();
             return None;
         }
         self.advance(); // skip '{'
@@ -416,20 +417,31 @@ impl<'a> CssParser<'a> {
                     u = self.current_slice().to_string();
                     self.advance();
                 } else {
-                    while !self.at_end() && self.current_kind() != CssTokenKind::CloseParen {
+                    while !self.at_end()
+                        && self.current_kind() != CssTokenKind::CloseParen
+                        && self.current_kind() != CssTokenKind::Semicolon
+                        && self.current_kind() != CssTokenKind::OpenBrace
+                    {
                         u.push_str(self.current_slice());
                         self.advance();
                     }
                     u = u.trim().to_string();
                 }
                 self.skip_whitespace();
-                if self.current_kind() == CssTokenKind::CloseParen {
+                let has_close_paren = if self.current_kind() == CssTokenKind::CloseParen {
                     self.advance(); // skip ')'
+                    true
+                } else {
+                    false
+                };
+                if !has_close_paren {
+                    self.skip_at_rule_body();
+                    return None;
                 }
                 u
             }
             _ => {
-                self.skip_at_rule();
+                self.skip_at_rule_body();
                 return None;
             }
         };
@@ -444,6 +456,11 @@ impl<'a> CssParser<'a> {
         {
             media_parts.push_str(self.current_slice());
             self.advance();
+        }
+
+        if self.current_kind() == CssTokenKind::OpenBrace {
+            self.skip_at_rule_body();
+            return None;
         }
 
         if self.current_kind() == CssTokenKind::Semicolon {
@@ -888,6 +905,12 @@ impl<'a> CssParser<'a> {
     /// Skip an @-rule by consuming tokens until matching '}' or end.
     fn skip_at_rule(&mut self) {
         self.advance(); // skip @keyword
+        self.skip_at_rule_body();
+    }
+
+    /// Skip the body of an @-rule (when @keyword has already been consumed)
+    /// until reaching a top-level ';' or matching '}' or EOF.
+    fn skip_at_rule_body(&mut self) {
         let mut brace_depth = 0;
         while !self.at_end() {
             match self.current_kind() {
@@ -1161,5 +1184,59 @@ mod tests {
         // Original rule should have its position shifted
         assert_eq!(base.rules[2].declarations[0].value, "red");
         assert_eq!(base.rules[2].position, 2);
+    }
+
+    #[test]
+    fn test_import_missing_close_paren_recovered() {
+        let stylesheet =
+            Stylesheet::parse(b"@import url(\"missing_paren.css\"; h1 { color: red; }");
+        assert_eq!(stylesheet.imports.len(), 0);
+        assert_eq!(stylesheet.rules.len(), 1);
+        assert_eq!(
+            stylesheet.rules[0].selectors[0].parts,
+            vec![vec![SimpleSelector::Tag("h1".to_string())]]
+        );
+
+        let stylesheet2 = Stylesheet::parse(b"@import url(missing_paren.css; p { color: blue; }");
+        assert_eq!(stylesheet2.imports.len(), 0);
+        assert_eq!(stylesheet2.rules.len(), 1);
+        assert_eq!(
+            stylesheet2.rules[0].selectors[0].parts,
+            vec![vec![SimpleSelector::Tag("p".to_string())]]
+        );
+    }
+
+    #[test]
+    fn test_import_with_block_skipped_without_infinite_loop() {
+        let stylesheet = Stylesheet::parse(
+            b"@import \"invalid.css\" { a { color: green; } } h2 { color: yellow; }",
+        );
+        assert_eq!(stylesheet.imports.len(), 0);
+        assert_eq!(stylesheet.rules.len(), 1);
+        assert_eq!(
+            stylesheet.rules[0].selectors[0].parts,
+            vec![vec![SimpleSelector::Tag("h2".to_string())]]
+        );
+    }
+
+    #[test]
+    fn test_prepend_imported_with_media_rules() {
+        let mut base = Stylesheet::parse(
+            b"h1 { color: red; } @media (min-width: 500px) { p { color: pink; } }",
+        );
+        let imported = Stylesheet::parse(
+            b"h2 { color: blue; } @media (min-width: 500px) { span { color: cyan; } }",
+        );
+
+        base.prepend_imported(imported);
+        assert_eq!(base.rules.len(), 2);
+        assert_eq!(base.media_rules.len(), 2);
+
+        // Imported rules come first
+        assert_eq!(base.rules[0].position, 0); // imported h2
+        assert_eq!(base.rules[1].position, 2); // base h1 (shifted by 2: 0 + 2 = 2)
+
+        assert_eq!(base.media_rules[0].rules[0].position, 1); // imported span
+        assert_eq!(base.media_rules[1].rules[0].position, 3); // base p (shifted by 2: 1 + 2 = 3)
     }
 }

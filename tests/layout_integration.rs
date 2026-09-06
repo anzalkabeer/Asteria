@@ -930,3 +930,40 @@ fn test_grid_minmax_flexible_track_preserves_min() {
     assert_eq!(c1.dimensions.content.width, 100.0);
     assert_eq!(c2.dimensions.content.width, 75.0);
 }
+
+#[test]
+fn test_grid_clamped_bounded_huge_placement() {
+    let mut dom_store = None;
+    let mut bytes_store = Vec::new();
+    let mut styled_store = None;
+
+    let html =
+        r#"<html><body><div id="grid"><div id="c1"></div><div id="c2"></div></div></body></html>"#;
+    let css = r#"
+        * { margin: 0px; padding: 0px; border: 0px; }
+        #grid {
+            display: grid;
+            width: 300px;
+            grid-template-columns: 100px 100px 100px;
+            grid-gap: 0px;
+        }
+        #c1 { grid-column: 1 / 1000000; height: 50px; }
+        #c2 { grid-column: 999999; grid-row: 50000; height: 50px; }
+    "#;
+
+    let layout = parse_and_layout(
+        html,
+        css,
+        800.0,
+        600.0,
+        &mut dom_store,
+        &mut bytes_store,
+        &mut styled_store,
+    );
+
+    let grid = &layout.children[0].children[0].children[0];
+    assert_eq!(grid.children.len(), 2);
+    // Huge placement is bounded safely without crash or OOM
+    let c1 = &grid.children[0];
+    assert!(c1.dimensions.content.width > 0.0);
+}
