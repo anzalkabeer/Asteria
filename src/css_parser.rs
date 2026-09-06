@@ -95,6 +95,13 @@ pub struct StyleRule {
     pub position: usize,
 }
 
+/// An `@import` rule: a URL and an optional media query string.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ImportRule {
+    pub url: String,
+    pub media: Option<String>,
+}
+
 /// A `@media` rule containing nested style rules.
 #[derive(Debug, Clone)]
 pub struct MediaRule {
@@ -122,9 +129,10 @@ pub struct KeyframeRule {
     pub blocks: Vec<KeyframeBlock>,
 }
 
-/// A stylesheet: a list of style rules and media rules parsed from CSS source.
+/// A stylesheet: a list of style rules, media rules, keyframes, and import rules parsed from CSS source.
 #[derive(Debug, Clone, Default)]
 pub struct Stylesheet {
+    pub imports: Vec<ImportRule>,
     pub rules: Vec<StyleRule>,
     pub media_rules: Vec<MediaRule>,
     pub keyframes_rules: Vec<KeyframeRule>,
@@ -137,6 +145,36 @@ impl Stylesheet {
         let tokens = tokenizer.tokenize();
         let mut parser = CssParser::new(&tokens, source);
         parser.parse()
+    }
+
+    /// Prepend rules from an imported stylesheet, preserving cascade precedence.
+    /// Imported rules precede rules defined in the current stylesheet.
+    pub fn prepend_imported(&mut self, mut imported: Stylesheet) {
+        let imported_rules_count = imported.rules.len();
+        for rule in &mut self.rules {
+            rule.position += imported_rules_count;
+        }
+        imported.rules.append(&mut self.rules);
+        self.rules = imported.rules;
+
+        let imported_media_rules_count = imported
+            .media_rules
+            .iter()
+            .map(|m| m.rules.len())
+            .sum::<usize>();
+        for media_rule in &mut self.media_rules {
+            for rule in &mut media_rule.rules {
+                rule.position += imported_media_rules_count;
+            }
+        }
+        imported.media_rules.append(&mut self.media_rules);
+        self.media_rules = imported.media_rules;
+
+        imported.keyframes_rules.append(&mut self.keyframes_rules);
+        self.keyframes_rules = imported.keyframes_rules;
+
+        imported.imports.append(&mut self.imports);
+        self.imports = imported.imports;
     }
 }
 
@@ -160,6 +198,7 @@ impl<'a> CssParser<'a> {
     }
 
     pub fn parse(&mut self) -> Stylesheet {
+        let mut imports = Vec::new();
         let mut rules = Vec::new();
         let mut media_rules = Vec::new();
         let mut keyframes_rules = Vec::new();
@@ -172,6 +211,12 @@ impl<'a> CssParser<'a> {
             }
 
             if self.current_kind() == CssTokenKind::AtKeyword {
+                if self.current_slice().eq_ignore_ascii_case("@import") {
+                    if let Some(import_rule) = self.parse_import_rule() {
+                        imports.push(import_rule);
+                    }
+                    continue;
+                }
                 if self.current_slice().eq_ignore_ascii_case("@media") {
                     if let Some(media_rule) = self.parse_media_rule() {
                         media_rules.push(media_rule);
@@ -195,6 +240,7 @@ impl<'a> CssParser<'a> {
         }
 
         Stylesheet {
+            imports,
             rules,
             media_rules,
             keyframes_rules,
@@ -336,6 +382,82 @@ impl<'a> CssParser<'a> {
         }
 
         Some(KeyframeRule { name, blocks })
+    }
+
+    /// Parse an @import rule:
+    ///   @import "style.css";
+    ///   @import 'style.css';
+    ///   @import url("style.css");
+    ///   @import url(style.css);
+    ///   @import "style.css" screen and (min-width: 600px);
+    fn parse_import_rule(&mut self) -> Option<ImportRule> {
+        self.advance(); // skip @import
+        self.skip_whitespace();
+
+        if self.at_end() {
+            return None;
+        }
+
+        let url = match self.current_kind() {
+            CssTokenKind::String => {
+                let u = self.current_slice().to_string();
+                self.advance();
+                u
+            }
+            CssTokenKind::Function if self.current_slice().eq_ignore_ascii_case("url") => {
+                self.advance(); // skip url function token
+                self.skip_whitespace();
+                if self.current_kind() == CssTokenKind::OpenParen {
+                    self.advance(); // skip '('
+                }
+                self.skip_whitespace();
+                let mut u = String::new();
+                if self.current_kind() == CssTokenKind::String {
+                    u = self.current_slice().to_string();
+                    self.advance();
+                } else {
+                    while !self.at_end() && self.current_kind() != CssTokenKind::CloseParen {
+                        u.push_str(self.current_slice());
+                        self.advance();
+                    }
+                    u = u.trim().to_string();
+                }
+                self.skip_whitespace();
+                if self.current_kind() == CssTokenKind::CloseParen {
+                    self.advance(); // skip ')'
+                }
+                u
+            }
+            _ => {
+                self.skip_at_rule();
+                return None;
+            }
+        };
+
+        self.skip_whitespace();
+
+        // Optional media query up to ';' or '{'
+        let mut media_parts = String::new();
+        while !self.at_end()
+            && self.current_kind() != CssTokenKind::Semicolon
+            && self.current_kind() != CssTokenKind::OpenBrace
+        {
+            media_parts.push_str(self.current_slice());
+            self.advance();
+        }
+
+        if self.current_kind() == CssTokenKind::Semicolon {
+            self.advance(); // skip ';'
+        }
+
+        let media_str = media_parts.trim().to_string();
+        let media = if media_str.is_empty() {
+            None
+        } else {
+            Some(media_str)
+        };
+
+        Some(ImportRule { url, media })
     }
 
     fn parse_keyframe_block(&mut self) -> Option<KeyframeBlock> {
@@ -989,5 +1111,55 @@ mod tests {
         assert_eq!(stylesheet.media_rules[0].min_width, Some(600.0));
         assert_eq!(stylesheet.media_rules[0].max_width, Some(1200.0));
         assert_eq!(stylesheet.media_rules[0].rules.len(), 1);
+    }
+
+    #[test]
+    fn test_import_rule_string() {
+        let stylesheet = Stylesheet::parse(b"@import \"reset.css\";\nbody { margin: 0; }");
+        assert_eq!(stylesheet.imports.len(), 1);
+        assert_eq!(stylesheet.imports[0].url, "reset.css");
+        assert_eq!(stylesheet.imports[0].media, None);
+        assert_eq!(stylesheet.rules.len(), 1);
+    }
+
+    #[test]
+    fn test_import_rule_url() {
+        let stylesheet =
+            Stylesheet::parse(b"@import url(\"theme.css\");\n@import url('fonts.css');");
+        assert_eq!(stylesheet.imports.len(), 2);
+        assert_eq!(stylesheet.imports[0].url, "theme.css");
+        assert_eq!(stylesheet.imports[0].media, None);
+        assert_eq!(stylesheet.imports[1].url, "fonts.css");
+        assert_eq!(stylesheet.imports[1].media, None);
+    }
+
+    #[test]
+    fn test_import_rule_with_media() {
+        let stylesheet =
+            Stylesheet::parse(b"@import \"mobile.css\" screen and (max-width: 600px);");
+        assert_eq!(stylesheet.imports.len(), 1);
+        assert_eq!(stylesheet.imports[0].url, "mobile.css");
+        assert_eq!(
+            stylesheet.imports[0].media,
+            Some("screen and (max-width: 600px)".to_string())
+        );
+    }
+
+    #[test]
+    fn test_prepend_imported() {
+        let mut base = Stylesheet::parse(b"h1 { color: red; }");
+        let imported = Stylesheet::parse(b"h1 { color: blue; } p { color: black; }");
+        assert_eq!(base.rules[0].position, 0);
+
+        base.prepend_imported(imported);
+        assert_eq!(base.rules.len(), 3);
+        // Imported rules should come first
+        assert_eq!(base.rules[0].declarations[0].value, "blue");
+        assert_eq!(base.rules[0].position, 0);
+        assert_eq!(base.rules[1].declarations[0].value, "black");
+        assert_eq!(base.rules[1].position, 1);
+        // Original rule should have its position shifted
+        assert_eq!(base.rules[2].declarations[0].value, "red");
+        assert_eq!(base.rules[2].position, 2);
     }
 }

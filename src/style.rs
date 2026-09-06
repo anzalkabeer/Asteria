@@ -370,6 +370,80 @@ fn split_var_args(inner: &str) -> (&str, Option<String>) {
     (inner.trim(), None)
 }
 
+fn resolve_var_chain(
+    name: &str,
+    vars: &std::collections::HashMap<String, String>,
+    active_stack: &mut std::collections::HashSet<String>,
+) -> Option<String> {
+    if active_stack.contains(name) {
+        return None; // Cycle detected
+    }
+    let raw_val = vars.get(name)?;
+    if !raw_val.contains("var(") {
+        return Some(raw_val.clone());
+    }
+
+    active_stack.insert(name.to_string());
+    let resolved = substitute_vars_internal(raw_val, vars, active_stack);
+    active_stack.remove(name);
+    resolved
+}
+
+fn substitute_vars_internal(
+    val: &str,
+    vars: &std::collections::HashMap<String, String>,
+    active_stack: &mut std::collections::HashSet<String>,
+) -> Option<String> {
+    if !val.contains("var(") {
+        return Some(val.to_string());
+    }
+
+    let mut result = val.to_string();
+    let mut iterations = 0;
+    const MAX_VAR_DEPTH: usize = 32;
+
+    while let Some(start) = result.find("var(") {
+        iterations += 1;
+        if iterations > MAX_VAR_DEPTH {
+            return None;
+        }
+
+        let inner_start = start + 4;
+        let mut depth = 1;
+        let mut end_pos = None;
+        for (i, ch) in result[inner_start..].char_indices() {
+            match ch {
+                '(' => depth += 1,
+                ')' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        end_pos = Some(inner_start + i);
+                        break;
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        let end = end_pos?;
+        let var_inner = result[inner_start..end].trim().to_string();
+        let (var_name, fallback) = split_var_args(&var_inner);
+        let var_name = var_name.trim();
+
+        let resolved_val = if let Some(v) = resolve_var_chain(var_name, vars, active_stack) {
+            v
+        } else if let Some(fb) = fallback {
+            substitute_vars_internal(fb.trim(), vars, active_stack).unwrap_or_default()
+        } else {
+            return None;
+        };
+
+        result.replace_range(start..=end, &resolved_val);
+    }
+
+    Some(result)
+}
+
 /// Recursively build a StyledNode for a DOM node and its descendants.
 ///
 /// `parent_style` — the parent's computed style (for inheritance)
@@ -669,71 +743,11 @@ fn build_styled_node(
             // A helper to substitute `var()` in a value string.
             // Uses paren-aware scanning to correctly handle nested parens in
             // fallback values (e.g. `var(--x, calc(1px + 2px))`).
-            // Detects cycles via a visited set to prevent infinite loops.
+            // Detects cycles via a visited stack to fall back correctly.
             let substitute_vars =
                 |val: &str, vars: &std::collections::HashMap<String, String>| -> String {
-                    if !val.contains("var(") {
-                        return val.to_string();
-                    }
-                    let mut result = val.to_string();
-                    let mut iterations = 0;
-                    const MAX_VAR_DEPTH: usize = 32;
-                    let mut visited: std::collections::HashSet<String> =
-                        std::collections::HashSet::new();
-
-                    while let Some(start) = result.find("var(") {
-                        iterations += 1;
-                        if iterations > MAX_VAR_DEPTH {
-                            break; // Safety limit
-                        }
-
-                        // Find matching close paren using depth tracking
-                        let inner_start = start + 4;
-                        let mut depth = 1;
-                        let mut end_pos = None;
-                        for (i, ch) in result[inner_start..].char_indices() {
-                            match ch {
-                                '(' => depth += 1,
-                                ')' => {
-                                    depth -= 1;
-                                    if depth == 0 {
-                                        end_pos = Some(inner_start + i);
-                                        break;
-                                    }
-                                }
-                                _ => {}
-                            }
-                        }
-
-                        let end = match end_pos {
-                            Some(e) => e,
-                            None => break, // Unmatched paren
-                        };
-
-                        let var_inner = result[inner_start..end].trim().to_string();
-
-                        // Split on the first comma (paren-aware) for fallback
-                        let (var_name, fallback) = split_var_args(&var_inner);
-                        let var_name = var_name.trim();
-
-                        // Cycle detection
-                        if visited.contains(var_name) {
-                            // Cycle detected — use fallback or empty string
-                            let resolved = fallback.unwrap_or_default();
-                            result.replace_range(start..=end, &resolved);
-                            continue;
-                        }
-                        visited.insert(var_name.to_string());
-
-                        let resolved_val = if let Some(v) = vars.get(var_name) {
-                            v.clone()
-                        } else {
-                            fallback.unwrap_or_default()
-                        };
-
-                        result.replace_range(start..=end, &resolved_val);
-                    }
-                    result
+                    let mut active_stack = std::collections::HashSet::new();
+                    substitute_vars_internal(val, vars, &mut active_stack).unwrap_or_default()
                 };
 
             let mut computed = ComputedStyle::default();
@@ -1038,9 +1052,21 @@ fn copy_property(child: &mut ComputedStyle, parent: &ComputedStyle, prop: Proper
         PropertyId::GridTemplateRows => {
             child.grid_template_rows = parent.grid_template_rows.clone()
         }
-        PropertyId::GridColumn => child.grid_column = parent.grid_column.clone(),
-        PropertyId::GridRow => child.grid_row = parent.grid_row.clone(),
+        PropertyId::GridColumn => child.grid_column = parent.grid_column,
+        PropertyId::GridRow => child.grid_row = parent.grid_row,
+        PropertyId::GridColumnStart => child.grid_column.start = parent.grid_column.start,
+        PropertyId::GridColumnEnd => child.grid_column.end = parent.grid_column.end,
+        PropertyId::GridRowStart => child.grid_row.start = parent.grid_row.start,
+        PropertyId::GridRowEnd => child.grid_row.end = parent.grid_row.end,
         PropertyId::GridGap => child.grid_gap = parent.grid_gap,
+        PropertyId::RowGap => {
+            child.grid_gap.top = parent.grid_gap.top;
+            child.grid_gap.bottom = parent.grid_gap.bottom;
+        }
+        PropertyId::ColumnGap => {
+            child.grid_gap.left = parent.grid_gap.left;
+            child.grid_gap.right = parent.grid_gap.right;
+        }
         PropertyId::AnimationName => child.animation_name = parent.animation_name.clone(),
         PropertyId::AnimationDuration => child.animation_duration = parent.animation_duration,
         PropertyId::AnimationTimingFunction => {
@@ -1420,7 +1446,9 @@ impl StyledNode {
                 match s.width {
                     values::LengthOrPercentage::Px(v) => format!("{}px", v),
                     values::LengthOrPercentage::Percentage(p) => format!("{}%", p),
-                    values::LengthOrPercentage::Calc { px, percentage } => format!("calc({}% + {}px)", percentage, px),
+                    values::LengthOrPercentage::Calc { px, percentage } => {
+                        format!("calc({}% + {}px)", percentage, px)
+                    }
                     values::LengthOrPercentage::Auto => "auto".to_string(),
                 },
             ));
@@ -1431,7 +1459,9 @@ impl StyledNode {
                 match s.height {
                     values::LengthOrPercentage::Px(v) => format!("{}px", v),
                     values::LengthOrPercentage::Percentage(p) => format!("{}%", p),
-                    values::LengthOrPercentage::Calc { px, percentage } => format!("calc({}% + {}px)", percentage, px),
+                    values::LengthOrPercentage::Calc { px, percentage } => {
+                        format!("calc({}% + {}px)", percentage, px)
+                    }
                     values::LengthOrPercentage::Auto => "auto".to_string(),
                 },
             ));

@@ -279,3 +279,50 @@ fn test_document_position_cascade_order() {
     // Later top-level rule overrides earlier media rule at equal specificity
     assert_eq!(div.styles.color, asteria::values::Color::rgb(0, 0, 255));
 }
+
+// ─── CSS Variables Integration Tests ──────────────────────────────
+
+#[test]
+fn test_var_nested_fallback_with_comma() {
+    let (styled, _, _) = styled_tree(
+        "<div>Text</div>",
+        "div { color: var(--undefined, rgb(255, 0, 128)); }",
+    );
+    let div = &styled.children[0];
+    assert_eq!(div.styles.color, asteria::values::Color::rgb(255, 0, 128));
+}
+
+#[test]
+fn test_var_nested_var_fallback() {
+    let (styled, _, _) = styled_tree(
+        "<div>Text</div>",
+        "div { --primary: red; color: var(--missing, var(--primary, blue)); }",
+    );
+    let div = &styled.children[0];
+    assert_eq!(div.styles.color, asteria::values::Color::rgb(255, 0, 0));
+}
+
+#[test]
+fn test_var_cycle_detection() {
+    let (styled, _, _) = styled_tree(
+        "<div>Text</div>",
+        "div { --a: var(--b); --b: var(--a); color: var(--a, green); }",
+    );
+    let div = &styled.children[0];
+    // Cycle should not panic and fallback should resolve or default
+    assert_eq!(div.styles.color, asteria::values::Color::rgb(0, 128, 0));
+}
+
+#[test]
+fn test_var_in_shorthand_border() {
+    let (styled, _, _) = styled_tree(
+        "<div>Text</div>",
+        "div { --border-col: red; border: 4px solid var(--border-col); }",
+    );
+    let div = &styled.children[0];
+    assert_eq!(div.styles.border_width.top, 4.0);
+    assert_eq!(
+        div.styles.border_color,
+        asteria::values::Color::rgb(255, 0, 0)
+    );
+}

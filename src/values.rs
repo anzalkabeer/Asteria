@@ -116,20 +116,40 @@ pub enum GridTrack {
 }
 
 /// A single grid line reference: auto, a numbered line, or a span count.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GridLine {
     Auto,
     Line(i32),
     Span(i32),
 }
 
+impl std::fmt::Display for GridLine {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            GridLine::Auto => write!(f, "auto"),
+            GridLine::Line(l) => write!(f, "{}", l),
+            GridLine::Span(s) => write!(f, "span {}", s),
+        }
+    }
+}
+
 /// A grid placement consisting of start and end lines.
 /// For shorthand values like `grid-column: 2`, end defaults to Auto.
 /// For `grid-column: 1 / -1`, both start and end are populated.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct GridPlacement {
     pub start: GridLine,
     pub end: GridLine,
+}
+
+impl std::fmt::Display for GridPlacement {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if self.end == GridLine::Auto {
+            write!(f, "{}", self.start)
+        } else {
+            write!(f, "{} / {}", self.start, self.end)
+        }
+    }
 }
 
 // ─── Animation Types ─────────────────────────────────────────────
@@ -457,8 +477,6 @@ pub struct ComputedStyle {
     pub grid_template_rows: Vec<GridTrack>,
     pub grid_column: GridPlacement,
     pub grid_row: GridPlacement,
-    pub grid_column_end: GridLine,
-    pub grid_row_end: GridLine,
     pub grid_gap: Edges,
 
     // Animation
@@ -514,8 +532,6 @@ impl Default for ComputedStyle {
                 start: GridLine::Auto,
                 end: GridLine::Auto,
             },
-            grid_column_end: GridLine::Auto,
-            grid_row_end: GridLine::Auto,
             grid_gap: Edges::ZERO,
             animation_name: "none".to_string(),
             animation_duration: 0.0,
@@ -591,6 +607,10 @@ impl ComputedStyle {
             PropertyId::GridTemplateRows => "<grid-tracks>".to_string(),
             PropertyId::GridColumn => "<grid-placement>".to_string(),
             PropertyId::GridRow => "<grid-placement>".to_string(),
+            PropertyId::GridColumnStart => format!("{}", self.grid_column.start),
+            PropertyId::GridColumnEnd => format!("{}", self.grid_column.end),
+            PropertyId::GridRowStart => format!("{}", self.grid_row.start),
+            PropertyId::GridRowEnd => format!("{}", self.grid_row.end),
             PropertyId::GridGap => {
                 let g = self.grid_gap;
                 if (g.top - g.right).abs() < 1e-4
@@ -604,6 +624,8 @@ impl ComputedStyle {
                     format!("{}px {}px {}px {}px", g.top, g.right, g.bottom, g.left)
                 }
             }
+            PropertyId::RowGap => format!("{}px", self.grid_gap.top),
+            PropertyId::ColumnGap => format!("{}px", self.grid_gap.left),
             PropertyId::AnimationName => self.animation_name.clone(),
             PropertyId::AnimationDuration => format!("{}s", self.animation_duration),
             PropertyId::AnimationTimingFunction => "<timing-function>".to_string(),
@@ -724,7 +746,21 @@ impl ComputedStyle {
             PropertyId::GridTemplateRows => self.grid_template_rows = parse_grid_tracks(value),
             PropertyId::GridColumn => self.grid_column = parse_grid_placement(value),
             PropertyId::GridRow => self.grid_row = parse_grid_placement(value),
+            PropertyId::GridColumnStart => self.grid_column.start = parse_grid_line(value),
+            PropertyId::GridColumnEnd => self.grid_column.end = parse_grid_line(value),
+            PropertyId::GridRowStart => self.grid_row.start = parse_grid_line(value),
+            PropertyId::GridRowEnd => self.grid_row.end = parse_grid_line(value),
             PropertyId::GridGap => self.grid_gap = parse_gap(value, self.font_size, root_font_size),
+            PropertyId::RowGap => {
+                let v = parse_length(value, self.font_size, root_font_size);
+                self.grid_gap.top = v;
+                self.grid_gap.bottom = v;
+            }
+            PropertyId::ColumnGap => {
+                let v = parse_length(value, self.font_size, root_font_size);
+                self.grid_gap.left = v;
+                self.grid_gap.right = v;
+            }
             PropertyId::AnimationName => self.animation_name = value.trim().to_string(),
             PropertyId::AnimationDuration => self.animation_duration = parse_time(value),
             PropertyId::AnimationTimingFunction => {
@@ -1030,10 +1066,10 @@ pub fn parse_length(value: &str, em_base: f32, rem_base: f32) -> f32 {
     }
 
     // Handle calc() expressions (collapses to px with percentage resolved against em_base)
-    if let Some(inner) = strip_function_call(s, "calc") {
-        if let Some((px, pct)) = evaluate_calc(inner, em_base, rem_base) {
-            return px + pct / 100.0 * em_base;
-        }
+    if let Some(inner) = strip_function_call(s, "calc")
+        && let Some((px, pct)) = evaluate_calc(inner, em_base, rem_base)
+    {
+        return px + pct / 100.0 * em_base;
     }
 
     // Check rem BEFORE em (rem ends with "em" too)
@@ -1074,7 +1110,10 @@ pub enum LengthOrPercentage {
     Px(f32),
     Percentage(f32),
     /// Result of a `calc()` expression: `px + percentage/100 * base`.
-    Calc { px: f32, percentage: f32 },
+    Calc {
+        px: f32,
+        percentage: f32,
+    },
     Auto,
 }
 
@@ -1089,9 +1128,7 @@ impl LengthOrPercentage {
         match *self {
             LengthOrPercentage::Px(px) => Some(px),
             LengthOrPercentage::Percentage(pct) => Some(pct / 100.0 * base),
-            LengthOrPercentage::Calc { px, percentage } => {
-                Some(px + percentage / 100.0 * base)
-            }
+            LengthOrPercentage::Calc { px, percentage } => Some(px + percentage / 100.0 * base),
             LengthOrPercentage::Auto => None,
         }
     }
@@ -1117,19 +1154,19 @@ pub fn parse_length_or_percentage(value: &str, em_base: f32, rem_base: f32) -> L
         return LengthOrPercentage::Auto;
     }
     // Check for calc() expression
-    if let Some(inner) = strip_function_call(s, "calc") {
-        if let Some((px, pct)) = evaluate_calc(inner, em_base, rem_base) {
-            if pct == 0.0 {
-                return LengthOrPercentage::Px(px);
-            }
-            if px == 0.0 {
-                return LengthOrPercentage::Percentage(pct);
-            }
-            return LengthOrPercentage::Calc {
-                px,
-                percentage: pct,
-            };
+    if let Some(inner) = strip_function_call(s, "calc")
+        && let Some((px, pct)) = evaluate_calc(inner, em_base, rem_base)
+    {
+        if pct == 0.0 {
+            return LengthOrPercentage::Px(px);
         }
+        if px == 0.0 {
+            return LengthOrPercentage::Percentage(pct);
+        }
+        return LengthOrPercentage::Calc {
+            px,
+            percentage: pct,
+        };
     }
     if let Some(p) = s
         .strip_suffix('%')
@@ -1740,12 +1777,8 @@ fn parse_grid_tracks_inner(value: &str) -> Vec<GridTrack> {
             let rest = &value[i..];
             let lower = rest.to_ascii_lowercase();
             if lower.starts_with("repeat(") || lower.starts_with("minmax(") {
-                // Find the matching close paren
-                let func_name_len = if lower.starts_with("repeat(") {
-                    7
-                } else {
-                    7 // "minmax(" is also 7 chars
-                };
+                // Find the matching close paren ("repeat(" and "minmax(" are both 7 chars)
+                let func_name_len = 7;
                 let paren_start = i + func_name_len;
                 let mut depth = 1;
                 let mut end = paren_start;
@@ -2377,10 +2410,7 @@ mod tests {
             tracks,
             vec![
                 GridTrack::Px(100.0),
-                GridTrack::MinMax(
-                    Box::new(GridTrack::Px(50.0)),
-                    Box::new(GridTrack::Fr(1.0))
-                ),
+                GridTrack::MinMax(Box::new(GridTrack::Px(50.0)), Box::new(GridTrack::Fr(1.0))),
                 GridTrack::Auto,
             ]
         );

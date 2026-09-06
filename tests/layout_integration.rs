@@ -623,3 +623,310 @@ fn test_flex_justify_content_start_and_end_in_row_reverse() {
         c_start.dimensions.content.x + 300.0
     );
 }
+
+// ─── Grid Engine Integration Tests ─────────────────────────────────
+
+#[test]
+fn test_grid_repeat_and_fr_sizing() {
+    let mut dom_store = None;
+    let mut bytes_store = Vec::new();
+    let mut styled_store = None;
+
+    let html =
+        r#"<html><body><div id="grid"><div>1</div><div>2</div><div>3</div></div></body></html>"#;
+    let css = r#"
+        * { margin: 0px; padding: 0px; border: 0px; }
+        #grid { display: grid; width: 300px; grid-template-columns: repeat(3, 1fr); grid-gap: 0px; }
+        #grid > div { height: 50px; }
+    "#;
+
+    let layout = parse_and_layout(
+        html,
+        css,
+        800.0,
+        600.0,
+        &mut dom_store,
+        &mut bytes_store,
+        &mut styled_store,
+    );
+
+    let grid = &layout.children[0].children[0].children[0];
+    assert_eq!(grid.dimensions.content.width, 300.0);
+    assert_eq!(grid.children.len(), 3);
+
+    let c0 = &grid.children[0];
+    let c1 = &grid.children[1];
+    let c2 = &grid.children[2];
+
+    assert!((c0.dimensions.content.width - 100.0).abs() < 1e-3);
+    assert!((c1.dimensions.content.width - 100.0).abs() < 1e-3);
+    assert!((c2.dimensions.content.width - 100.0).abs() < 1e-3);
+
+    assert!((c0.dimensions.content.x - grid.dimensions.content.x).abs() < 1e-3);
+    assert!((c1.dimensions.content.x - (grid.dimensions.content.x + 100.0)).abs() < 1e-3);
+    assert!((c2.dimensions.content.x - (grid.dimensions.content.x + 200.0)).abs() < 1e-3);
+}
+
+#[test]
+fn test_grid_gap_sizing() {
+    let mut dom_store = None;
+    let mut bytes_store = Vec::new();
+    let mut styled_store = None;
+
+    let html =
+        r#"<html><body><div id="grid"><div>1</div><div>2</div><div>3</div></div></body></html>"#;
+    let css = r#"
+        * { margin: 0px; padding: 0px; border: 0px; }
+        #grid { display: grid; width: 290px; grid-template-columns: repeat(3, 1fr); grid-gap: 10px; }
+        #grid > div { height: 50px; }
+    "#;
+
+    let layout = parse_and_layout(
+        html,
+        css,
+        800.0,
+        600.0,
+        &mut dom_store,
+        &mut bytes_store,
+        &mut styled_store,
+    );
+
+    let grid = &layout.children[0].children[0].children[0];
+    let c0 = &grid.children[0];
+    let c1 = &grid.children[1];
+    let c2 = &grid.children[2];
+
+    // (290 - 2 * 10) / 3 = 90px
+    assert!((c0.dimensions.content.width - 90.0).abs() < 1e-3);
+    assert!((c1.dimensions.content.width - 90.0).abs() < 1e-3);
+    assert!((c2.dimensions.content.width - 90.0).abs() < 1e-3);
+
+    assert!((c0.dimensions.content.x - grid.dimensions.content.x).abs() < 1e-3);
+    assert!((c1.dimensions.content.x - (grid.dimensions.content.x + 100.0)).abs() < 1e-3);
+    assert!((c2.dimensions.content.x - (grid.dimensions.content.x + 200.0)).abs() < 1e-3);
+}
+
+#[test]
+fn test_grid_explicit_and_negative_lines() {
+    let mut dom_store = None;
+    let mut bytes_store = Vec::new();
+    let mut styled_store = None;
+
+    let html = r#"<html><body><div id="grid"><div id="full">Full</div><div id="tail">Tail</div></div></body></html>"#;
+    let css = r#"
+        * { margin: 0px; padding: 0px; border: 0px; }
+        #grid { display: grid; width: 300px; grid-template-columns: 100px 100px 100px; grid-gap: 0px; }
+        #full { grid-column: 1 / -1; height: 40px; }
+        #tail { grid-column: 2 / 4; height: 40px; }
+    "#;
+
+    let layout = parse_and_layout(
+        html,
+        css,
+        800.0,
+        600.0,
+        &mut dom_store,
+        &mut bytes_store,
+        &mut styled_store,
+    );
+
+    let grid = &layout.children[0].children[0].children[0];
+    let full = &grid.children[0];
+    let tail = &grid.children[1];
+
+    // #full spans columns 1 to -1 (1 to 4 -> all 3 columns = 300px)
+    assert_eq!(full.dimensions.content.x, grid.dimensions.content.x);
+    assert_eq!(full.dimensions.content.width, 300.0);
+
+    // #tail spans columns 2 to 4 (columns 2 and 3 = 200px)
+    assert_eq!(tail.dimensions.content.x, grid.dimensions.content.x + 100.0);
+    assert_eq!(tail.dimensions.content.width, 200.0);
+}
+
+#[test]
+fn test_grid_2d_occupancy_auto_placement() {
+    let mut dom_store = None;
+    let mut bytes_store = Vec::new();
+    let mut styled_store = None;
+
+    let html = r#"<html><body><div id="grid">
+        <div id="fixed">Fixed</div>
+        <div id="auto1">A1</div>
+        <div id="auto2">A2</div>
+        <div id="auto3">A3</div>
+    </div></body></html>"#;
+    let css = r#"
+        * { margin: 0px; padding: 0px; border: 0px; }
+        #grid {
+            display: grid;
+            width: 300px;
+            grid-template-columns: 100px 100px 100px;
+            grid-template-rows: 50px 50px;
+            grid-gap: 0px;
+        }
+        #fixed { grid-column: 2; grid-row: 1; height: 50px; }
+        #auto1 { height: 50px; }
+        #auto2 { height: 50px; }
+        #auto3 { height: 50px; }
+    "#;
+
+    let layout = parse_and_layout(
+        html,
+        css,
+        800.0,
+        600.0,
+        &mut dom_store,
+        &mut bytes_store,
+        &mut styled_store,
+    );
+
+    let grid = &layout.children[0].children[0].children[0];
+    let fixed = &grid.children[0];
+    let a1 = &grid.children[1];
+    let a2 = &grid.children[2];
+    let a3 = &grid.children[3];
+
+    let gx = grid.dimensions.content.x;
+    let gy = grid.dimensions.content.y;
+
+    // #fixed is at col 1, row 0
+    assert_eq!(fixed.dimensions.content.x, gx + 100.0);
+    assert_eq!(fixed.dimensions.content.y, gy);
+
+    // #auto1 takes first free spot: col 0, row 0
+    assert_eq!(a1.dimensions.content.x, gx);
+    assert_eq!(a1.dimensions.content.y, gy);
+
+    // #auto2 skips occupied col 1, row 0 and takes col 2, row 0
+    assert_eq!(a2.dimensions.content.x, gx + 200.0);
+    assert_eq!(a2.dimensions.content.y, gy);
+
+    // #auto3 wraps to next row: col 0, row 1
+    assert_eq!(a3.dimensions.content.x, gx);
+    assert_eq!(a3.dimensions.content.y, gy + 50.0);
+}
+
+#[test]
+fn test_grid_alignment_center_and_end() {
+    let mut dom_store = None;
+    let mut bytes_store = Vec::new();
+    let mut styled_store = None;
+
+    let html =
+        r#"<html><body><div id="grid"><div id="i1"></div><div id="i2"></div></div></body></html>"#;
+    let css = r#"
+        * { margin: 0px; padding: 0px; border: 0px; }
+        #grid {
+            display: grid;
+            width: 200px;
+            grid-template-columns: 100px 100px;
+            grid-template-rows: 100px;
+            align-items: center;
+            grid-gap: 0px;
+        }
+        #i1 { width: 80px; height: 40px; }
+        #i2 { width: 80px; height: 60px; align-self: end; }
+    "#;
+
+    let layout = parse_and_layout(
+        html,
+        css,
+        800.0,
+        600.0,
+        &mut dom_store,
+        &mut bytes_store,
+        &mut styled_store,
+    );
+
+    let grid = &layout.children[0].children[0].children[0];
+    let i1 = &grid.children[0];
+    let i2 = &grid.children[1];
+
+    let gy = grid.dimensions.content.y;
+
+    // #i1 is aligned center in 100px row: (100 - 40) / 2 = 30px offset
+    assert_eq!(i1.dimensions.content.y, gy + 30.0);
+
+    // #i2 is aligned end: (100 - 60) = 40px offset
+    assert_eq!(i2.dimensions.content.y, gy + 40.0);
+}
+
+#[test]
+fn test_grid_minmax_flexible_track_sizing() {
+    let mut dom_store = None;
+    let mut bytes_store = Vec::new();
+    let mut styled_store = None;
+
+    let html =
+        r#"<html><body><div id="grid"><div id="c1"></div><div id="c2"></div></div></body></html>"#;
+    let css = r#"
+        * { margin: 0px; padding: 0px; border: 0px; }
+        #grid {
+            display: grid;
+            width: 400px;
+            grid-template-columns: minmax(100px, 1fr) 1fr;
+            grid-gap: 0px;
+        }
+        #c1, #c2 { height: 50px; }
+    "#;
+
+    let layout = parse_and_layout(
+        html,
+        css,
+        800.0,
+        600.0,
+        &mut dom_store,
+        &mut bytes_store,
+        &mut styled_store,
+    );
+
+    let grid = &layout.children[0].children[0].children[0];
+    let c1 = &grid.children[0];
+    let c2 = &grid.children[1];
+
+    // Total space 400px, total_fr_col = 2.0.
+    // minmax(100px, 1fr) receives max(100px, 400px * 0.5) = 200px.
+    // c2 receives 400px * 0.5 = 200px.
+    assert_eq!(c1.dimensions.content.width, 200.0);
+    assert_eq!(c2.dimensions.content.width, 200.0);
+}
+
+#[test]
+fn test_grid_minmax_flexible_track_preserves_min() {
+    let mut dom_store = None;
+    let mut bytes_store = Vec::new();
+    let mut styled_store = None;
+
+    let html =
+        r#"<html><body><div id="grid"><div id="c1"></div><div id="c2"></div></div></body></html>"#;
+    let css = r#"
+        * { margin: 0px; padding: 0px; border: 0px; }
+        #grid {
+            display: grid;
+            width: 150px;
+            grid-template-columns: minmax(100px, 1fr) 1fr;
+            grid-gap: 0px;
+        }
+        #c1, #c2 { height: 50px; }
+    "#;
+
+    let layout = parse_and_layout(
+        html,
+        css,
+        800.0,
+        600.0,
+        &mut dom_store,
+        &mut bytes_store,
+        &mut styled_store,
+    );
+
+    let grid = &layout.children[0].children[0].children[0];
+    let c1 = &grid.children[0];
+    let c2 = &grid.children[1];
+
+    // Total space 150px, total_fr_col = 2.0.
+    // c1 flex share is 75px, but min is 100px, so c1 gets max(100, 75) = 100px.
+    // c2 gets 150 * 0.5 = 75px.
+    assert_eq!(c1.dimensions.content.width, 100.0);
+    assert_eq!(c2.dimensions.content.width, 75.0);
+}
