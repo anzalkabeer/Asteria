@@ -50,6 +50,17 @@ impl Color {
     pub const fn to_rgba(self) -> (u8, u8, u8, u8) {
         (self.r, self.g, self.b, self.a)
     }
+
+    /// Multiply the alpha channel by a factor in [0.0, 1.0].
+    pub fn with_alpha_multiplier(self, multiplier: f32) -> Self {
+        let new_a = ((self.a as f32) * multiplier.clamp(0.0, 1.0)).round() as u8;
+        Color {
+            r: self.r,
+            g: self.g,
+            b: self.b,
+            a: new_a,
+        }
+    }
 }
 
 impl std::fmt::Display for Color {
@@ -89,6 +100,36 @@ pub enum Display {
     Flex,
     Grid,
     None,
+    // Table formatting context
+    Table,
+    TableRow,
+    TableCell,
+    TableRowGroup,
+    TableHeaderGroup,
+    TableFooterGroup,
+    TableCaption,
+    InlineTable,
+    TableColumn,
+    TableColumnGroup,
+}
+
+impl Display {
+    /// Returns true if this display type establishes a table formatting context.
+    pub fn is_table_display(self) -> bool {
+        matches!(
+            self,
+            Display::Table
+                | Display::InlineTable
+                | Display::TableRow
+                | Display::TableCell
+                | Display::TableRowGroup
+                | Display::TableHeaderGroup
+                | Display::TableFooterGroup
+                | Display::TableCaption
+                | Display::TableColumn
+                | Display::TableColumnGroup
+        )
+    }
 }
 
 impl std::fmt::Display for Display {
@@ -100,6 +141,16 @@ impl std::fmt::Display for Display {
             Display::Flex => write!(f, "flex"),
             Display::Grid => write!(f, "grid"),
             Display::None => write!(f, "none"),
+            Display::Table => write!(f, "table"),
+            Display::TableRow => write!(f, "table-row"),
+            Display::TableCell => write!(f, "table-cell"),
+            Display::TableRowGroup => write!(f, "table-row-group"),
+            Display::TableHeaderGroup => write!(f, "table-header-group"),
+            Display::TableFooterGroup => write!(f, "table-footer-group"),
+            Display::TableCaption => write!(f, "table-caption"),
+            Display::InlineTable => write!(f, "inline-table"),
+            Display::TableColumn => write!(f, "table-column"),
+            Display::TableColumnGroup => write!(f, "table-column-group"),
         }
     }
 }
@@ -213,6 +264,134 @@ pub enum BoxSizing {
     ContentBox,
     /// Width/height include padding and border.
     BorderBox,
+}
+
+// ─── Table Types ─────────────────────────────────────────────────
+
+/// CSS border-collapse property for tables.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BorderCollapse {
+    Separate,
+    Collapse,
+}
+
+impl std::fmt::Display for BorderCollapse {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            BorderCollapse::Separate => write!(f, "separate"),
+            BorderCollapse::Collapse => write!(f, "collapse"),
+        }
+    }
+}
+
+/// CSS vertical-align property for table cells and inline elements.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VerticalAlign {
+    Baseline,
+    Top,
+    Middle,
+    Bottom,
+}
+
+impl std::fmt::Display for VerticalAlign {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            VerticalAlign::Baseline => write!(f, "baseline"),
+            VerticalAlign::Top => write!(f, "top"),
+            VerticalAlign::Middle => write!(f, "middle"),
+            VerticalAlign::Bottom => write!(f, "bottom"),
+        }
+    }
+}
+
+// ─── Visual Rendering Types ─────────────────────────────────────
+
+/// CSS overflow property.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Overflow {
+    Visible,
+    Hidden,
+    Scroll,
+    Auto,
+}
+
+impl std::fmt::Display for Overflow {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Overflow::Visible => write!(f, "visible"),
+            Overflow::Hidden => write!(f, "hidden"),
+            Overflow::Scroll => write!(f, "scroll"),
+            Overflow::Auto => write!(f, "auto"),
+        }
+    }
+}
+
+/// CSS border-radius for one corner.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct BorderRadius {
+    pub top_left: f32,
+    pub top_right: f32,
+    pub bottom_right: f32,
+    pub bottom_left: f32,
+}
+
+impl BorderRadius {
+    pub const ZERO: BorderRadius = BorderRadius {
+        top_left: 0.0,
+        top_right: 0.0,
+        bottom_right: 0.0,
+        bottom_left: 0.0,
+    };
+
+    pub fn uniform(r: f32) -> Self {
+        BorderRadius {
+            top_left: r,
+            top_right: r,
+            bottom_right: r,
+            bottom_left: r,
+        }
+    }
+
+    pub fn is_zero(&self) -> bool {
+        self.top_left == 0.0
+            && self.top_right == 0.0
+            && self.bottom_right == 0.0
+            && self.bottom_left == 0.0
+    }
+}
+
+impl std::fmt::Display for BorderRadius {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if self.top_left == self.top_right
+            && self.top_right == self.bottom_right
+            && self.bottom_right == self.bottom_left
+        {
+            write!(f, "{}px", self.top_left)
+        } else {
+            write!(
+                f,
+                "{}px {}px {}px {}px",
+                self.top_left, self.top_right, self.bottom_right, self.bottom_left
+            )
+        }
+    }
+}
+
+/// A single CSS box-shadow declaration.
+#[derive(Debug, Clone, PartialEq)]
+pub struct BoxShadow {
+    pub offset_x: f32,
+    pub offset_y: f32,
+    pub blur_radius: f32,
+    pub spread_radius: f32,
+    pub color: Color,
+    pub inset: bool,
+}
+
+impl BoxShadow {
+    pub fn none() -> Vec<BoxShadow> {
+        Vec::new()
+    }
 }
 
 // ─── Flexbox Types ───────────────────────────────────────────────
@@ -485,6 +664,17 @@ pub struct ComputedStyle {
     pub animation_timing_function: AnimationTimingFunction,
     pub animation_iteration_count: f32,
 
+    // Table
+    pub border_collapse: BorderCollapse,
+    pub border_spacing: f32,
+    pub vertical_align: VerticalAlign,
+
+    // Visual rendering
+    pub opacity: f32,
+    pub border_radius: BorderRadius,
+    pub box_shadow: Vec<BoxShadow>,
+    pub overflow: Overflow,
+
     // CSS Variables
     pub variables: std::collections::HashMap<String, String>,
 }
@@ -537,6 +727,15 @@ impl Default for ComputedStyle {
             animation_duration: 0.0,
             animation_timing_function: AnimationTimingFunction::Ease,
             animation_iteration_count: 1.0,
+            // Table
+            border_collapse: BorderCollapse::Separate,
+            border_spacing: 0.0,
+            vertical_align: VerticalAlign::Baseline,
+            // Visual rendering
+            opacity: 1.0,
+            border_radius: BorderRadius::ZERO,
+            box_shadow: Vec::new(),
+            overflow: Overflow::Visible,
             variables: std::collections::HashMap::new(),
         }
     }
@@ -630,6 +829,21 @@ impl ComputedStyle {
             PropertyId::AnimationDuration => format!("{}s", self.animation_duration),
             PropertyId::AnimationTimingFunction => "<timing-function>".to_string(),
             PropertyId::AnimationIterationCount => format!("{}", self.animation_iteration_count),
+            // Table
+            PropertyId::BorderCollapse => format!("{}", self.border_collapse),
+            PropertyId::BorderSpacing => format!("{}px", self.border_spacing),
+            PropertyId::VerticalAlign => format!("{}", self.vertical_align),
+            // Visual rendering
+            PropertyId::Opacity => format!("{}", self.opacity),
+            PropertyId::BorderRadius => format!("{}", self.border_radius),
+            PropertyId::BoxShadow => {
+                if self.box_shadow.is_empty() {
+                    "none".to_string()
+                } else {
+                    "<box-shadow>".to_string()
+                }
+            }
+            PropertyId::Overflow => format!("{}", self.overflow),
         }
     }
 
@@ -769,6 +983,21 @@ impl ComputedStyle {
             PropertyId::AnimationIterationCount => {
                 self.animation_iteration_count = parse_iteration_count(value)
             }
+            // Table
+            PropertyId::BorderCollapse => self.border_collapse = parse_border_collapse(value),
+            PropertyId::BorderSpacing => {
+                self.border_spacing = parse_length(value, self.font_size, root_font_size)
+            }
+            PropertyId::VerticalAlign => self.vertical_align = parse_vertical_align(value),
+            // Visual rendering
+            PropertyId::Opacity => self.opacity = parse_opacity(value),
+            PropertyId::BorderRadius => {
+                self.border_radius = parse_border_radius(value, self.font_size, root_font_size)
+            }
+            PropertyId::BoxShadow => {
+                self.box_shadow = parse_box_shadow(value, self.font_size, root_font_size)
+            }
+            PropertyId::Overflow => self.overflow = parse_overflow(value),
         }
     }
 }
@@ -1465,6 +1694,17 @@ pub fn parse_display(value: &str) -> Display {
         "flex" => Display::Flex,
         "grid" => Display::Grid,
         "none" => Display::None,
+        // Table display types
+        "table" => Display::Table,
+        "table-row" => Display::TableRow,
+        "table-cell" => Display::TableCell,
+        "table-row-group" => Display::TableRowGroup,
+        "table-header-group" => Display::TableHeaderGroup,
+        "table-footer-group" => Display::TableFooterGroup,
+        "table-caption" => Display::TableCaption,
+        "inline-table" => Display::InlineTable,
+        "table-column" => Display::TableColumn,
+        "table-column-group" => Display::TableColumnGroup,
         _ => Display::Inline,
     }
 }
@@ -1964,6 +2204,176 @@ pub fn parse_iteration_count(value: &str) -> f32 {
     } else {
         s.parse::<f32>().unwrap_or(1.0)
     }
+}
+
+// ─── Table & Visual Rendering Parsers ───────────────────────────
+
+/// Parse a CSS border-collapse value.
+pub fn parse_border_collapse(value: &str) -> BorderCollapse {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "collapse" => BorderCollapse::Collapse,
+        _ => BorderCollapse::Separate,
+    }
+}
+
+/// Parse a CSS vertical-align value.
+pub fn parse_vertical_align(value: &str) -> VerticalAlign {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "top" => VerticalAlign::Top,
+        "middle" => VerticalAlign::Middle,
+        "bottom" => VerticalAlign::Bottom,
+        _ => VerticalAlign::Baseline,
+    }
+}
+
+/// Parse a CSS opacity value (0.0 to 1.0).
+pub fn parse_opacity(value: &str) -> f32 {
+    value.trim().parse::<f32>().unwrap_or(1.0).clamp(0.0, 1.0)
+}
+
+/// Parse a CSS overflow value.
+pub fn parse_overflow(value: &str) -> Overflow {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "hidden" => Overflow::Hidden,
+        "scroll" => Overflow::Scroll,
+        "auto" => Overflow::Auto,
+        _ => Overflow::Visible,
+    }
+}
+
+/// Parse a CSS border-radius shorthand value.
+/// Supports 1-4 values: `10px`, `10px 20px`, `10px 20px 30px`, `10px 20px 30px 40px`.
+pub fn parse_border_radius(value: &str, em_base: f32, rem_base: f32) -> BorderRadius {
+    let trimmed = value.trim().to_ascii_lowercase();
+    if trimmed == "0" || trimmed.is_empty() {
+        return BorderRadius::ZERO;
+    }
+
+    let parts: Vec<&str> = trimmed.split_whitespace().collect();
+    match parts.len() {
+        1 => {
+            let r = parse_length(parts[0], em_base, rem_base);
+            BorderRadius::uniform(r)
+        }
+        2 => {
+            let tl_br = parse_length(parts[0], em_base, rem_base);
+            let tr_bl = parse_length(parts[1], em_base, rem_base);
+            BorderRadius {
+                top_left: tl_br,
+                top_right: tr_bl,
+                bottom_right: tl_br,
+                bottom_left: tr_bl,
+            }
+        }
+        3 => {
+            let tl = parse_length(parts[0], em_base, rem_base);
+            let tr_bl = parse_length(parts[1], em_base, rem_base);
+            let br = parse_length(parts[2], em_base, rem_base);
+            BorderRadius {
+                top_left: tl,
+                top_right: tr_bl,
+                bottom_right: br,
+                bottom_left: tr_bl,
+            }
+        }
+        4 => BorderRadius {
+            top_left: parse_length(parts[0], em_base, rem_base),
+            top_right: parse_length(parts[1], em_base, rem_base),
+            bottom_right: parse_length(parts[2], em_base, rem_base),
+            bottom_left: parse_length(parts[3], em_base, rem_base),
+        },
+        _ => BorderRadius::ZERO,
+    }
+}
+
+/// Parse a CSS box-shadow value.
+/// Supports: `none`, `<offset-x> <offset-y> [blur] [spread] [color] [inset]`
+/// Multiple shadows separated by commas.
+pub fn parse_box_shadow(value: &str, em_base: f32, rem_base: f32) -> Vec<BoxShadow> {
+    let trimmed = value.trim();
+    if trimmed.eq_ignore_ascii_case("none") || trimmed.is_empty() {
+        return Vec::new();
+    }
+
+    let mut shadows = Vec::new();
+    // Split on commas (simple; does not handle nested function commas)
+    for shadow_str in trimmed.split(',') {
+        if let Some(shadow) = parse_single_box_shadow(shadow_str.trim(), em_base, rem_base) {
+            shadows.push(shadow);
+        }
+    }
+    shadows
+}
+
+/// Parse a single box-shadow value.
+fn parse_single_box_shadow(value: &str, em_base: f32, rem_base: f32) -> Option<BoxShadow> {
+    let parts: Vec<&str> = value.split_whitespace().collect();
+    if parts.len() < 2 {
+        return None;
+    }
+
+    let mut inset = false;
+    let mut color = Color::BLACK;
+    let mut lengths = Vec::new();
+
+    for &part in &parts {
+        if part.eq_ignore_ascii_case("inset") {
+            inset = true;
+        } else if part.starts_with('#')
+            || part.starts_with("rgb")
+            || part.starts_with("rgba")
+            || is_named_color(part)
+        {
+            color = parse_color(part);
+        } else {
+            // Try to parse as length
+            let v = parse_length(part, em_base, rem_base);
+            lengths.push(v);
+        }
+    }
+
+    if lengths.len() < 2 {
+        return None;
+    }
+
+    Some(BoxShadow {
+        offset_x: lengths[0],
+        offset_y: lengths[1],
+        blur_radius: *lengths.get(2).unwrap_or(&0.0),
+        spread_radius: *lengths.get(3).unwrap_or(&0.0),
+        color,
+        inset,
+    })
+}
+
+/// Check if a string is a recognized CSS named color (subset used for shadow parsing).
+fn is_named_color(s: &str) -> bool {
+    matches!(
+        s.to_ascii_lowercase().as_str(),
+        "black"
+            | "white"
+            | "red"
+            | "green"
+            | "blue"
+            | "yellow"
+            | "cyan"
+            | "magenta"
+            | "orange"
+            | "purple"
+            | "pink"
+            | "gray"
+            | "grey"
+            | "transparent"
+            | "silver"
+            | "navy"
+            | "teal"
+            | "maroon"
+            | "olive"
+            | "lime"
+            | "aqua"
+            | "fuchsia"
+            | "currentcolor"
+    )
 }
 
 // ─── Tests ───────────────────────────────────────────────────────
@@ -2520,5 +2930,113 @@ mod tests {
             percentage: 50.0,
         };
         assert_eq!(format_lop(&lop), "calc(50% + 10px)");
+    }
+
+    // ─── Table & Visual Rendering Tests ─────────────────────────
+
+    #[test]
+    fn test_parse_border_collapse() {
+        assert_eq!(parse_border_collapse("collapse"), BorderCollapse::Collapse);
+        assert_eq!(parse_border_collapse("separate"), BorderCollapse::Separate);
+        assert_eq!(parse_border_collapse("invalid"), BorderCollapse::Separate);
+    }
+
+    #[test]
+    fn test_parse_vertical_align() {
+        assert_eq!(parse_vertical_align("top"), VerticalAlign::Top);
+        assert_eq!(parse_vertical_align("middle"), VerticalAlign::Middle);
+        assert_eq!(parse_vertical_align("bottom"), VerticalAlign::Bottom);
+        assert_eq!(parse_vertical_align("baseline"), VerticalAlign::Baseline);
+        assert_eq!(parse_vertical_align("auto"), VerticalAlign::Baseline);
+    }
+
+    #[test]
+    fn test_parse_opacity() {
+        assert_eq!(parse_opacity("1.0"), 1.0);
+        assert_eq!(parse_opacity("0.5"), 0.5);
+        assert_eq!(parse_opacity("0"), 0.0);
+        assert_eq!(parse_opacity("1.5"), 1.0);
+        assert_eq!(parse_opacity("-0.2"), 0.0);
+        assert_eq!(parse_opacity("invalid"), 1.0);
+    }
+
+    #[test]
+    fn test_parse_overflow() {
+        assert_eq!(parse_overflow("visible"), Overflow::Visible);
+        assert_eq!(parse_overflow("hidden"), Overflow::Hidden);
+        assert_eq!(parse_overflow("scroll"), Overflow::Scroll);
+        assert_eq!(parse_overflow("auto"), Overflow::Auto);
+        assert_eq!(parse_overflow("unknown"), Overflow::Visible);
+    }
+
+    #[test]
+    fn test_parse_border_radius() {
+        assert_eq!(parse_border_radius("0", 16.0, 16.0), BorderRadius::ZERO);
+        assert_eq!(
+            parse_border_radius("10px", 16.0, 16.0),
+            BorderRadius::uniform(10.0)
+        );
+        assert_eq!(
+            parse_border_radius("10px 20px", 16.0, 16.0),
+            BorderRadius {
+                top_left: 10.0,
+                top_right: 20.0,
+                bottom_right: 10.0,
+                bottom_left: 20.0,
+            }
+        );
+        assert_eq!(
+            parse_border_radius("10px 20px 30px", 16.0, 16.0),
+            BorderRadius {
+                top_left: 10.0,
+                top_right: 20.0,
+                bottom_right: 30.0,
+                bottom_left: 20.0,
+            }
+        );
+        assert_eq!(
+            parse_border_radius("10px 20px 30px 40px", 16.0, 16.0),
+            BorderRadius {
+                top_left: 10.0,
+                top_right: 20.0,
+                bottom_right: 30.0,
+                bottom_left: 40.0,
+            }
+        );
+    }
+
+    #[test]
+    fn test_parse_box_shadow() {
+        assert_eq!(parse_box_shadow("none", 16.0, 16.0), Vec::new());
+        let shadows = parse_box_shadow("2px 4px 6px 8px red", 16.0, 16.0);
+        assert_eq!(shadows.len(), 1);
+        assert_eq!(shadows[0].offset_x, 2.0);
+        assert_eq!(shadows[0].offset_y, 4.0);
+        assert_eq!(shadows[0].blur_radius, 6.0);
+        assert_eq!(shadows[0].spread_radius, 8.0);
+        assert_eq!(shadows[0].color, Color::rgb(255, 0, 0));
+        assert!(!shadows[0].inset);
+
+        let inset_shadow = parse_box_shadow("inset 0 2px 4px #000", 16.0, 16.0);
+        assert_eq!(inset_shadow.len(), 1);
+        assert!(inset_shadow[0].inset);
+        assert_eq!(inset_shadow[0].offset_x, 0.0);
+        assert_eq!(inset_shadow[0].offset_y, 2.0);
+
+        let multi = parse_box_shadow("2px 2px red, 4px 4px blue", 16.0, 16.0);
+        assert_eq!(multi.len(), 2);
+    }
+
+    #[test]
+    fn test_color_alpha_multiplier() {
+        let c = Color::new(100, 150, 200, 255);
+        let c_half = c.with_alpha_multiplier(0.5);
+        assert_eq!(c_half.r, 100);
+        assert_eq!(c_half.g, 150);
+        assert_eq!(c_half.b, 200);
+        assert_eq!(c_half.a, 128);
+
+        let c_zero = c.with_alpha_multiplier(0.0);
+        assert_eq!(c_zero.a, 0);
     }
 }

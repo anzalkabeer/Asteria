@@ -85,6 +85,7 @@ pub enum BoxType {
     InlineNode,
     FlexNode,
     GridNode,
+    TableNode,
     AnonymousBlock,
 }
 
@@ -323,6 +324,9 @@ impl<'a> LayoutBox<'a> {
             BoxType::InlineNode => {
                 self.layout_inline(containing_block, positioned_cb, viewport, dom, source);
             }
+            BoxType::TableNode => {
+                self.layout_table(containing_block, positioned_cb, viewport, dom, source);
+            }
         }
 
         // Apply relative positioning shift if applicable
@@ -377,6 +381,10 @@ impl<'a> LayoutBox<'a> {
             BoxType::GridNode => {
                 let dim = self.dimensions;
                 self.layout_grid(dim, Some(next_cb), viewport, dom, source);
+            }
+            BoxType::TableNode => {
+                let dim = self.dimensions;
+                self.layout_table(dim, Some(next_cb), viewport, dom, source);
             }
             BoxType::InlineNode => {
                 let dim = self.dimensions;
@@ -1767,6 +1775,513 @@ impl<'a> LayoutBox<'a> {
         self.calculate_block_height(containing_block);
     }
 
+    // ─── Table Layout Algorithm ─────────────────────────────────────
+
+    fn layout_table(
+        &mut self,
+        containing_block: Dimensions,
+        positioned_cb: Option<Rect>,
+        viewport: Rect,
+        dom: &Dom,
+        source: &[u8],
+    ) {
+        self.calculate_block_width(containing_block);
+        self.calculate_block_position(containing_block);
+
+        let is_positioned_ancestor = self
+            .styled_node
+            .is_some_and(|n| n.styles.position != values::Position::Static);
+        let next_cb = if is_positioned_ancestor {
+            self.dimensions.padding_box()
+        } else {
+            positioned_cb.unwrap_or_else(|| containing_block.padding_box())
+        };
+
+        // Table styles: border-collapse & border-spacing
+        let (_border_collapse, (h_spacing, v_spacing)) = if let Some(sn) = self.styled_node {
+            let bc = sn.styles.border_collapse;
+            let sp = if bc == values::BorderCollapse::Collapse {
+                (0.0, 0.0)
+            } else {
+                (sn.styles.border_spacing, sn.styles.border_spacing)
+            };
+            (bc, sp)
+        } else {
+            (values::BorderCollapse::Separate, (2.0, 2.0))
+        };
+
+        // 1. Classify table children: Captions, row groups, and direct rows
+        #[derive(Debug, Clone, Copy)]
+        enum RowLocation {
+            Direct(usize),
+            InGroup(usize, usize),
+        }
+
+        let mut captions = Vec::new();
+        let mut row_locations: Vec<RowLocation> = Vec::new();
+
+        for (i, child) in self.children.iter().enumerate() {
+            let display = child
+                .styled_node
+                .map(|s| s.styles.display)
+                .unwrap_or(Display::Block);
+            match display {
+                Display::TableCaption => captions.push(i),
+                Display::TableHeaderGroup | Display::TableRowGroup | Display::TableFooterGroup => {
+                    for (j, row_child) in child.children.iter().enumerate() {
+                        let r_disp = row_child
+                            .styled_node
+                            .map(|s| s.styles.display)
+                            .unwrap_or(Display::Block);
+                        if r_disp == Display::TableRow || r_disp == Display::Block {
+                            row_locations.push(RowLocation::InGroup(i, j));
+                        }
+                    }
+                }
+                Display::TableRow => {
+                    row_locations.push(RowLocation::Direct(i));
+                }
+                _ => {
+                    if child.children.iter().any(|c| {
+                        c.styled_node
+                            .is_some_and(|s| s.styles.display == Display::TableCell)
+                    }) {
+                        row_locations.push(RowLocation::Direct(i));
+                    }
+                }
+            }
+        }
+
+        // Layout captions at the top of the table
+        let mut caption_h = 0.0;
+        for &c_idx in &captions {
+            let cap = &mut self.children[c_idx];
+            cap.layout_internal(self.dimensions, Some(next_cb), viewport, dom, source);
+            caption_h += cap.dimensions.margin_box().height;
+        }
+
+        if row_locations.is_empty() {
+            self.dimensions.content.height = caption_h;
+            self.calculate_block_height(containing_block);
+            return;
+        }
+
+        // 2. Build 2D grid of cell placements accounting for colspan and rowspan
+        struct CellPlacement {
+            row_idx: usize,
+            cell_idx: usize,
+            grid_row: usize,
+            grid_col: usize,
+            colspan: usize,
+            rowspan: usize,
+        }
+
+        let num_rows = row_locations.len();
+        let mut occupied: Vec<Vec<bool>> = Vec::new();
+        let mut placements: Vec<CellPlacement> = Vec::new();
+
+        for r in 0..num_rows {
+            if occupied.len() <= r {
+                occupied.resize(r + 1, Vec::new());
+            }
+
+            let cell_count = match row_locations[r] {
+                RowLocation::Direct(i) => self.children[i].children.len(),
+                RowLocation::InGroup(i, j) => self.children[i].children[j].children.len(),
+            };
+
+            let mut col = 0;
+            for cell_idx in 0..cell_count {
+                while occupied[r].get(col).copied().unwrap_or(false) {
+                    col += 1;
+                }
+
+                let cell = match row_locations[r] {
+                    RowLocation::Direct(i) => &self.children[i].children[cell_idx],
+                    RowLocation::InGroup(i, j) => &self.children[i].children[j].children[cell_idx],
+                };
+
+                let (colspan, rowspan) = if let Some(sn) = cell.styled_node {
+                    let node = dom.get(sn.node_id);
+                    let cs = node
+                        .get_attribute("colspan", source)
+                        .and_then(|s| s.trim().parse::<usize>().ok())
+                        .unwrap_or(1)
+                        .max(1);
+                    let rs = node
+                        .get_attribute("rowspan", source)
+                        .and_then(|s| s.trim().parse::<usize>().ok())
+                        .unwrap_or(1)
+                        .max(1);
+                    (cs, rs)
+                } else {
+                    (1, 1)
+                };
+
+                for dr in 0..rowspan {
+                    let target_r = r + dr;
+                    if occupied.len() <= target_r {
+                        occupied.resize(target_r + 1, Vec::new());
+                    }
+                    if occupied[target_r].len() < col + colspan {
+                        occupied[target_r].resize(col + colspan, false);
+                    }
+                    for dc in 0..colspan {
+                        occupied[target_r][col + dc] = true;
+                    }
+                }
+
+                placements.push(CellPlacement {
+                    row_idx: r,
+                    cell_idx,
+                    grid_row: r,
+                    grid_col: col,
+                    colspan,
+                    rowspan,
+                });
+
+                col += colspan;
+            }
+        }
+
+        let num_cols = placements
+            .iter()
+            .map(|p| p.grid_col + p.colspan)
+            .max()
+            .unwrap_or(0);
+        let total_grid_rows = occupied.len().max(num_rows);
+
+        if num_cols == 0 {
+            self.dimensions.content.height = caption_h;
+            self.calculate_block_height(containing_block);
+            return;
+        }
+
+        // 3. Compute initial column widths from cells
+        let mut col_widths = vec![0.0f32; num_cols];
+
+        for p in &placements {
+            let cell = match row_locations[p.row_idx] {
+                RowLocation::Direct(i) => &self.children[i].children[p.cell_idx],
+                RowLocation::InGroup(i, j) => &self.children[i].children[j].children[p.cell_idx],
+            };
+
+            let pad_left = cell
+                .styled_node
+                .map(|s| s.styles.padding.left)
+                .unwrap_or(4.0);
+            let pad_right = cell
+                .styled_node
+                .map(|s| s.styles.padding.right)
+                .unwrap_or(4.0);
+            let border_left = cell
+                .styled_node
+                .map(|s| s.styles.border_width.left)
+                .unwrap_or(1.0);
+            let border_right = cell
+                .styled_node
+                .map(|s| s.styles.border_width.right)
+                .unwrap_or(1.0);
+            let h_decorations = pad_left + pad_right + border_left + border_right;
+
+            let explicit_w = cell.styled_node.and_then(|s| {
+                s.styles
+                    .width
+                    .resolve_against(self.dimensions.content.width)
+            });
+
+            let required_w = if let Some(ew) = explicit_w {
+                ew.max(20.0)
+            } else {
+                let int_w =
+                    compute_intrinsic_inline_width(cell.styled_node, dom, source) + h_decorations;
+                int_w.max(24.0)
+            };
+
+            if p.colspan == 1 {
+                col_widths[p.grid_col] = col_widths[p.grid_col].max(required_w);
+            }
+        }
+
+        // Second pass for multi-column cells
+        for p in &placements {
+            if p.colspan > 1 {
+                let cell = match row_locations[p.row_idx] {
+                    RowLocation::Direct(i) => &self.children[i].children[p.cell_idx],
+                    RowLocation::InGroup(i, j) => {
+                        &self.children[i].children[j].children[p.cell_idx]
+                    }
+                };
+                let explicit_w = cell.styled_node.and_then(|s| {
+                    s.styles
+                        .width
+                        .resolve_against(self.dimensions.content.width)
+                });
+                let required_w = if let Some(ew) = explicit_w {
+                    ew.max(20.0)
+                } else {
+                    let pad_left = cell
+                        .styled_node
+                        .map(|s| s.styles.padding.left)
+                        .unwrap_or(4.0);
+                    let pad_right = cell
+                        .styled_node
+                        .map(|s| s.styles.padding.right)
+                        .unwrap_or(4.0);
+                    compute_intrinsic_inline_width(cell.styled_node, dom, source)
+                        + pad_left
+                        + pad_right
+                };
+
+                let current_span_w: f32 =
+                    (0..p.colspan).map(|dc| col_widths[p.grid_col + dc]).sum();
+                if current_span_w < required_w {
+                    let diff = (required_w - current_span_w) / (p.colspan as f32);
+                    for dc in 0..p.colspan {
+                        col_widths[p.grid_col + dc] += diff;
+                    }
+                }
+            }
+        }
+
+        // Spacing & table width resolution
+        let total_h_spacing = if num_cols > 0 {
+            (num_cols + 1) as f32 * h_spacing
+        } else {
+            0.0
+        };
+        let sum_cols: f32 = col_widths.iter().sum();
+        let intrinsic_table_w = sum_cols + total_h_spacing;
+
+        let is_auto_width = self
+            .styled_node
+            .map(|s| s.styles.width.is_auto())
+            .unwrap_or(true);
+        if is_auto_width {
+            let max_avail = if containing_block.content.width > 0.0 {
+                (containing_block.content.width
+                    - self.dimensions.margin.left
+                    - self.dimensions.margin.right
+                    - self.dimensions.padding.left
+                    - self.dimensions.padding.right
+                    - self.dimensions.border.left
+                    - self.dimensions.border.right)
+                    .max(0.0)
+            } else {
+                intrinsic_table_w
+            };
+
+            let used_table_w = if max_avail > 0.0 && intrinsic_table_w > max_avail {
+                let avail_for_cols = (max_avail - total_h_spacing).max(0.0);
+                if sum_cols > 0.0 {
+                    let scale = avail_for_cols / sum_cols;
+                    for w in &mut col_widths {
+                        *w *= scale;
+                    }
+                }
+                max_avail
+            } else {
+                intrinsic_table_w
+            };
+            self.dimensions.content.width = used_table_w;
+        } else {
+            let avail_for_cols = (self.dimensions.content.width - total_h_spacing).max(0.0);
+            if sum_cols > 0.0 {
+                let scale = avail_for_cols / sum_cols;
+                for w in &mut col_widths {
+                    *w *= scale;
+                }
+            } else if num_cols > 0 {
+                let equal = avail_for_cols / num_cols as f32;
+                col_widths.fill(equal);
+            }
+        }
+
+        // 4. Calculate Column X positions
+        let mut col_x = Vec::with_capacity(num_cols);
+        let mut cur_x = self.dimensions.content.x + h_spacing;
+        for w in &col_widths {
+            col_x.push(cur_x);
+            cur_x += *w + h_spacing;
+        }
+
+        // 5. Lay out cell contents and determine Row Heights
+        let mut row_heights = vec![0.0f32; total_grid_rows];
+
+        // Pass 5A: Lay out cells and record height for single-row cells
+        for p in &placements {
+            let cell_w = (0..p.colspan)
+                .map(|dc| col_widths[p.grid_col + dc])
+                .sum::<f32>()
+                + ((p.colspan - 1) as f32 * h_spacing);
+
+            let cell_x = col_x[p.grid_col];
+
+            let cell = match row_locations[p.row_idx] {
+                RowLocation::Direct(i) => &mut self.children[i].children[p.cell_idx],
+                RowLocation::InGroup(i, j) => {
+                    &mut self.children[i].children[j].children[p.cell_idx]
+                }
+            };
+
+            let mut cell_cb = self.dimensions;
+            cell_cb.content.x = cell_x;
+            cell_cb.content.width = cell_w;
+
+            cell.layout_internal(cell_cb, Some(next_cb), viewport, dom, source);
+
+            let cell_h = cell.dimensions.margin_box().height.max(24.0);
+            if p.rowspan == 1 {
+                row_heights[p.grid_row] = row_heights[p.grid_row].max(cell_h);
+            }
+        }
+
+        // Pass 5B: Multi-row cells distribute excess height
+        for p in &placements {
+            if p.rowspan > 1 {
+                let cell = match row_locations[p.row_idx] {
+                    RowLocation::Direct(i) => &self.children[i].children[p.cell_idx],
+                    RowLocation::InGroup(i, j) => {
+                        &self.children[i].children[j].children[p.cell_idx]
+                    }
+                };
+                let cell_h = cell.dimensions.margin_box().height.max(24.0);
+                let current_span_h: f32 = (0..p.rowspan)
+                    .map(|dr| row_heights[p.grid_row + dr])
+                    .sum::<f32>()
+                    + ((p.rowspan - 1) as f32 * v_spacing);
+
+                if cell_h > current_span_h {
+                    let diff = (cell_h - current_span_h) / (p.rowspan as f32);
+                    for dr in 0..p.rowspan {
+                        row_heights[p.grid_row + dr] += diff;
+                    }
+                }
+            }
+        }
+
+        // 6. Calculate Row Y positions
+        let mut row_y = Vec::with_capacity(total_grid_rows);
+        let mut cur_y = self.dimensions.content.y + caption_h + v_spacing;
+        for h in &row_heights {
+            row_y.push(cur_y);
+            cur_y += *h + v_spacing;
+        }
+
+        // 7. Final cell placement & vertical alignment
+        for p in &placements {
+            let cell_span_w = (0..p.colspan)
+                .map(|dc| col_widths[p.grid_col + dc])
+                .sum::<f32>()
+                + ((p.colspan - 1) as f32 * h_spacing);
+            let cell_span_h = (0..p.rowspan)
+                .map(|dr| row_heights[p.grid_row + dr])
+                .sum::<f32>()
+                + ((p.rowspan - 1) as f32 * v_spacing);
+
+            let target_box_x = col_x[p.grid_col];
+            let target_box_y = row_y[p.grid_row];
+
+            let cell = match row_locations[p.row_idx] {
+                RowLocation::Direct(i) => &mut self.children[i].children[p.cell_idx],
+                RowLocation::InGroup(i, j) => {
+                    &mut self.children[i].children[j].children[p.cell_idx]
+                }
+            };
+
+            let pad_left = cell.dimensions.padding.left;
+            let pad_right = cell.dimensions.padding.right;
+            let pad_top = cell.dimensions.padding.top;
+            let pad_bottom = cell.dimensions.padding.bottom;
+            let border_left = cell.dimensions.border.left;
+            let border_right = cell.dimensions.border.right;
+            let border_top = cell.dimensions.border.top;
+            let border_bottom = cell.dimensions.border.bottom;
+
+            let h_decorations = pad_left + pad_right + border_left + border_right;
+            let v_decorations = pad_top + pad_bottom + border_top + border_bottom;
+
+            let target_content_w = (cell_span_w - h_decorations).max(0.0);
+            let target_content_h = (cell_span_h - v_decorations).max(0.0);
+
+            let orig_content_x = cell.dimensions.content.x;
+            let orig_content_y = cell.dimensions.content.y;
+            let target_content_x = target_box_x + border_left + pad_left;
+            let target_content_y = target_box_y + border_top + pad_top;
+
+            // Vertical alignment
+            let v_align = cell
+                .styled_node
+                .map(|s| s.styles.vertical_align)
+                .unwrap_or(values::VerticalAlign::Middle);
+            let natural_content_h = cell.dimensions.content.height;
+            let extra_v = (target_content_h - natural_content_h).max(0.0);
+
+            let v_shift = match v_align {
+                values::VerticalAlign::Top | values::VerticalAlign::Baseline => 0.0,
+                values::VerticalAlign::Middle => extra_v / 2.0,
+                values::VerticalAlign::Bottom => extra_v,
+            };
+
+            let dx = target_content_x - orig_content_x;
+            let dy = (target_content_y + v_shift) - orig_content_y;
+
+            if dx != 0.0 || dy != 0.0 {
+                cell.apply_offset_to_tree(dx, dy);
+            }
+
+            cell.dimensions.content.x = target_content_x;
+            cell.dimensions.content.y = target_content_y + v_shift;
+            cell.dimensions.content.width = target_content_w;
+            cell.dimensions.content.height = target_content_h;
+        }
+
+        // Update row container dimensions
+        for (r, loc) in row_locations.iter().enumerate() {
+            let row_h = row_heights.get(r).copied().unwrap_or(0.0);
+            let row_y_pos = row_y.get(r).copied().unwrap_or(self.dimensions.content.y);
+            let row_box = match loc {
+                RowLocation::Direct(i) => &mut self.children[*i],
+                RowLocation::InGroup(i, j) => &mut self.children[*i].children[*j],
+            };
+            row_box.dimensions.content.x = self.dimensions.content.x;
+            row_box.dimensions.content.y = row_y_pos;
+            row_box.dimensions.content.width = self.dimensions.content.width;
+            row_box.dimensions.content.height = row_h;
+        }
+
+        // Update row group container dimensions
+        for child in &mut self.children {
+            let display = child
+                .styled_node
+                .map(|s| s.styles.display)
+                .unwrap_or(Display::Block);
+            if matches!(
+                display,
+                Display::TableHeaderGroup | Display::TableRowGroup | Display::TableFooterGroup
+            ) {
+                child.dimensions.content.x = self.dimensions.content.x;
+                child.dimensions.content.width = self.dimensions.content.width;
+                if let (Some(first), Some(last)) = (child.children.first(), child.children.last()) {
+                    child.dimensions.content.y = first.dimensions.content.y;
+                    let bottom = last.dimensions.content.y + last.dimensions.content.height;
+                    child.dimensions.content.height =
+                        (bottom - first.dimensions.content.y).max(0.0);
+                }
+            }
+        }
+
+        // 8. Total table height
+        let total_table_h = caption_h
+            + if total_grid_rows > 0 {
+                row_heights.iter().sum::<f32>() + ((total_grid_rows + 1) as f32 * v_spacing)
+            } else {
+                0.0
+            };
+        self.dimensions.content.height = total_table_h;
+        self.calculate_block_height(containing_block);
+    }
+
     // ─── Inline Layout Handling ────────────────────────────────────
 
     fn layout_inline(
@@ -1945,6 +2460,15 @@ pub fn build_layout_tree<'a>(
         Display::Flex => BoxType::FlexNode,
         Display::Grid => BoxType::GridNode,
         Display::Inline | Display::InlineBlock => BoxType::InlineNode,
+        Display::Table | Display::InlineTable => BoxType::TableNode,
+        Display::TableRow
+        | Display::TableCell
+        | Display::TableRowGroup
+        | Display::TableHeaderGroup
+        | Display::TableFooterGroup
+        | Display::TableCaption
+        | Display::TableColumn
+        | Display::TableColumnGroup => BoxType::BlockNode,
         Display::None => unreachable!(),
     };
 
@@ -1958,8 +2482,18 @@ pub fn build_layout_tree<'a>(
         }
     }
 
-    // Process children: Flex/Grid containers do NOT create anonymous blocks for whitespace nodes
-    if box_type == BoxType::FlexNode || box_type == BoxType::GridNode {
+    let is_table_container = matches!(
+        styled_node.styles.display,
+        Display::Table
+            | Display::InlineTable
+            | Display::TableRowGroup
+            | Display::TableHeaderGroup
+            | Display::TableFooterGroup
+            | Display::TableRow
+    );
+
+    // Process children: Flex/Grid/Table containers do NOT create anonymous blocks for whitespace nodes
+    if box_type == BoxType::FlexNode || box_type == BoxType::GridNode || is_table_container {
         root_box.children = child_boxes
             .into_iter()
             .filter(|child| {
@@ -1987,7 +2521,8 @@ pub fn build_layout_tree<'a>(
                 && (b.box_type == BoxType::BlockNode
                     || b.box_type == BoxType::AnonymousBlock
                     || b.box_type == BoxType::FlexNode
-                    || b.box_type == BoxType::GridNode)
+                    || b.box_type == BoxType::GridNode
+                    || b.box_type == BoxType::TableNode)
         });
 
         if contains_blocks {
@@ -2000,6 +2535,7 @@ pub fn build_layout_tree<'a>(
                     || child.box_type == BoxType::AnonymousBlock
                     || child.box_type == BoxType::FlexNode
                     || child.box_type == BoxType::GridNode
+                    || child.box_type == BoxType::TableNode
                 {
                     if let Some(anon) = anonymous_buffer.take() {
                         final_children.push(anon);

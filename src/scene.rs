@@ -358,6 +358,53 @@ pub fn build_scene_graph(display_list: &DisplayList, segment_height: f32) -> Sce
                 parent_stack.push((id, *rect));
                 z_order += 1;
             }
+            DisplayCommand::RoundedRect {
+                color,
+                rect,
+                radius: _,
+                link_url,
+            } => {
+                let seg = assign_segment(rect.y, segment_height);
+                let id = scene.push(
+                    SceneNode {
+                        rect: *rect,
+                        kind: SceneNodeKind::SolidRect,
+                        parent: parent_id,
+                        z_order,
+                        segment_id: seg,
+                        dirty: true,
+                        state: NodeState::Normal,
+                        link_url: link_url.clone(),
+                    },
+                    color_to_rgba(color),
+                    None,
+                );
+                parent_stack.push((id, *rect));
+                z_order += 1;
+            }
+            DisplayCommand::BoxShadow {
+                rect,
+                shadow,
+                link_url,
+            } => {
+                let seg = assign_segment(rect.y, segment_height);
+                scene.push(
+                    SceneNode {
+                        rect: *rect,
+                        kind: SceneNodeKind::SolidRect,
+                        parent: parent_id,
+                        z_order,
+                        segment_id: seg,
+                        dirty: true,
+                        state: NodeState::Normal,
+                        link_url: link_url.clone(),
+                    },
+                    color_to_rgba(&shadow.color),
+                    None,
+                );
+                z_order += 1;
+            }
+            DisplayCommand::PushClip { .. } | DisplayCommand::PopClip => {}
             DisplayCommand::Border {
                 color,
                 rect,
@@ -471,7 +518,11 @@ fn compute_text_rect(text: &str, x: f32, y: f32, width: f32, line_height: f32) -
 fn cmd_bounding_rect(cmd: &DisplayCommand) -> Rect {
     match cmd {
         DisplayCommand::SolidColor { rect, .. } => *rect,
+        DisplayCommand::RoundedRect { rect, .. } => *rect,
         DisplayCommand::Border { rect, .. } => *rect,
+        DisplayCommand::BoxShadow { rect, .. } => *rect,
+        DisplayCommand::PushClip { rect } => *rect,
+        DisplayCommand::PopClip => Rect::default(),
         DisplayCommand::Text {
             text,
             x,

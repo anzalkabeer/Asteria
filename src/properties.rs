@@ -86,6 +86,17 @@ pub enum PropertyId {
     AnimationDuration,
     AnimationTimingFunction,
     AnimationIterationCount,
+
+    // Table
+    BorderCollapse,
+    BorderSpacing,
+    VerticalAlign,
+
+    // Visual rendering
+    Opacity,
+    BorderRadius,
+    BoxShadow,
+    Overflow,
 }
 
 /// All known property IDs — useful for iterating over every property
@@ -144,6 +155,15 @@ pub const ALL_PROPERTIES: &[PropertyId] = &[
     PropertyId::AnimationDuration,
     PropertyId::AnimationTimingFunction,
     PropertyId::AnimationIterationCount,
+    // Table
+    PropertyId::BorderCollapse,
+    PropertyId::BorderSpacing,
+    PropertyId::VerticalAlign,
+    // Visual rendering
+    PropertyId::Opacity,
+    PropertyId::BorderRadius,
+    PropertyId::BoxShadow,
+    PropertyId::Overflow,
 ];
 
 /// Returns true if this property is inherited by default.
@@ -211,6 +231,15 @@ pub fn is_inherited(id: PropertyId) -> bool {
         PropertyId::AnimationDuration => false,
         PropertyId::AnimationTimingFunction => false,
         PropertyId::AnimationIterationCount => false,
+        // Table (border-collapse inherits per spec)
+        PropertyId::BorderCollapse => true,
+        PropertyId::BorderSpacing => true,
+        PropertyId::VerticalAlign => false,
+        // Visual rendering
+        PropertyId::Opacity => false,
+        PropertyId::BorderRadius => false,
+        PropertyId::BoxShadow => false,
+        PropertyId::Overflow => false,
     }
 }
 
@@ -301,6 +330,17 @@ pub fn property_from_name(name: &str) -> Option<PropertyId> {
         "animation-timing-function" => Some(PropertyId::AnimationTimingFunction),
         "animation-iteration-count" => Some(PropertyId::AnimationIterationCount),
 
+        // Table
+        "border-collapse" => Some(PropertyId::BorderCollapse),
+        "border-spacing" => Some(PropertyId::BorderSpacing),
+        "vertical-align" => Some(PropertyId::VerticalAlign),
+
+        // Visual rendering
+        "opacity" => Some(PropertyId::Opacity),
+        "border-radius" => Some(PropertyId::BorderRadius),
+        "box-shadow" => Some(PropertyId::BoxShadow),
+        "overflow" => Some(PropertyId::Overflow),
+
         // Shorthands — handled specially in style.rs
         "margin" | "padding" | "flex" => None,
         _ => None,
@@ -363,6 +403,15 @@ pub fn property_id_to_name(id: PropertyId) -> &'static str {
         PropertyId::AnimationDuration => "animation-duration",
         PropertyId::AnimationTimingFunction => "animation-timing-function",
         PropertyId::AnimationIterationCount => "animation-iteration-count",
+        // Table
+        PropertyId::BorderCollapse => "border-collapse",
+        PropertyId::BorderSpacing => "border-spacing",
+        PropertyId::VerticalAlign => "vertical-align",
+        // Visual rendering
+        PropertyId::Opacity => "opacity",
+        PropertyId::BorderRadius => "border-radius",
+        PropertyId::BoxShadow => "box-shadow",
+        PropertyId::Overflow => "overflow",
     }
 }
 
@@ -486,6 +535,6 @@ mod tests {
         for &prop in ALL_PROPERTIES {
             let _ = is_inherited(prop);
         }
-        assert_eq!(ALL_PROPERTIES.len(), 53);
+        assert_eq!(ALL_PROPERTIES.len(), 60);
     }
 }

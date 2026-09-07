@@ -967,3 +967,178 @@ fn test_grid_clamped_bounded_huge_placement() {
     let c1 = &grid.children[0];
     assert!(c1.dimensions.content.width > 0.0);
 }
+
+// ─── Table Layout Integration Tests ─────────────────────────────
+
+#[test]
+fn test_table_basic_2x2_layout() {
+    let mut dom_store = None;
+    let mut bytes_store = Vec::new();
+    let mut styled_store = None;
+
+    let html = r#"<html><body><table id="tbl">
+        <tr><td id="c1">A</td><td id="c2">B</td></tr>
+        <tr><td id="c3">C</td><td id="c4">D</td></tr>
+    </table></body></html>"#;
+    let css = r#"
+        * { margin: 0px; padding: 0px; border: 0px; }
+        #tbl { border-collapse: separate; border-spacing: 0px; }
+        #c1, #c2, #c3, #c4 { width: 100px; height: 50px; }
+    "#;
+
+    let layout = parse_and_layout(
+        html,
+        css,
+        800.0,
+        600.0,
+        &mut dom_store,
+        &mut bytes_store,
+        &mut styled_store,
+    );
+
+    // html -> body -> table
+    let body = &layout.children[0].children[0];
+    let table = &body.children[0];
+    assert_eq!(table.box_type, BoxType::TableNode);
+    assert_eq!(table.children.len(), 2); // 2 rows
+
+    let row1 = &table.children[0];
+    let row2 = &table.children[1];
+    assert_eq!(row1.children.len(), 2);
+    assert_eq!(row2.children.len(), 2);
+
+    let c1 = &row1.children[0];
+    let c2 = &row1.children[1];
+    let c3 = &row2.children[0];
+    let c4 = &row2.children[1];
+
+    assert_eq!(c1.dimensions.content.x, 0.0);
+    assert_eq!(c1.dimensions.content.y, 0.0);
+    assert_eq!(c1.dimensions.content.width, 100.0);
+
+    assert_eq!(c2.dimensions.content.x, 100.0);
+    assert_eq!(c2.dimensions.content.y, 0.0);
+    assert_eq!(c2.dimensions.content.width, 100.0);
+
+    assert_eq!(c3.dimensions.content.x, 0.0);
+    assert_eq!(c3.dimensions.content.y, 50.0);
+    assert_eq!(c3.dimensions.content.width, 100.0);
+
+    assert_eq!(c4.dimensions.content.x, 100.0);
+    assert_eq!(c4.dimensions.content.y, 50.0);
+    assert_eq!(c4.dimensions.content.width, 100.0);
+}
+
+#[test]
+fn test_table_colspan_and_rowspan() {
+    let mut dom_store = None;
+    let mut bytes_store = Vec::new();
+    let mut styled_store = None;
+
+    let html = r#"<html><body><table id="tbl">
+        <tr><td id="c1" colspan="2">Wide Cell</td></tr>
+        <tr><td id="c2">Left</td><td id="c3">Right</td></tr>
+    </table></body></html>"#;
+    let css = r#"
+        * { margin: 0px; padding: 0px; border: 0px; }
+        #tbl { border-collapse: separate; border-spacing: 0px; }
+        #c2, #c3 { width: 100px; height: 40px; }
+        #c1 { height: 40px; }
+    "#;
+
+    let layout = parse_and_layout(
+        html,
+        css,
+        800.0,
+        600.0,
+        &mut dom_store,
+        &mut bytes_store,
+        &mut styled_store,
+    );
+
+    let body = &layout.children[0].children[0];
+    let table = &body.children[0];
+    let row1 = &table.children[0];
+    let row2 = &table.children[1];
+
+    let c1 = &row1.children[0];
+    let c2 = &row2.children[0];
+    let c3 = &row2.children[1];
+
+    // Colspan 2 spans both columns (100px + 100px = 200px)
+    assert_eq!(c1.dimensions.content.width, 200.0);
+    assert_eq!(c2.dimensions.content.width, 100.0);
+    assert_eq!(c3.dimensions.content.width, 100.0);
+}
+
+#[test]
+fn test_table_cell_vertical_alignment() {
+    let mut dom_store = None;
+    let mut bytes_store = Vec::new();
+    let mut styled_store = None;
+
+    let html = r#"<html><body><table id="tbl">
+        <tr><td id="c1">Top</td><td id="c2">Bottom</td><td id="c3">Tall</td></tr>
+    </table></body></html>"#;
+    let css = r#"
+        * { margin: 0px; padding: 0px; border: 0px; }
+        #tbl { border-collapse: separate; border-spacing: 0px; }
+        #c1 { width: 100px; height: 30px; vertical-align: top; }
+        #c2 { width: 100px; height: 30px; vertical-align: bottom; }
+        #c3 { width: 100px; height: 90px; }
+    "#;
+
+    let layout = parse_and_layout(
+        html,
+        css,
+        800.0,
+        600.0,
+        &mut dom_store,
+        &mut bytes_store,
+        &mut styled_store,
+    );
+
+    let body = &layout.children[0].children[0];
+    let table = &body.children[0];
+    let row = &table.children[0];
+
+    let c1 = &row.children[0];
+    let c2 = &row.children[1];
+    let c3 = &row.children[2];
+
+    assert_eq!(c3.dimensions.content.height, 90.0);
+    assert_eq!(c1.dimensions.content.y, 0.0);
+    // Vertical-align bottom shifts by (90 - 30) = 60px
+    assert_eq!(c2.dimensions.content.y, 60.0);
+}
+
+#[test]
+fn test_table_user_agent_defaults() {
+    let mut dom_store = None;
+    let mut bytes_store = Vec::new();
+    let mut styled_store = None;
+
+    let html = r#"<html><body><table>
+        <thead><tr><th>Header</th></tr></thead>
+        <tbody><tr><td>Data</td></tr></tbody>
+    </table></body></html>"#;
+    let css = r#"* { margin: 0px; padding: 0px; border: 0px; }"#;
+
+    let layout = parse_and_layout(
+        html,
+        css,
+        800.0,
+        600.0,
+        &mut dom_store,
+        &mut bytes_store,
+        &mut styled_store,
+    );
+
+    let body = &layout.children[0].children[0];
+    let table = &body.children[0];
+    assert_eq!(table.box_type, BoxType::TableNode);
+    // Table should contain thead and tbody
+    assert_eq!(table.children.len(), 2);
+    assert!(table.dimensions.content.width > 0.0);
+    assert!(table.dimensions.content.height > 0.0);
+}

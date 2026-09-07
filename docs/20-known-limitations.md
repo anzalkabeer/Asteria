@@ -50,12 +50,12 @@
 | Attribute selectors (`[type="text"]`) | ❌ | Not supported |
 | `calc()` | ❌ | Not supported |
 | CSS Grid | ❌ | Not supported |
-| `opacity` | ❌ | Not supported |
+| `opacity` | ✅ | Fully supported with hierarchical cascade and alpha modulation |
 | `transform` | ❌ | Not supported |
-| `box-shadow` | ❌ | Not supported |
-| `border-radius` | ❌ | Not supported |
+| `box-shadow` | ✅ | Multiple shadows, blur, spread, color, and inset |
+| `border-radius` | ✅ | 1-4 value shorthand parsing and rounded rect commands |
 | `text-decoration` | ❌ | Not supported |
-| `overflow` | ❌ | Content always visible |
+| `overflow` | ✅ | `overflow: hidden` clipping supported via PushClip/PopClip |
 | `z-index` (full stacking contexts) | Partial | Values tracked but not fully sorted |
 | CSS gradients | ❌ | Not supported |
 | `float` | ❌ | Not supported |
@@ -82,7 +82,7 @@
 | Positioned elements | ❌ | `absolute`, `fixed`, `sticky` not supported |
 | Float layout | ❌ | Not supported |
 | Incremental layout | ❌ | Full reflow on every change |
-| Table layout | ❌ | Tables parsed but not laid out as tables |
+| Table layout | ✅ | Multi-pass table formatting context, column sizing, row sizing, colspan, rowspan, vertical alignment |
 
 ---
 
@@ -94,9 +94,9 @@
 | Borders (solid) | ✅ | Per-edge widths supported |
 | Text rendering (basic) | ✅ | Via glyphon |
 | Image placeholders | ✅ | Format detection and decode pipeline |
-| Rounded corners | ❌ | Not supported |
-| Box shadows | ❌ | Not supported |
-| Alpha blending / opacity | ❌ | Not supported |
+| Rounded corners | ✅ | Emits RoundedRect display commands |
+| Box shadows | ✅ | Emits BoxShadow commands before element background |
+| Alpha blending / opacity | ✅ | Cascading opacity modulating color alpha channels |
 | CSS transforms | ❌ | Not supported |
 | Layer compositing | ❌ | No GPU layer separation |
 | Subpixel text antialiasing | Partial | Depends on glyphon and GPU driver |

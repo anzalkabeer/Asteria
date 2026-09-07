@@ -882,6 +882,27 @@ fn apply_user_agent_defaults(
             "head" | "title" | "meta" | "script" | "style" | "link" | "noscript" => {
                 computed.display = Display::None;
             }
+            "table" => {
+                computed.display = Display::Table;
+            }
+            "tr" => {
+                computed.display = Display::TableRow;
+            }
+            "td" | "th" => {
+                computed.display = Display::TableCell;
+            }
+            "thead" => {
+                computed.display = Display::TableHeaderGroup;
+            }
+            "tbody" => {
+                computed.display = Display::TableRowGroup;
+            }
+            "tfoot" => {
+                computed.display = Display::TableFooterGroup;
+            }
+            "caption" => {
+                computed.display = Display::TableCaption;
+            }
             _ if is_default_inline_block_tag(tag_name) => {
                 computed.display = Display::InlineBlock;
             }
@@ -1000,6 +1021,16 @@ fn apply_user_agent_defaults(
     {
         computed.padding = values::Edges::uniform(12.0);
     }
+
+    if !specified.contains_key("font-weight") && tag_name == "th" {
+        computed.font_weight = 700.0;
+    }
+    if !specified.contains_key("text-align") && (tag_name == "th" || tag_name == "caption") {
+        computed.text_align = values::TextAlign::Center;
+    }
+    if !specified.contains_key("vertical-align") && (tag_name == "td" || tag_name == "th") {
+        computed.vertical_align = values::VerticalAlign::Middle;
+    }
 }
 
 /// Copy a single CSS property value from parent to child style.
@@ -1087,6 +1118,15 @@ fn copy_property(child: &mut ComputedStyle, parent: &ComputedStyle, prop: Proper
         PropertyId::FlexGrow => child.flex_grow = parent.flex_grow,
         PropertyId::FlexShrink => child.flex_shrink = parent.flex_shrink,
         PropertyId::FlexBasis => child.flex_basis = parent.flex_basis,
+        // Table
+        PropertyId::BorderCollapse => child.border_collapse = parent.border_collapse,
+        PropertyId::BorderSpacing => child.border_spacing = parent.border_spacing,
+        PropertyId::VerticalAlign => child.vertical_align = parent.vertical_align,
+        // Visual rendering
+        PropertyId::Opacity => child.opacity = parent.opacity,
+        PropertyId::BorderRadius => child.border_radius = parent.border_radius,
+        PropertyId::BoxShadow => child.box_shadow = parent.box_shadow.clone(),
+        PropertyId::Overflow => child.overflow = parent.overflow,
     }
 }
 
