@@ -35,6 +35,10 @@ impl SceneNodeId {
 pub enum SceneNodeKind {
     /// Solid color filled rectangle (element backgrounds)
     SolidRect,
+    /// Rounded rectangle filled with a color
+    RoundedRect { radius: crate::values::BorderRadius },
+    /// Box shadow visual primitive
+    BoxShadow { shadow: crate::values::BoxShadow },
     /// Box borders (top, right, bottom, left edges)
     Border { widths: EdgeSizes },
     /// Text fragment at a position
@@ -73,6 +77,24 @@ pub struct SceneNode {
     pub state: NodeState,
     /// Target URL of the anchor tag if the node is an interactive link, otherwise None
     pub link_url: Option<String>,
+    /// Active clip rectangle if this node is inside an overflow-hidden container
+    pub clip: Option<Rect>,
+}
+
+impl Default for SceneNode {
+    fn default() -> Self {
+        SceneNode {
+            rect: Rect::default(),
+            kind: SceneNodeKind::SolidRect,
+            parent: None,
+            z_order: 0,
+            segment_id: 0,
+            dirty: true,
+            state: NodeState::Normal,
+            link_url: None,
+            clip: None,
+        }
+    }
 }
 
 // ─── Text Run Data ───────────────────────────────────────────────
@@ -318,6 +340,7 @@ pub fn build_scene_graph(display_list: &DisplayList, segment_height: f32) -> Sce
     // Stack of (SceneNodeId, Rect) for positional parent assignment.
     // Only SolidColor nodes (backgrounds) act as potential parents.
     let mut parent_stack: Vec<(SceneNodeId, Rect)> = Vec::new();
+    let mut clip_stack: Vec<Rect> = Vec::new();
 
     for cmd in &display_list.commands {
         let node_rect = cmd_bounding_rect(cmd);
@@ -332,6 +355,7 @@ pub fn build_scene_graph(display_list: &DisplayList, segment_height: f32) -> Sce
             }
         }
         let parent_id = parent_stack.last().map(|(id, _)| *id);
+        let active_clip = clip_stack.last().copied();
 
         match cmd {
             DisplayCommand::SolidColor {
@@ -350,6 +374,7 @@ pub fn build_scene_graph(display_list: &DisplayList, segment_height: f32) -> Sce
                         dirty: true,
                         state: NodeState::Normal,
                         link_url: link_url.clone(),
+                        clip: active_clip,
                     },
                     color_to_rgba(color),
                     None,
@@ -361,20 +386,21 @@ pub fn build_scene_graph(display_list: &DisplayList, segment_height: f32) -> Sce
             DisplayCommand::RoundedRect {
                 color,
                 rect,
-                radius: _,
+                radius,
                 link_url,
             } => {
                 let seg = assign_segment(rect.y, segment_height);
                 let id = scene.push(
                     SceneNode {
                         rect: *rect,
-                        kind: SceneNodeKind::SolidRect,
+                        kind: SceneNodeKind::RoundedRect { radius: *radius },
                         parent: parent_id,
                         z_order,
                         segment_id: seg,
                         dirty: true,
                         state: NodeState::Normal,
                         link_url: link_url.clone(),
+                        clip: active_clip,
                     },
                     color_to_rgba(color),
                     None,
@@ -387,24 +413,41 @@ pub fn build_scene_graph(display_list: &DisplayList, segment_height: f32) -> Sce
                 shadow,
                 link_url,
             } => {
-                let seg = assign_segment(rect.y, segment_height);
+                let blur = shadow.blur_radius;
+                let expanded_rect = Rect {
+                    x: rect.x - blur,
+                    y: rect.y - blur,
+                    width: rect.width + 2.0 * blur,
+                    height: rect.height + 2.0 * blur,
+                };
+                let seg = assign_segment(expanded_rect.y, segment_height);
                 scene.push(
                     SceneNode {
-                        rect: *rect,
-                        kind: SceneNodeKind::SolidRect,
+                        rect: expanded_rect,
+                        kind: SceneNodeKind::BoxShadow { shadow: *shadow },
                         parent: parent_id,
                         z_order,
                         segment_id: seg,
                         dirty: true,
                         state: NodeState::Normal,
                         link_url: link_url.clone(),
+                        clip: active_clip,
                     },
                     color_to_rgba(&shadow.color),
                     None,
                 );
                 z_order += 1;
             }
-            DisplayCommand::PushClip { .. } | DisplayCommand::PopClip => {}
+            DisplayCommand::PushClip { rect } => {
+                let current_clip = match clip_stack.last() {
+                    Some(parent_clip) => intersect_rect(parent_clip, rect),
+                    None => *rect,
+                };
+                clip_stack.push(current_clip);
+            }
+            DisplayCommand::PopClip => {
+                clip_stack.pop();
+            }
             DisplayCommand::Border {
                 color,
                 rect,
@@ -424,6 +467,7 @@ pub fn build_scene_graph(display_list: &DisplayList, segment_height: f32) -> Sce
                         dirty: true,
                         state: NodeState::Normal,
                         link_url: link_url.clone(),
+                        clip: active_clip,
                     },
                     color_to_rgba(color),
                     None,
@@ -454,6 +498,7 @@ pub fn build_scene_graph(display_list: &DisplayList, segment_height: f32) -> Sce
                         dirty: true,
                         state: NodeState::Normal,
                         link_url: link_url.clone(),
+                        clip: active_clip,
                     },
                     color_to_rgba(color),
                     Some(TextRun {
@@ -488,6 +533,7 @@ pub fn build_scene_graph(display_list: &DisplayList, segment_height: f32) -> Sce
                         dirty: true,
                         state: NodeState::Normal,
                         link_url: link_url.clone(),
+                        clip: active_clip,
                     },
                     [1.0, 1.0, 1.0, 1.0], // White placeholder (texture replaces this)
                     Some(TextRun {
@@ -514,13 +560,35 @@ fn compute_text_rect(text: &str, x: f32, y: f32, width: f32, line_height: f32) -
     }
 }
 
+/// Intersects two rectangles.
+fn intersect_rect(a: &Rect, b: &Rect) -> Rect {
+    let x1 = a.x.max(b.x);
+    let y1 = a.y.max(b.y);
+    let x2 = (a.x + a.width).min(b.x + b.width);
+    let y2 = (a.y + a.height).min(b.y + b.height);
+    Rect {
+        x: x1,
+        y: y1,
+        width: (x2 - x1).max(0.0),
+        height: (y2 - y1).max(0.0),
+    }
+}
+
 /// Extract the bounding rect from a DisplayCommand.
 fn cmd_bounding_rect(cmd: &DisplayCommand) -> Rect {
     match cmd {
         DisplayCommand::SolidColor { rect, .. } => *rect,
         DisplayCommand::RoundedRect { rect, .. } => *rect,
         DisplayCommand::Border { rect, .. } => *rect,
-        DisplayCommand::BoxShadow { rect, .. } => *rect,
+        DisplayCommand::BoxShadow { rect, shadow, .. } => {
+            let blur = shadow.blur_radius;
+            Rect {
+                x: rect.x - blur,
+                y: rect.y - blur,
+                width: rect.width + 2.0 * blur,
+                height: rect.height + 2.0 * blur,
+            }
+        }
         DisplayCommand::PushClip { rect } => *rect,
         DisplayCommand::PopClip => Rect::default(),
         DisplayCommand::Text {

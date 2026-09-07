@@ -102,6 +102,36 @@ fn test_opacity_cascade_in_display_list() {
 }
 
 #[test]
+fn test_positioned_child_opacity_applied_once() {
+    let html = r#"<html><body><div id="parent" style="opacity: 0.5;"><div id="child" style="position: relative; z-index: 1; opacity: 0.5; background-color: rgb(200, 0, 0);">Positioned</div></div></body></html>"#;
+    let css = r#""#;
+
+    let bytes = html.as_bytes();
+    let mut processor = asteria::streaming_parser::StreamingHtmlProcessor::new();
+    let _ = processor.receive_network_chunk(bytes, true);
+    let dom = processor.finish();
+
+    let stylesheet = Stylesheet::parse(css.as_bytes());
+    let styled = resolve_styles(&dom, &stylesheet, bytes);
+    let layout = layout_document(&styled, &dom, bytes, 800.0, 600.0).unwrap();
+
+    let display_list = build_display_list(&layout, &dom, bytes);
+
+    let child_bg = display_list.commands.iter().find(|cmd| {
+        if let DisplayCommand::SolidColor { color, .. } = cmd {
+            color.r == 200 && color.g == 0 && color.b == 0
+        } else {
+            false
+        }
+    });
+    assert!(child_bg.is_some());
+    if let Some(DisplayCommand::SolidColor { color, .. }) = child_bg {
+        // 255 * 0.5 * 0.5 = 63.75 -> 64
+        assert!((color.a as i32 - 64).abs() <= 1);
+    }
+}
+
+#[test]
 fn test_border_radius_command_emission() {
     let html = r#"<html><body><div id="btn" style="border-radius: 8px; background-color: #00ff00;">Button</div></body></html>"#;
     let css = r#""#;

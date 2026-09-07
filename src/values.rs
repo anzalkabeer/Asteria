@@ -378,7 +378,7 @@ impl std::fmt::Display for BorderRadius {
 }
 
 /// A single CSS box-shadow declaration.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct BoxShadow {
     pub offset_x: f32,
     pub offset_y: f32,
@@ -986,7 +986,8 @@ impl ComputedStyle {
             // Table
             PropertyId::BorderCollapse => self.border_collapse = parse_border_collapse(value),
             PropertyId::BorderSpacing => {
-                self.border_spacing = parse_length(value, self.font_size, root_font_size)
+                let first = value.split_whitespace().next().unwrap_or(value);
+                self.border_spacing = parse_length(first, self.font_size, root_font_size);
             }
             PropertyId::VerticalAlign => self.vertical_align = parse_vertical_align(value),
             // Visual rendering
@@ -2226,9 +2227,15 @@ pub fn parse_vertical_align(value: &str) -> VerticalAlign {
     }
 }
 
-/// Parse a CSS opacity value (0.0 to 1.0).
+/// Parse a CSS opacity value (0.0 to 1.0), accepting decimals or percentages.
 pub fn parse_opacity(value: &str) -> f32 {
-    value.trim().parse::<f32>().unwrap_or(1.0).clamp(0.0, 1.0)
+    let s = value.trim();
+    let parsed = if let Some(pct) = s.strip_suffix('%') {
+        pct.trim().parse::<f32>().map(|v| v / 100.0)
+    } else {
+        s.parse::<f32>()
+    };
+    parsed.unwrap_or(1.0).clamp(0.0, 1.0)
 }
 
 /// Parse a CSS overflow value.
@@ -2286,6 +2293,68 @@ pub fn parse_border_radius(value: &str, em_base: f32, rem_base: f32) -> BorderRa
     }
 }
 
+fn split_commas_outside_parens(s: &str) -> Vec<&str> {
+    let mut parts = Vec::new();
+    let mut start = 0;
+    let mut depth: usize = 0;
+    for (idx, ch) in s.char_indices() {
+        match ch {
+            '(' => depth += 1,
+            ')' => depth = depth.saturating_sub(1),
+            ',' if depth == 0 => {
+                parts.push(&s[start..idx]);
+                start = idx + ch.len_utf8();
+            }
+            _ => {}
+        }
+    }
+    parts.push(&s[start..]);
+    parts
+}
+
+fn tokenize_shadow_tokens(s: &str) -> Vec<&str> {
+    let mut tokens = Vec::new();
+    let mut start = None;
+    let mut depth: usize = 0;
+    for (idx, ch) in s.char_indices() {
+        if ch == '(' {
+            depth += 1;
+        } else if ch == ')' {
+            depth = depth.saturating_sub(1);
+        } else if ch.is_whitespace() && depth == 0 {
+            if let Some(st) = start {
+                tokens.push(&s[st..idx]);
+                start = None;
+            }
+            continue;
+        }
+        if start.is_none() {
+            start = Some(idx);
+        }
+    }
+    if let Some(st) = start {
+        tokens.push(&s[st..]);
+    }
+    tokens
+}
+
+fn try_parse_shadow_length(value: &str, em_base: f32, rem_base: f32) -> Option<f32> {
+    let s = value.trim();
+    if s == "0" {
+        return Some(0.0);
+    }
+    if let Some(num) = s.strip_suffix("px") {
+        return num.trim().parse::<f32>().ok();
+    }
+    if let Some(num) = s.strip_suffix("rem") {
+        return num.trim().parse::<f32>().ok().map(|n| n * rem_base);
+    }
+    if let Some(num) = s.strip_suffix("em") {
+        return num.trim().parse::<f32>().ok().map(|n| n * em_base);
+    }
+    s.parse::<f32>().ok()
+}
+
 /// Parse a CSS box-shadow value.
 /// Supports: `none`, `<offset-x> <offset-y> [blur] [spread] [color] [inset]`
 /// Multiple shadows separated by commas.
@@ -2296,9 +2365,11 @@ pub fn parse_box_shadow(value: &str, em_base: f32, rem_base: f32) -> Vec<BoxShad
     }
 
     let mut shadows = Vec::new();
-    // Split on commas (simple; does not handle nested function commas)
-    for shadow_str in trimmed.split(',') {
-        if let Some(shadow) = parse_single_box_shadow(shadow_str.trim(), em_base, rem_base) {
+    for shadow_str in split_commas_outside_parens(trimmed) {
+        let shadow_str = shadow_str.trim();
+        if !shadow_str.is_empty()
+            && let Some(shadow) = parse_single_box_shadow(shadow_str, em_base, rem_base)
+        {
             shadows.push(shadow);
         }
     }
@@ -2307,7 +2378,7 @@ pub fn parse_box_shadow(value: &str, em_base: f32, rem_base: f32) -> Vec<BoxShad
 
 /// Parse a single box-shadow value.
 fn parse_single_box_shadow(value: &str, em_base: f32, rem_base: f32) -> Option<BoxShadow> {
-    let parts: Vec<&str> = value.split_whitespace().collect();
+    let parts = tokenize_shadow_tokens(value);
     if parts.len() < 2 {
         return None;
     }
@@ -2319,15 +2390,12 @@ fn parse_single_box_shadow(value: &str, em_base: f32, rem_base: f32) -> Option<B
     for &part in &parts {
         if part.eq_ignore_ascii_case("inset") {
             inset = true;
-        } else if part.starts_with('#')
-            || part.starts_with("rgb")
-            || part.starts_with("rgba")
-            || is_named_color(part)
-        {
-            color = parse_color(part);
-        } else {
-            // Try to parse as length
-            let v = parse_length(part, em_base, rem_base);
+        } else if let Some(css_color) = try_parse_css_color(part) {
+            color = match css_color {
+                CssColor::Rgba(c) => c,
+                CssColor::CurrentColor => Color::BLACK,
+            };
+        } else if let Some(v) = try_parse_shadow_length(part, em_base, rem_base) {
             lengths.push(v);
         }
     }
@@ -2344,36 +2412,6 @@ fn parse_single_box_shadow(value: &str, em_base: f32, rem_base: f32) -> Option<B
         color,
         inset,
     })
-}
-
-/// Check if a string is a recognized CSS named color (subset used for shadow parsing).
-fn is_named_color(s: &str) -> bool {
-    matches!(
-        s.to_ascii_lowercase().as_str(),
-        "black"
-            | "white"
-            | "red"
-            | "green"
-            | "blue"
-            | "yellow"
-            | "cyan"
-            | "magenta"
-            | "orange"
-            | "purple"
-            | "pink"
-            | "gray"
-            | "grey"
-            | "transparent"
-            | "silver"
-            | "navy"
-            | "teal"
-            | "maroon"
-            | "olive"
-            | "lime"
-            | "aqua"
-            | "fuchsia"
-            | "currentcolor"
-    )
 }
 
 // ─── Tests ───────────────────────────────────────────────────────
@@ -3038,5 +3076,60 @@ mod tests {
 
         let c_zero = c.with_alpha_multiplier(0.0);
         assert_eq!(c_zero.a, 0);
+    }
+
+    #[test]
+    fn test_parse_opacity_percentage() {
+        assert_eq!(parse_opacity("50%"), 0.5);
+        assert_eq!(parse_opacity("100%"), 1.0);
+        assert_eq!(parse_opacity("0%"), 0.0);
+        assert_eq!(parse_opacity(" 75% "), 0.75);
+        assert_eq!(parse_opacity("150%"), 1.0);
+        assert_eq!(parse_opacity("0.4"), 0.4);
+    }
+
+    #[test]
+    fn test_parse_box_shadow_spaced_rgba() {
+        let shadows = parse_box_shadow("0 4px 6px rgba(0, 0, 0, 0.1)", 16.0, 16.0);
+        assert_eq!(shadows.len(), 1);
+        assert_eq!(shadows[0].offset_x, 0.0);
+        assert_eq!(shadows[0].offset_y, 4.0);
+        assert_eq!(shadows[0].blur_radius, 6.0);
+        assert_eq!(shadows[0].spread_radius, 0.0);
+        assert_eq!(shadows[0].color, Color::new(0, 0, 0, 25));
+        assert!(!shadows[0].inset);
+    }
+
+    #[test]
+    fn test_parse_box_shadow_multiple_rgba() {
+        let shadows = parse_box_shadow(
+            "0 2px 4px rgba(0, 0, 0, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.5)",
+            16.0,
+            16.0,
+        );
+        assert_eq!(shadows.len(), 2);
+        assert_eq!(shadows[0].offset_x, 0.0);
+        assert_eq!(shadows[0].offset_y, 2.0);
+        assert_eq!(shadows[0].blur_radius, 4.0);
+        assert_eq!(shadows[0].color, Color::new(0, 0, 0, 51));
+        assert!(!shadows[0].inset);
+
+        assert_eq!(shadows[1].offset_x, 0.0);
+        assert_eq!(shadows[1].offset_y, 1.0);
+        assert_eq!(shadows[1].blur_radius, 0.0);
+        assert_eq!(shadows[1].color, Color::new(255, 255, 255, 127));
+        assert!(shadows[1].inset);
+    }
+
+    #[test]
+    fn test_border_spacing_two_values() {
+        let mut style = ComputedStyle::default();
+        style.set_property(
+            crate::properties::PropertyId::BorderSpacing,
+            "10px 20px",
+            16.0,
+            16.0,
+        );
+        assert_eq!(style.border_spacing, 10.0);
     }
 }

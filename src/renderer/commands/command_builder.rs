@@ -38,7 +38,9 @@ impl CommandBuilder {
         for (i, node) in scene.nodes.iter().enumerate() {
             let color = scene.colors[i];
             match &node.kind {
-                crate::scene::SceneNodeKind::SolidRect => {
+                crate::scene::SceneNodeKind::SolidRect
+                | crate::scene::SceneNodeKind::RoundedRect { .. }
+                | crate::scene::SceneNodeKind::BoxShadow { .. } => {
                     self.commands.push(RenderCommand::SolidRect {
                         rect: [node.rect.x, node.rect.y, node.rect.width, node.rect.height],
                         rgba: color,

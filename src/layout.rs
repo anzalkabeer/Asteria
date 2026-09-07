@@ -2224,14 +2224,20 @@ impl<'a> LayoutBox<'a> {
             };
 
             let dx = target_content_x - orig_content_x;
-            let dy = (target_content_y + v_shift) - orig_content_y;
+            let dy = target_content_y - orig_content_y;
 
             if dx != 0.0 || dy != 0.0 {
                 cell.apply_offset_to_tree(dx, dy);
             }
 
+            if v_shift != 0.0 {
+                for child in &mut cell.children {
+                    child.apply_offset_to_tree(0.0, v_shift);
+                }
+            }
+
             cell.dimensions.content.x = target_content_x;
-            cell.dimensions.content.y = target_content_y + v_shift;
+            cell.dimensions.content.y = target_content_y;
             cell.dimensions.content.width = target_content_w;
             cell.dimensions.content.height = target_content_h;
         }

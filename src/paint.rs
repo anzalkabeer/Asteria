@@ -203,9 +203,9 @@ fn collect_stacking_context_descendants<'a>(
                 .and_then(|n| n.styles.z_index)
                 .unwrap_or(0);
             if z < 0 {
-                neg_positioned.push((z, child, child_opacity));
+                neg_positioned.push((z, child, parent_opacity));
             } else {
-                pos_positioned.push((z, child, child_opacity));
+                pos_positioned.push((z, child, parent_opacity));
             }
         } else {
             let is_child_clipped = child
@@ -320,7 +320,7 @@ fn render_background(
                 rect: shadow_rect,
                 shadow: crate::values::BoxShadow {
                     color: shadow_color,
-                    ..shadow.clone()
+                    ..*shadow
                 },
                 link_url: link_url.clone(),
             });

@@ -15,7 +15,7 @@ use asteria::scene::{
 };
 use asteria::scheduler::{TaskPriority, TaskScheduler};
 use asteria::segment::SegmentBuilder;
-use asteria::values::Color;
+use asteria::values::{BorderRadius, BoxShadow, Color};
 
 // ─── Pool Tests ──────────────────────────────────────────────────
 
@@ -170,6 +170,7 @@ fn test_scene_graph_flat_storage() {
             dirty: true,
             state: NodeState::Normal,
             link_url: None,
+            clip: None,
         },
         [1.0, 0.0, 0.0, 1.0],
         None,
@@ -199,6 +200,7 @@ fn test_scene_graph_dirty_propagation() {
             dirty: false,
             state: NodeState::Normal,
             link_url: None,
+            clip: None,
         },
         [0.0; 4],
         None,
@@ -220,6 +222,7 @@ fn test_scene_graph_dirty_propagation() {
             dirty: false,
             state: NodeState::Normal,
             link_url: None,
+            clip: None,
         },
         [1.0, 0.0, 0.0, 1.0],
         None,
@@ -270,6 +273,99 @@ fn test_build_scene_graph_from_display_list() {
     // Both in segment 0 (y < 256)
     assert_eq!(scene.nodes[0].segment_id, 0);
     assert_eq!(scene.nodes[1].segment_id, 0);
+}
+
+#[test]
+fn test_scene_graph_rounded_rect_box_shadow_and_clip() {
+    let mut list = DisplayList::new();
+
+    // 1. RoundedRect
+    list.commands.push(DisplayCommand::RoundedRect {
+        color: Color::rgb(0, 255, 0),
+        rect: Rect {
+            x: 10.0,
+            y: 10.0,
+            width: 100.0,
+            height: 50.0,
+        },
+        radius: BorderRadius::uniform(12.0),
+        link_url: None,
+    });
+
+    // 2. BoxShadow with blur = 8.0
+    list.commands.push(DisplayCommand::BoxShadow {
+        rect: Rect {
+            x: 20.0,
+            y: 20.0,
+            width: 80.0,
+            height: 40.0,
+        },
+        shadow: BoxShadow {
+            offset_x: 2.0,
+            offset_y: 4.0,
+            blur_radius: 8.0,
+            spread_radius: 0.0,
+            color: Color::rgb(0, 0, 0),
+            inset: false,
+        },
+        link_url: None,
+    });
+
+    // 3. PushClip, node inside clip, PopClip, node outside clip
+    let clip_box = Rect {
+        x: 0.0,
+        y: 0.0,
+        width: 200.0,
+        height: 200.0,
+    };
+    list.commands
+        .push(DisplayCommand::PushClip { rect: clip_box });
+    list.commands.push(DisplayCommand::SolidColor {
+        color: Color::rgb(255, 0, 0),
+        rect: Rect {
+            x: 50.0,
+            y: 50.0,
+            width: 50.0,
+            height: 50.0,
+        },
+        link_url: None,
+    });
+    list.commands.push(DisplayCommand::PopClip);
+    list.commands.push(DisplayCommand::SolidColor {
+        color: Color::rgb(0, 0, 255),
+        rect: Rect {
+            x: 300.0,
+            y: 300.0,
+            width: 50.0,
+            height: 50.0,
+        },
+        link_url: None,
+    });
+
+    let scene = build_scene_graph(&list, 256.0);
+    assert_eq!(scene.len(), 4);
+
+    // Verify RoundedRect node preserves radius
+    assert_eq!(
+        scene.nodes[0].kind,
+        SceneNodeKind::RoundedRect {
+            radius: BorderRadius::uniform(12.0)
+        }
+    );
+
+    // Verify BoxShadow node kind and expanded blur bounds
+    assert!(matches!(
+        scene.nodes[1].kind,
+        SceneNodeKind::BoxShadow { .. }
+    ));
+    assert_eq!(scene.nodes[1].rect.x, 20.0 - 8.0);
+    assert_eq!(scene.nodes[1].rect.y, 20.0 - 8.0);
+    assert_eq!(scene.nodes[1].rect.width, 80.0 + 16.0);
+    assert_eq!(scene.nodes[1].rect.height, 40.0 + 16.0);
+
+    // Verify clip is attached to node inside PushClip/PopClip, and None outside
+    assert_eq!(scene.nodes[2].clip, Some(clip_box));
+    assert_eq!(scene.nodes[3].clip, None);
 }
 
 // ─── Segment Builder Tests ───────────────────────────────────────
@@ -383,6 +479,7 @@ fn test_hit_test_finds_topmost_node() {
             dirty: false,
             state: NodeState::Normal,
             link_url: None,
+            clip: None,
         },
         [0.9, 0.9, 0.9, 1.0],
         None,
@@ -404,6 +501,7 @@ fn test_hit_test_finds_topmost_node() {
             dirty: false,
             state: NodeState::Normal,
             link_url: None,
+            clip: None,
         },
         [0.2, 0.5, 1.0, 1.0],
         None,
@@ -437,6 +535,7 @@ fn test_hit_test_miss_returns_none() {
             dirty: false,
             state: NodeState::Normal,
             link_url: None,
+            clip: None,
         },
         [1.0, 0.0, 0.0, 1.0],
         None,
@@ -469,6 +568,7 @@ fn test_hit_test_edge_boundary() {
             dirty: false,
             state: NodeState::Normal,
             link_url: None,
+            clip: None,
         },
         [0.0, 1.0, 0.0, 1.0],
         None,
@@ -501,6 +601,7 @@ fn test_invalidate_after_hit() {
             dirty: false,
             state: NodeState::Normal,
             link_url: None,
+            clip: None,
         },
         [1.0, 1.0, 0.0, 1.0],
         None,
@@ -540,6 +641,7 @@ fn test_node_state_invalidation() {
             dirty: false,
             state: NodeState::Normal,
             link_url: None,
+            clip: None,
         },
         [1.0, 0.0, 0.0, 1.0],
         None,
@@ -581,6 +683,7 @@ fn test_dirty_segments_query() {
             dirty: false,
             state: NodeState::Normal,
             link_url: None,
+            clip: None,
         },
         [0.0; 4],
         None,
@@ -602,6 +705,7 @@ fn test_dirty_segments_query() {
             dirty: true,
             state: NodeState::Normal,
             link_url: None,
+            clip: None,
         },
         [0.0; 4],
         None,
@@ -631,6 +735,7 @@ fn test_node_link_url_retrieval() {
             dirty: false,
             state: NodeState::Normal,
             link_url: Some("https://asteria.dev".to_string()),
+            clip: None,
         },
         [0.0; 4],
         None,
@@ -658,6 +763,7 @@ fn test_clean_scene_empty_dirty_segments() {
             dirty: false,
             state: NodeState::Normal,
             link_url: None,
+            clip: None,
         },
         [0.0; 4],
         None,

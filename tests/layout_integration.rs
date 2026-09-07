@@ -1108,8 +1108,12 @@ fn test_table_cell_vertical_alignment() {
 
     assert_eq!(c3.dimensions.content.height, 90.0);
     assert_eq!(c1.dimensions.content.y, 0.0);
-    // Vertical-align bottom shifts by (90 - 30) = 60px
-    assert_eq!(c2.dimensions.content.y, 60.0);
+    assert_eq!(c1.dimensions.content.height, 90.0);
+    assert_eq!(c2.dimensions.content.y, 0.0);
+    assert_eq!(c2.dimensions.content.height, 90.0);
+    // Vertical-align bottom shifts descendant child content by (90 - 30) = 60px
+    assert_eq!(c2.children[0].dimensions.content.y, 60.0);
+    assert_eq!(c1.children[0].dimensions.content.y, 0.0);
 }
 
 #[test]
