@@ -39,6 +39,7 @@ permissions:
 jobs:
   Analysis:
     runs-on: ubuntu-latest
+    if: "${{ secrets.SONAR_TOKEN != '' && secrets.SONAR_HOST_URL != '' }}"
 
     steps:
       - name: Analyze with SonarQube

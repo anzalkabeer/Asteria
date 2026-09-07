@@ -286,9 +286,8 @@ fn find_link_url(dom: &Dom, source: &[u8], node_id: Option<NodeId>) -> Option<St
             let trimmed = href.trim();
             if is_safe_link_url(trimmed) {
                 return Some(trimmed.to_string());
-            } else {
-                return None;
             }
+            return None;
         }
         curr = node.parent;
     }

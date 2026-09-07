@@ -432,10 +432,9 @@ fn substitute_vars_internal(
 
         let resolved_val = if let Some(v) = resolve_var_chain(var_name, vars, active_stack) {
             v
-        } else if let Some(fb) = fallback {
-            substitute_vars_internal(fb.trim(), vars, active_stack).unwrap_or_default()
         } else {
-            return None;
+            let fb = fallback?;
+            substitute_vars_internal(fb.trim(), vars, active_stack).unwrap_or_default()
         };
 
         result.replace_range(start..=end, &resolved_val);
