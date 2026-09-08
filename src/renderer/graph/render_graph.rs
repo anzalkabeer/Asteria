@@ -25,6 +25,14 @@ impl RenderGraph {
         self.passes.get_mut(index)?.as_any_mut().downcast_mut::<T>()
     }
 
+    /// Downcast the first pass matching concrete type `T`.
+    /// Returns `None` if no pass matches the requested type.
+    pub fn find_pass_mut<T: 'static>(&mut self) -> Option<&mut T> {
+        self.passes
+            .iter_mut()
+            .find_map(|p| p.as_any_mut().downcast_mut::<T>())
+    }
+
     pub fn prepare(&mut self, device: &wgpu::Device, queue: &wgpu::Queue) {
         for pass in &mut self.passes {
             pass.prepare(device, queue);

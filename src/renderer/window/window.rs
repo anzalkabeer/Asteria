@@ -41,6 +41,7 @@ use crate::renderer::scheduler::batching::BatchPlanner;
 use crate::scene::{NodeState, SceneGraph, SceneNodeId, build_scene_graph};
 use crate::scheduler::ThreadedScheduler;
 use crate::shell::{ShellEvent, TabManager};
+use crate::shell_ui::{HEADER_HEIGHT, STATUS_BAR_HEIGHT, ShellHitTarget, ShellUiState};
 
 // ─── Pass indices in the RenderGraph ──────────────────────────────
 // These constants define the Z-order of GPU passes:
@@ -88,7 +89,8 @@ impl AsteriaWindow {
     ) -> SceneGraph {
         let size = self.window.inner_size();
         let viewport_w = size.width as f32;
-        let viewport_h = size.height as f32;
+        // Webpage viewport excludes shell chrome (Header + Status Bar)
+        let viewport_h = (size.height as f32 - HEADER_HEIGHT - STATUS_BAR_HEIGHT).max(100.0);
 
         let sample_html_bytes = b"<!DOCTYPE html><html><head><style>body { background-color: #1e1e2e; color: #cdd6f4; } h1 { color: #89b4fa; font-size: 24px; } p { color: #a6adc8; font-size: 16px; } div { background-color: #313244; }</style></head><body><h1>Asteria Browser Engine</h1><p>Hardware-accelerated GPU renderer running with wgpu + winit.</p><div><p>Interactive Viewport: Scroll, Hover, Click supported!</p></div></body></html>";
 
@@ -144,13 +146,14 @@ fn build_rect_batch(scene: &SceneGraph, scroll_y: f32, vp_w: f32) -> BatchBuilde
     let mut cmd_builder = CommandBuilder::new();
     cmd_builder.build_from_scene(scene);
 
+    // Offset webpage content by HEADER_HEIGHT and scroll position
     let scrolled: Vec<_> = cmd_builder
         .commands
         .iter()
         .map(|c| match c {
             RenderCommand::SolidRect { rect, rgba } => {
                 let mut r = *rect;
-                r[1] -= scroll_y;
+                r[1] = r[1] + HEADER_HEIGHT - scroll_y;
                 RenderCommand::SolidRect {
                     rect: r,
                     rgba: *rgba,
@@ -163,7 +166,7 @@ fn build_rect_batch(scene: &SceneGraph, scroll_y: f32, vp_w: f32) -> BatchBuilde
                 font_size,
             } => {
                 let mut r = *rect;
-                r[1] -= scroll_y;
+                r[1] = r[1] + HEADER_HEIGHT - scroll_y;
                 RenderCommand::Text {
                     text: text.clone(),
                     rect: r,
@@ -192,7 +195,8 @@ fn populate_text_pass(text_pass: &mut TextPass, scene: &SceneGraph, scroll_y: f3
             && let Some(text_run) = &scene.texts[i]
         {
             let color = scene.colors[i];
-            let y = node.rect.y - scroll_y;
+            // Offset webpage text by HEADER_HEIGHT and scroll position
+            let y = node.rect.y + HEADER_HEIGHT - scroll_y;
             text_pass.add_text(&text_run.text, [node.rect.x, y], font_size, color);
         }
     }
@@ -231,6 +235,10 @@ pub fn run_window_loop(initial_scene: SceneGraph, tab_manager: TabManager) {
     let mut target_scroll_y: f32 = 0.0;
     let mut hovered_node: Option<SceneNodeId> = None;
     let mut needs_redraw = true;
+    let mut shell_ui = ShellUiState::new();
+
+    // Sync omnibox with initial tab
+    shell_ui.sync_with_tab_url(&asteria_window.tab_manager.active_tab().url);
 
     let mut render_graph = RenderGraph::new();
     render_graph.add_pass(Box::new(RectPass::new(
@@ -279,6 +287,7 @@ pub fn run_window_loop(initial_scene: SceneGraph, tab_manager: TabManager) {
                             KeyEvent {
                                 logical_key,
                                 state: ElementState::Pressed,
+                                ref text,
                                 ..
                             },
                         ..
@@ -287,12 +296,17 @@ pub fn run_window_loop(initial_scene: SceneGraph, tab_manager: TabManager) {
                         let alt = asteria_window.modifiers.alt_key();
 
                         let mut handled = false;
+
+                        // ── Global shortcuts (always active) ─────────
                         match (ctrl, alt, &logical_key) {
                             // Ctrl + T: New Tab
                             (true, false, Key::Character(c)) if c.eq_ignore_ascii_case("t") => {
                                 let _ = asteria_window
                                     .tab_manager
                                     .handle_event(ShellEvent::NewTab("<sample>".to_string()));
+                                shell_ui.sync_with_tab_url(
+                                    &asteria_window.tab_manager.active_tab().url,
+                                );
                                 handled = true;
                             }
                             // Ctrl + W: Close Active Tab
@@ -301,11 +315,24 @@ pub fn run_window_loop(initial_scene: SceneGraph, tab_manager: TabManager) {
                                 let _ = asteria_window
                                     .tab_manager
                                     .handle_event(ShellEvent::CloseTab(idx));
+                                shell_ui.sync_with_tab_url(
+                                    &asteria_window.tab_manager.active_tab().url,
+                                );
                                 handled = true;
+                            }
+                            // Ctrl + L: Focus Omnibox
+                            (true, false, Key::Character(c)) if c.eq_ignore_ascii_case("l") => {
+                                shell_ui.focus_omnibox();
+                                needs_redraw = true;
+                                asteria_window.window.request_redraw();
+                                return;
                             }
                             // Alt + LeftArrow: Go Back
                             (false, true, Key::Named(NamedKey::ArrowLeft)) => {
                                 let _ = asteria_window.tab_manager.handle_event(ShellEvent::GoBack);
+                                shell_ui.sync_with_tab_url(
+                                    &asteria_window.tab_manager.active_tab().url,
+                                );
                                 handled = true;
                             }
                             // Alt + RightArrow: Go Forward
@@ -313,6 +340,9 @@ pub fn run_window_loop(initial_scene: SceneGraph, tab_manager: TabManager) {
                                 let _ = asteria_window
                                     .tab_manager
                                     .handle_event(ShellEvent::GoForward);
+                                shell_ui.sync_with_tab_url(
+                                    &asteria_window.tab_manager.active_tab().url,
+                                );
                                 handled = true;
                             }
                             // Ctrl + R or F5: Reload
@@ -327,6 +357,80 @@ pub fn run_window_loop(initial_scene: SceneGraph, tab_manager: TabManager) {
                             _ => {}
                         }
 
+                        // ── Omnibox text editing (when focused) ──────
+                        if !handled && shell_ui.omnibox_focused {
+                            match &logical_key {
+                                Key::Named(NamedKey::Enter) => {
+                                    let url = shell_ui.omnibox_text.clone();
+                                    shell_ui.unfocus_omnibox();
+                                    if let Err(e) = asteria_window.tab_manager.navigate(&url) {
+                                        shell_ui.status_message = Some(format!("Error: {}", e));
+                                    } else {
+                                        shell_ui.sync_with_tab_url(
+                                            &asteria_window.tab_manager.active_tab().url,
+                                        );
+                                    }
+                                    handled = true;
+                                }
+                                Key::Named(NamedKey::Escape) => {
+                                    shell_ui.omnibox_text =
+                                        asteria_window.tab_manager.active_tab().url.clone();
+                                    shell_ui.unfocus_omnibox();
+                                    needs_redraw = true;
+                                    asteria_window.window.request_redraw();
+                                    return;
+                                }
+                                Key::Named(NamedKey::Backspace) => {
+                                    shell_ui.backspace();
+                                    needs_redraw = true;
+                                    asteria_window.window.request_redraw();
+                                    return;
+                                }
+                                Key::Named(NamedKey::Delete) => {
+                                    shell_ui.delete_forward();
+                                    needs_redraw = true;
+                                    asteria_window.window.request_redraw();
+                                    return;
+                                }
+                                Key::Named(NamedKey::ArrowLeft) => {
+                                    shell_ui.cursor_left();
+                                    needs_redraw = true;
+                                    asteria_window.window.request_redraw();
+                                    return;
+                                }
+                                Key::Named(NamedKey::ArrowRight) => {
+                                    shell_ui.cursor_right();
+                                    needs_redraw = true;
+                                    asteria_window.window.request_redraw();
+                                    return;
+                                }
+                                Key::Named(NamedKey::Home) => {
+                                    shell_ui.cursor_home();
+                                    needs_redraw = true;
+                                    asteria_window.window.request_redraw();
+                                    return;
+                                }
+                                Key::Named(NamedKey::End) => {
+                                    shell_ui.cursor_end();
+                                    needs_redraw = true;
+                                    asteria_window.window.request_redraw();
+                                    return;
+                                }
+                                _ => {
+                                    // Handle character input
+                                    if let Some(txt) = text {
+                                        let s = txt.as_str();
+                                        if !s.is_empty() && !ctrl && !alt {
+                                            shell_ui.insert_str(s);
+                                            needs_redraw = true;
+                                            asteria_window.window.request_redraw();
+                                            return;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
                         if handled {
                             scene = asteria_window.build_active_scene(Some(proxy.clone()));
                             current_scroll_y = 0.0;
@@ -338,18 +442,51 @@ pub fn run_window_loop(initial_scene: SceneGraph, tab_manager: TabManager) {
 
                     WindowEvent::CursorMoved { position, .. } => {
                         cursor_pos = (position.x as f32, position.y as f32);
+                        let window_h = asteria_window.window.inner_size().height as f32;
+                        let tab_count = asteria_window.tab_manager.tabs.len();
 
-                        let hit_y = cursor_pos.1 + current_scroll_y;
-                        let new_hover = scene.hit_test(cursor_pos.0, hit_y);
+                        // Hit test against shell UI first
+                        let shell_target = shell_ui.hit_test(
+                            cursor_pos.0,
+                            cursor_pos.1,
+                            asteria_window.window.inner_size().width as f32,
+                            window_h,
+                            tab_count,
+                        );
 
-                        if new_hover != hovered_node {
-                            if let Some(old_id) = hovered_node {
+                        let old_hover = shell_ui.hovered_target;
+                        shell_ui.hovered_target = Some(shell_target);
+
+                        if shell_target == ShellHitTarget::Webpage {
+                            // Map cursor into webpage coordinate space
+                            let page_y = cursor_pos.1 - HEADER_HEIGHT + current_scroll_y;
+                            let new_hover = scene.hit_test(cursor_pos.0, page_y);
+
+                            // Update link preview in status bar
+                            shell_ui.hovered_link_url = new_hover
+                                .and_then(|nid| scene.node_url(nid).map(|s| s.to_string()));
+
+                            if new_hover != hovered_node {
+                                if let Some(old_id) = hovered_node {
+                                    scene.set_node_state(old_id, NodeState::Normal);
+                                }
+                                if let Some(new_id) = new_hover {
+                                    scene.set_node_state(new_id, NodeState::Hovered);
+                                }
+                                hovered_node = new_hover;
+                                needs_redraw = true;
+                                asteria_window.window.request_redraw();
+                            }
+                        } else {
+                            // Clear webpage hover when cursor is over chrome
+                            shell_ui.hovered_link_url = None;
+                            if let Some(old_id) = hovered_node.take() {
                                 scene.set_node_state(old_id, NodeState::Normal);
                             }
-                            if let Some(new_id) = new_hover {
-                                scene.set_node_state(new_id, NodeState::Hovered);
-                            }
-                            hovered_node = new_hover;
+                        }
+
+                        // Redraw if shell hover target changed
+                        if old_hover != shell_ui.hovered_target {
                             needs_redraw = true;
                             asteria_window.window.request_redraw();
                         }
@@ -360,38 +497,149 @@ pub fn run_window_loop(initial_scene: SceneGraph, tab_manager: TabManager) {
                         button: MouseButton::Left,
                         ..
                     } => {
-                        let hit_y = cursor_pos.1 + current_scroll_y;
-                        if let Some(node_id) = scene.hit_test(cursor_pos.0, hit_y) {
-                            scene.set_node_state(node_id, NodeState::Active);
+                        let window_w = asteria_window.window.inner_size().width as f32;
+                        let window_h = asteria_window.window.inner_size().height as f32;
+                        let tab_count = asteria_window.tab_manager.tabs.len();
+                        let shell_target = shell_ui.hit_test(
+                            cursor_pos.0,
+                            cursor_pos.1,
+                            window_w,
+                            window_h,
+                            tab_count,
+                        );
 
-                            if let Some(url) = scene.node_url(node_id) {
-                                println!("[ASTERIA NAV] Link Clicked → Target URL: {}", url);
-                                if let Err(e) = asteria_window.tab_manager.navigate(url) {
-                                    eprintln!("Navigation failed: {}", e);
+                        let mut rebuild_scene = false;
+
+                        match shell_target {
+                            ShellHitTarget::Tab(idx) => {
+                                asteria_window.tab_manager.switch_tab(idx);
+                                shell_ui.sync_with_tab_url(
+                                    &asteria_window.tab_manager.active_tab().url,
+                                );
+                                shell_ui.unfocus_omnibox();
+                                rebuild_scene = true;
+                            }
+                            ShellHitTarget::TabClose(idx) => {
+                                asteria_window.tab_manager.close_tab(idx);
+                                shell_ui.sync_with_tab_url(
+                                    &asteria_window.tab_manager.active_tab().url,
+                                );
+                                shell_ui.unfocus_omnibox();
+                                rebuild_scene = true;
+                            }
+                            ShellHitTarget::NewTab => {
+                                let _ = asteria_window
+                                    .tab_manager
+                                    .handle_event(ShellEvent::NewTab("<sample>".to_string()));
+                                shell_ui.sync_with_tab_url(
+                                    &asteria_window.tab_manager.active_tab().url,
+                                );
+                                shell_ui.unfocus_omnibox();
+                                rebuild_scene = true;
+                            }
+                            ShellHitTarget::Back => {
+                                let _ = asteria_window.tab_manager.handle_event(ShellEvent::GoBack);
+                                shell_ui.sync_with_tab_url(
+                                    &asteria_window.tab_manager.active_tab().url,
+                                );
+                                rebuild_scene = true;
+                            }
+                            ShellHitTarget::Forward => {
+                                let _ = asteria_window
+                                    .tab_manager
+                                    .handle_event(ShellEvent::GoForward);
+                                shell_ui.sync_with_tab_url(
+                                    &asteria_window.tab_manager.active_tab().url,
+                                );
+                                rebuild_scene = true;
+                            }
+                            ShellHitTarget::Reload => {
+                                let _ = asteria_window.tab_manager.handle_event(ShellEvent::Reload);
+                                rebuild_scene = true;
+                            }
+                            ShellHitTarget::Home => {
+                                let _ = asteria_window.tab_manager.navigate("<sample>");
+                                shell_ui.sync_with_tab_url(
+                                    &asteria_window.tab_manager.active_tab().url,
+                                );
+                                rebuild_scene = true;
+                            }
+                            ShellHitTarget::Omnibox => {
+                                shell_ui.focus_omnibox();
+                                needs_redraw = true;
+                                asteria_window.window.request_redraw();
+                            }
+                            ShellHitTarget::OmniboxGo => {
+                                let url = shell_ui.omnibox_text.clone();
+                                shell_ui.unfocus_omnibox();
+                                if let Err(e) = asteria_window.tab_manager.navigate(&url) {
+                                    shell_ui.status_message = Some(format!("Error: {}", e));
                                 } else {
-                                    scene = asteria_window.build_active_scene(Some(proxy.clone()));
-                                    current_scroll_y = 0.0;
-                                    target_scroll_y = 0.0;
+                                    shell_ui.sync_with_tab_url(
+                                        &asteria_window.tab_manager.active_tab().url,
+                                    );
+                                }
+                                rebuild_scene = true;
+                            }
+                            ShellHitTarget::Webpage => {
+                                shell_ui.unfocus_omnibox();
+                                // Hit test webpage scene
+                                let page_y = cursor_pos.1 - HEADER_HEIGHT + current_scroll_y;
+                                if let Some(node_id) = scene.hit_test(cursor_pos.0, page_y) {
+                                    scene.set_node_state(node_id, NodeState::Active);
+
+                                    if let Some(url) = scene.node_url(node_id) {
+                                        println!(
+                                            "[ASTERIA NAV] Link Clicked → Target URL: {}",
+                                            url
+                                        );
+                                        if let Err(e) = asteria_window.tab_manager.navigate(url) {
+                                            shell_ui.status_message =
+                                                Some(format!("Navigation failed: {}", e));
+                                        } else {
+                                            shell_ui.sync_with_tab_url(
+                                                &asteria_window.tab_manager.active_tab().url,
+                                            );
+                                            rebuild_scene = true;
+                                        }
+                                    }
                                     needs_redraw = true;
                                     asteria_window.window.request_redraw();
                                 }
                             }
+                            ShellHitTarget::Settings | ShellHitTarget::StatusBar => {
+                                // No-op for now
+                            }
+                        }
+
+                        if rebuild_scene {
+                            scene = asteria_window.build_active_scene(Some(proxy.clone()));
+                            current_scroll_y = 0.0;
+                            target_scroll_y = 0.0;
                             needs_redraw = true;
                             asteria_window.window.request_redraw();
                         }
                     }
 
                     WindowEvent::MouseWheel { delta, .. } => {
-                        let scroll_dy = match delta {
-                            MouseScrollDelta::LineDelta(_, y) => y * 40.0,
-                            MouseScrollDelta::PixelDelta(pos) => pos.y as f32,
-                        };
+                        // Only scroll if cursor is in webpage area
+                        if cursor_pos.1 > HEADER_HEIGHT
+                            && cursor_pos.1 < (backend.config.height as f32 - STATUS_BAR_HEIGHT)
+                        {
+                            let scroll_dy = match delta {
+                                MouseScrollDelta::LineDelta(_, y) => y * 40.0,
+                                MouseScrollDelta::PixelDelta(pos) => pos.y as f32,
+                            };
 
-                        let max_scroll = max_scroll_for_scene(&scene, backend.config.height as f32);
-                        target_scroll_y = (target_scroll_y - scroll_dy).clamp(0.0, max_scroll);
+                            let viewport_h =
+                                (backend.config.height as f32 - HEADER_HEIGHT - STATUS_BAR_HEIGHT)
+                                    .max(100.0);
+                            let max_scroll = max_scroll_for_scene(&scene, viewport_h);
+                            target_scroll_y = (target_scroll_y - scroll_dy).clamp(0.0, max_scroll);
 
-                        needs_redraw = true;
-                        asteria_window.window.request_redraw();
+                            needs_redraw = true;
+                            asteria_window.window.request_redraw();
+                        }
                     }
 
                     WindowEvent::RedrawRequested => {
@@ -402,7 +650,19 @@ pub fn run_window_loop(initial_scene: SceneGraph, tab_manager: TabManager) {
                         needs_redraw = false;
 
                         let vp_w = asteria_window.window.inner_size().width as f32;
-                        let new_batch = build_rect_batch(&scene, current_scroll_y, vp_w);
+                        let vp_h = asteria_window.window.inner_size().height as f32;
+
+                        // Build webpage rect batch (already offset by HEADER_HEIGHT)
+                        let mut new_batch = build_rect_batch(&scene, current_scroll_y, vp_w);
+
+                        // Overlay shell chrome rects on top
+                        shell_ui.render_shell_rects(
+                            &mut new_batch,
+                            vp_w,
+                            vp_h,
+                            &asteria_window.tab_manager,
+                        );
+
                         if let Some(rp) =
                             render_graph.pass_downcast_mut::<RectPass>(RECT_PASS_INDEX)
                         {
@@ -412,7 +672,28 @@ pub fn run_window_loop(initial_scene: SceneGraph, tab_manager: TabManager) {
                         if let Some(tp) =
                             render_graph.pass_downcast_mut::<TextPass>(TEXT_PASS_INDEX)
                         {
+                            // Populate webpage text (already offset)
                             populate_text_pass(tp, &scene, current_scroll_y);
+
+                            // Overlay shell chrome text on top
+                            let can_back = asteria_window
+                                .tab_manager
+                                .active_tab()
+                                .history
+                                .can_go_back();
+                            let can_fwd = asteria_window
+                                .tab_manager
+                                .active_tab()
+                                .history
+                                .can_go_forward();
+                            shell_ui.render_shell_text(
+                                tp,
+                                vp_w,
+                                vp_h,
+                                &asteria_window.tab_manager,
+                                can_back,
+                                can_fwd,
+                            );
                         }
 
                         render_graph.prepare(&backend.device, &backend.queue);
@@ -455,10 +736,11 @@ pub fn run_window_loop(initial_scene: SceneGraph, tab_manager: TabManager) {
                                         view: &view,
                                         resolve_target: None,
                                         ops: wgpu::Operations {
+                                            // Dark background matching shell chrome
                                             load: wgpu::LoadOp::Clear(wgpu::Color {
-                                                r: 1.0,
-                                                g: 1.0,
-                                                b: 1.0,
+                                                r: 0.067,
+                                                g: 0.067,
+                                                b: 0.106,
                                                 a: 1.0,
                                             }),
                                             store: wgpu::StoreOp::Store,

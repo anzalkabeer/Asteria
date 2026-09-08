@@ -63,13 +63,14 @@ impl TextPass {
             Some(self.height as f32),
         );
         buffer.set_text(&mut self.font_system, text, Attrs::new(), Shaping::Advanced);
+        buffer.shape_until_scroll(&mut self.font_system, false);
 
         self.buffers.push((buffer, pos, glyphon_color));
     }
 
     pub fn resize(&mut self, width: u32, height: u32) {
-        self.width = width;
-        self.height = height;
+        self.width = width.max(1);
+        self.height = height.max(1);
     }
 
     pub fn clear(&mut self) {
@@ -106,7 +107,7 @@ impl RenderPass for TextPass {
             })
             .collect();
 
-        let _ = self.renderer.prepare(
+        let result = self.renderer.prepare(
             device,
             queue,
             &mut self.font_system,
@@ -115,10 +116,17 @@ impl RenderPass for TextPass {
             text_areas,
             &mut self.swash_cache,
         );
+        if let Err(glyphon::PrepareError::AtlasFull) = result {
+            self.atlas.trim();
+        } else if let Err(e) = result {
+            eprintln!("[ASTERIA] Text prepare error: {e:?}");
+        }
     }
 
     fn render<'a>(&'a self, pass: &mut wgpu::RenderPass<'a>) {
-        let _ = self.renderer.render(&self.atlas, &self.viewport, pass);
+        if let Err(e) = self.renderer.render(&self.atlas, &self.viewport, pass) {
+            eprintln!("[ASTERIA] Text render error: {e:?}");
+        }
     }
 
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any {

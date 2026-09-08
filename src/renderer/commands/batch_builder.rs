@@ -149,6 +149,12 @@ impl BatchBuilder {
             base_idx + 3,
         ]);
     }
+
+    /// Public quad emitter for shell UI chrome rendering.
+    /// Adds a colored rectangle at absolute pixel coordinates.
+    pub fn add_quad_direct(&mut self, x: f32, y: f32, w: f32, h: f32, rgba: [f32; 4]) {
+        self.add_quad(x, y, w, h, rgba);
+    }
 }
 
 /// Compact 5x7 bitmap font patterns for ASCII characters

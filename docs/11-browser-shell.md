@@ -240,10 +240,12 @@ The window title, initial size, and behaviour are all configurable. The event lo
 
 | Feature | Status |
 |---|---|
-| Address bar UI | 🔜 |
+| Address bar UI | ✅ Implemented (`src/shell_ui.rs`) |
+| Tab bar UI | ✅ Implemented (`src/shell_ui.rs`) |
+| Status bar | ✅ Implemented (link preview + engine badge) |
+| Navigation buttons | ✅ Implemented (Back, Forward, Reload, Home) |
 | Bookmarks | 🔜 |
 | Settings panel | 🔜 |
-| Tab bar UI | 🔜 (tabs managed via keyboard only) |
 | Context menu (right-click) | 🔜 |
 | Find in page | 🔜 |
 | Download manager | 🔜 |
