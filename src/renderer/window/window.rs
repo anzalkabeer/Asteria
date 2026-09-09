@@ -37,17 +37,10 @@ use crate::renderer::graph::render_graph::RenderGraph;
 use crate::renderer::passes::image_pass::ImagePass;
 use crate::renderer::passes::rect_pass::RectPass;
 use crate::renderer::passes::text_pass::TextPass;
-use crate::renderer::scheduler::batching::BatchPlanner;
 use crate::scene::{NodeState, SceneGraph, SceneNodeId, build_scene_graph};
 use crate::scheduler::ThreadedScheduler;
 use crate::shell::{ShellEvent, TabManager};
 use crate::shell_ui::{HEADER_HEIGHT, STATUS_BAR_HEIGHT, ShellHitTarget, ShellUiState};
-
-// ─── Pass indices in the RenderGraph ──────────────────────────────
-// These constants define the Z-order of GPU passes:
-//   Backgrounds (0) → Images (1) → Text (2)
-const RECT_PASS_INDEX: usize = 0;
-const TEXT_PASS_INDEX: usize = 1;
 
 pub struct AsteriaWindow {
     pub window: Arc<Window>,
@@ -108,6 +101,7 @@ impl AsteriaWindow {
                     url: active_tab.url.clone(),
                     bytes: html_bytes.to_vec(),
                     proxy: Some(p),
+                    viewport_size: Some((viewport_w, viewport_h)),
                 });
             // Return an empty scene immediately; the proxy will deliver the real scene
             return SceneGraph::new();
@@ -118,14 +112,32 @@ impl AsteriaWindow {
         let _ = processor.receive_network_chunk(html_bytes, true);
         let dom = processor.finish();
 
-        let css_bytes = active_tab
-            .page_resources
-            .as_ref()
-            .and_then(|r| r.stylesheets.first())
-            .map(|c| c.bytes.as_slice())
-            .unwrap_or(b"");
+        let sample_css_bytes = b"body { background-color: #1e1e2e; color: #cdd6f4; } h1 { color: #89b4fa; font-size: 24px; } p { color: #a6adc8; font-size: 16px; } div { background-color: #313244; }";
 
-        let stylesheet = Stylesheet::parse(css_bytes);
+        let mut css_source = Vec::new();
+        if let Some(res) = &active_tab.page_resources {
+            for sheet in &res.stylesheets {
+                css_source.extend_from_slice(&sheet.bytes);
+                css_source.push(b'\n');
+            }
+        }
+        if css_source.is_empty() {
+            // Also attempt to discover inline <style> tags from the parsed DOM
+            let mut loader = crate::loader::ResourceLoader::new();
+            let discovered = loader.load_html_string(
+                std::str::from_utf8(html_bytes).unwrap_or(""),
+                &active_tab.url,
+            );
+            for sheet in &discovered.stylesheets {
+                css_source.extend_from_slice(&sheet.bytes);
+                css_source.push(b'\n');
+            }
+        }
+        if css_source.is_empty() {
+            css_source.extend_from_slice(sample_css_bytes);
+        }
+
+        let stylesheet = Stylesheet::parse(&css_source);
         let styled =
             crate::style::resolve_styles_with_viewport(&dom, &stylesheet, html_bytes, viewport_w);
 
@@ -142,54 +154,87 @@ impl AsteriaWindow {
 
 // ─── Batch Builder Helper ─────────────────────────────────────────
 
-fn build_rect_batch(scene: &SceneGraph, scroll_y: f32, vp_w: f32) -> BatchBuilder {
+fn build_rect_batch(scene: &SceneGraph, scroll_y: f32, vp_w: f32, vp_h: f32) -> BatchBuilder {
     let mut cmd_builder = CommandBuilder::new();
     cmd_builder.build_from_scene(scene);
 
-    // Offset webpage content by HEADER_HEIGHT and scroll position
+    let top_clip = HEADER_HEIGHT;
+    let bottom_clip = (vp_h - STATUS_BAR_HEIGHT).max(HEADER_HEIGHT);
+
+    // Canvas background fill: Find the canvas/body background color from the scene (or fallback to #1e1e2e)
+    let canvas_bg = scene
+        .nodes
+        .iter()
+        .enumerate()
+        .find_map(|(i, n)| {
+            if matches!(n.kind, crate::scene::SceneNodeKind::SolidRect)
+                && n.rect.x <= 0.0
+                && n.rect.y <= 0.0
+                && n.rect.width > 50.0
+            {
+                Some(scene.colors[i])
+            } else {
+                None
+            }
+        })
+        .unwrap_or([0.118, 0.118, 0.180, 1.0]); // Catppuccin Mocha Base #1e1e2e
+
+    let mut batch = BatchBuilder::new();
+
+    // Flood the entire content viewport with the canvas background
+    batch.add_quad_direct(
+        0.0,
+        top_clip,
+        vp_w,
+        (bottom_clip - top_clip).max(0.0),
+        canvas_bg,
+    );
+
+    // Offset webpage content by HEADER_HEIGHT and scroll position, and clip to content bounds
     let scrolled: Vec<_> = cmd_builder
         .commands
-        .iter()
-        .map(|c| match c {
+        .into_iter()
+        .filter_map(|c| match c {
             RenderCommand::SolidRect { rect, rgba } => {
-                let mut r = *rect;
+                let mut r = rect;
                 r[1] = r[1] + HEADER_HEIGHT - scroll_y;
-                RenderCommand::SolidRect {
-                    rect: r,
-                    rgba: *rgba,
+
+                let r_top = r[1];
+                let r_bottom = r[1] + r[3];
+                if r_bottom <= top_clip || r_top >= bottom_clip {
+                    return None;
                 }
+                let visible_top = r_top.max(top_clip);
+                let visible_bottom = r_bottom.min(bottom_clip);
+                r[1] = visible_top;
+                r[3] = (visible_bottom - visible_top).max(0.0);
+                Some(RenderCommand::SolidRect { rect: r, rgba })
             }
-            RenderCommand::Text {
-                text,
-                rect,
-                rgba,
-                font_size,
-            } => {
-                let mut r = *rect;
-                r[1] = r[1] + HEADER_HEIGHT - scroll_y;
-                RenderCommand::Text {
-                    text: text.clone(),
-                    rect: r,
-                    rgba: *rgba,
-                    font_size: *font_size,
-                }
-            }
+            // Text is rendered via TextPass (glyphon)
+            RenderCommand::Text { .. } => None,
         })
         .collect();
 
-    let planned = BatchPlanner::plan(&scrolled);
-    let mut batch = BatchBuilder::new();
-    if let Some(rect_cmds) = planned.first() {
-        let owned: Vec<RenderCommand> = rect_cmds.iter().map(|&c| c.clone()).collect();
-        batch.append_batches(&owned, vp_w);
-    }
+    batch.append_batches(&scrolled, vp_w);
     batch
 }
 
 // ─── Text Pass Population ─────────────────────────────────────────
 
-fn populate_text_pass(text_pass: &mut TextPass, scene: &SceneGraph, scroll_y: f32) {
+fn populate_text_pass(
+    text_pass: &mut TextPass,
+    scene: &SceneGraph,
+    scroll_y: f32,
+    vp_w: f32,
+    vp_h: f32,
+) {
     text_pass.clear();
+    let bounds = [
+        0,
+        HEADER_HEIGHT as i32,
+        vp_w as i32,
+        (vp_h - STATUS_BAR_HEIGHT).max(HEADER_HEIGHT) as i32,
+    ];
     for (i, node) in scene.nodes.iter().enumerate() {
         if let crate::scene::SceneNodeKind::Text { font_size } = node.kind
             && let Some(text_run) = &scene.texts[i]
@@ -197,7 +242,13 @@ fn populate_text_pass(text_pass: &mut TextPass, scene: &SceneGraph, scroll_y: f3
             let color = scene.colors[i];
             // Offset webpage text by HEADER_HEIGHT and scroll position
             let y = node.rect.y + HEADER_HEIGHT - scroll_y;
-            text_pass.add_text(&text_run.text, [node.rect.x, y], font_size, color);
+            text_pass.add_text_clipped(
+                &text_run.text,
+                [node.rect.x, y],
+                font_size,
+                color,
+                Some(bounds),
+            );
         }
     }
 }
@@ -241,10 +292,13 @@ pub fn run_window_loop(initial_scene: SceneGraph, tab_manager: TabManager) {
     shell_ui.sync_with_tab_url(&asteria_window.tab_manager.active_tab().url);
 
     let mut render_graph = RenderGraph::new();
-    render_graph.add_pass(Box::new(RectPass::new(
-        &backend.device,
-        backend.config.format,
-    )));
+    let mut rect_pass = RectPass::new(&backend.device, backend.config.format);
+    rect_pass.update_viewport(
+        &backend.queue,
+        backend.config.width as f32,
+        backend.config.height as f32,
+    );
+    render_graph.add_pass(Box::new(rect_pass));
     render_graph.add_pass(Box::new(ImagePass::new(
         &backend.device,
         backend.config.format,
@@ -268,11 +322,19 @@ pub fn run_window_loop(initial_scene: SceneGraph, tab_manager: TabManager) {
                     WindowEvent::Resized(physical_size) => {
                         backend.resize(physical_size);
 
-                        if let Some(tp) =
-                            render_graph.pass_downcast_mut::<TextPass>(TEXT_PASS_INDEX)
-                        {
+                        let vp_w = backend.config.width as f32;
+                        let vp_h = backend.config.height as f32;
+
+                        if let Some(rp) = render_graph.find_pass_mut::<RectPass>() {
+                            rp.update_viewport(&backend.queue, vp_w, vp_h);
+                        }
+
+                        if let Some(tp) = render_graph.find_pass_mut::<TextPass>() {
                             tp.resize(backend.config.width, backend.config.height);
                         }
+
+                        // Rebuild scene synchronously on resize to adapt to new layout width
+                        scene = asteria_window.build_active_scene(None);
 
                         needs_redraw = true;
                         asteria_window.window.request_redraw();
@@ -652,8 +714,8 @@ pub fn run_window_loop(initial_scene: SceneGraph, tab_manager: TabManager) {
                         let vp_w = asteria_window.window.inner_size().width as f32;
                         let vp_h = asteria_window.window.inner_size().height as f32;
 
-                        // Build webpage rect batch (already offset by HEADER_HEIGHT)
-                        let mut new_batch = build_rect_batch(&scene, current_scroll_y, vp_w);
+                        // Build webpage rect batch (canvas fill, offset by HEADER_HEIGHT, and clipped)
+                        let mut new_batch = build_rect_batch(&scene, current_scroll_y, vp_w, vp_h);
 
                         // Overlay shell chrome rects on top
                         shell_ui.render_shell_rects(
@@ -663,17 +725,14 @@ pub fn run_window_loop(initial_scene: SceneGraph, tab_manager: TabManager) {
                             &asteria_window.tab_manager,
                         );
 
-                        if let Some(rp) =
-                            render_graph.pass_downcast_mut::<RectPass>(RECT_PASS_INDEX)
-                        {
+                        if let Some(rp) = render_graph.find_pass_mut::<RectPass>() {
+                            rp.update_viewport(&backend.queue, vp_w, vp_h);
                             rp.update_buffers(&backend.device, &new_batch);
                         }
 
-                        if let Some(tp) =
-                            render_graph.pass_downcast_mut::<TextPass>(TEXT_PASS_INDEX)
-                        {
-                            // Populate webpage text (already offset)
-                            populate_text_pass(tp, &scene, current_scroll_y);
+                        if let Some(tp) = render_graph.find_pass_mut::<TextPass>() {
+                            // Populate webpage text (offset and clipped to content viewport)
+                            populate_text_pass(tp, &scene, current_scroll_y, vp_w, vp_h);
 
                             // Overlay shell chrome text on top
                             let can_back = asteria_window

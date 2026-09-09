@@ -120,6 +120,7 @@ pub enum PipelineStage {
         proxy: Option<
             winit::event_loop::EventLoopProxy<crate::renderer::window::window::AsteriaUserEvent>,
         >,
+        viewport_size: Option<(f32, f32)>,
     },
     /// Tokenize and parse CSS bytes into a Stylesheet
     ParseCss { url: String, bytes: Vec<u8> },
@@ -320,17 +321,34 @@ fn execute_stage(stage: PipelineStage) -> Result<TaskResult, String> {
                     .map_err(|e| e.to_string())
             }
         }
-        PipelineStage::ParseHtml { url, bytes, proxy } => {
+        PipelineStage::ParseHtml {
+            url,
+            bytes,
+            proxy,
+            viewport_size,
+        } => {
             let mut processor = crate::streaming_parser::StreamingHtmlProcessor::new();
             let _ = processor.receive_network_chunk(&bytes, true);
             let dom = processor.finish();
 
             if let Some(p) = proxy {
-                let sample_css_bytes = b"body { background-color: #1e1e2e; color: #cdd6f4; margin: 0; } h1 { color: #89b4fa; font-size: 24px; margin: 10px; } p { color: #a6adc8; font-size: 16px; margin: 5px; } div { background-color: #313244; padding: 10px; }";
-                let stylesheet = crate::css_parser::Stylesheet::parse(sample_css_bytes);
-                let styled = crate::style::resolve_styles(&dom, &stylesheet, &bytes);
+                let mut loader = crate::loader::ResourceLoader::new();
+                let html_str = std::str::from_utf8(&bytes).unwrap_or("");
+                let resources = loader.load_html_string(html_str, &url);
+                let mut css_bytes = Vec::new();
+                for sheet in &resources.stylesheets {
+                    css_bytes.extend_from_slice(&sheet.bytes);
+                    css_bytes.push(b'\n');
+                }
+                if css_bytes.is_empty() {
+                    css_bytes.extend_from_slice(b"body { background-color: #1e1e2e; color: #cdd6f4; margin: 0; } h1 { color: #89b4fa; font-size: 24px; margin: 10px; } p { color: #a6adc8; font-size: 16px; margin: 5px; } div { background-color: #313244; padding: 10px; }");
+                }
+                let stylesheet = crate::css_parser::Stylesheet::parse(&css_bytes);
+                let (vp_w, vp_h) = viewport_size.unwrap_or((800.0, 600.0));
+                let styled =
+                    crate::style::resolve_styles_with_viewport(&dom, &stylesheet, &bytes, vp_w);
                 if let Some(layout_tree) =
-                    crate::layout::layout_document(&styled, &dom, &bytes, 800.0, 600.0)
+                    crate::layout::layout_document(&styled, &dom, &bytes, vp_w, vp_h)
                 {
                     let display_list = crate::paint::build_display_list(&layout_tree, &dom, &bytes);
                     let scene = crate::scene::build_scene_graph(&display_list, 256.0);
@@ -415,6 +433,7 @@ mod tests {
                 url: "test.html".to_string(),
                 bytes: html,
                 proxy: None,
+                viewport_size: None,
             })
             .expect("Schedule failed");
 
@@ -498,6 +517,7 @@ mod tests {
                 url: "valid.html".to_string(),
                 bytes: html,
                 proxy: None,
+                viewport_size: None,
             })
             .expect("Schedule failed");
 

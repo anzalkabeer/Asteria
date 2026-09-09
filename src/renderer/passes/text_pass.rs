@@ -4,13 +4,20 @@ use glyphon::{
     TextAtlas, TextBounds, TextRenderer, Viewport,
 };
 
+struct TextBufferItem {
+    buffer: Buffer,
+    pos: [f32; 2],
+    color: Color,
+    bounds: Option<[i32; 4]>,
+}
+
 pub struct TextPass {
     font_system: FontSystem,
     swash_cache: SwashCache,
     atlas: TextAtlas,
     renderer: TextRenderer,
     viewport: Viewport,
-    buffers: Vec<(Buffer, [f32; 2], Color)>,
+    buffers: Vec<TextBufferItem>,
     width: u32,
     height: u32,
 }
@@ -45,6 +52,17 @@ impl TextPass {
     }
 
     pub fn add_text(&mut self, text: &str, pos: [f32; 2], font_size: f32, color: [f32; 4]) {
+        self.add_text_clipped(text, pos, font_size, color, None);
+    }
+
+    pub fn add_text_clipped(
+        &mut self,
+        text: &str,
+        pos: [f32; 2],
+        font_size: f32,
+        color: [f32; 4],
+        bounds: Option<[i32; 4]>,
+    ) {
         let line_height = font_size * 1.2;
         let mut buffer = Buffer::new(&mut self.font_system, Metrics::new(font_size, line_height));
 
@@ -65,7 +83,12 @@ impl TextPass {
         buffer.set_text(&mut self.font_system, text, Attrs::new(), Shaping::Advanced);
         buffer.shape_until_scroll(&mut self.font_system, false);
 
-        self.buffers.push((buffer, pos, glyphon_color));
+        self.buffers.push(TextBufferItem {
+            buffer,
+            pos,
+            color: glyphon_color,
+            bounds,
+        });
     }
 
     pub fn resize(&mut self, width: u32, height: u32) {
@@ -91,19 +114,30 @@ impl RenderPass for TextPass {
         let text_areas: Vec<TextArea> = self
             .buffers
             .iter()
-            .map(|(buffer, pos, color)| TextArea {
-                buffer,
-                left: pos[0],
-                top: pos[1],
-                scale: 1.0,
-                bounds: TextBounds {
-                    left: 0,
-                    top: 0,
-                    right: self.width as i32,
-                    bottom: self.height as i32,
-                },
-                default_color: *color,
-                custom_glyphs: &[],
+            .map(|item| {
+                let bounds = match item.bounds {
+                    Some([l, t, r, b]) => TextBounds {
+                        left: l,
+                        top: t,
+                        right: r,
+                        bottom: b,
+                    },
+                    None => TextBounds {
+                        left: 0,
+                        top: 0,
+                        right: self.width as i32,
+                        bottom: self.height as i32,
+                    },
+                };
+                TextArea {
+                    buffer: &item.buffer,
+                    left: item.pos[0],
+                    top: item.pos[1],
+                    scale: 1.0,
+                    bounds,
+                    default_color: item.color,
+                    custom_glyphs: &[],
+                }
             })
             .collect();
 

@@ -698,7 +698,7 @@ impl ShellUiState {
             badge,
             [badge_x, status_text_y],
             11.0,
-            ShellTheme::TEXT_DISABLED,
+            ShellTheme::TEXT_SECONDARY,
         );
     }
 }

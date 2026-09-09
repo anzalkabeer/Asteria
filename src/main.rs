@@ -65,6 +65,7 @@ fn main() {
             url: active_tab.url.clone(),
             bytes: bytes.to_vec(),
             proxy: None,
+            viewport_size: None,
         })
         .ok();
 

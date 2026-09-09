@@ -6,6 +6,8 @@ pub struct RectPass {
     pipeline: wgpu::RenderPipeline,
     vertex_buffer: Option<wgpu::Buffer>,
     index_buffer: Option<wgpu::Buffer>,
+    uniform_buffer: wgpu::Buffer,
+    bind_group: wgpu::BindGroup,
     num_indices: u32,
 }
 
@@ -16,10 +18,39 @@ impl RectPass {
             source: wgpu::ShaderSource::Wgsl(include_str!("shader.wgsl").into()),
         });
 
+        let uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Rect Viewport Buffer"),
+            contents: bytemuck::cast_slice(&[800.0_f32, 600.0, 0.0, 0.0]),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        });
+
+        let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("Rect Viewport Layout"),
+            entries: &[wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStages::VERTEX,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Uniform,
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            }],
+        });
+
+        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("Rect Viewport Bind Group"),
+            layout: &bind_group_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: uniform_buffer.as_entire_binding(),
+            }],
+        });
+
         let render_pipeline_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some("Rect Pipeline Layout"),
-                bind_group_layouts: &[],
+                bind_group_layouts: &[&bind_group_layout],
                 push_constant_ranges: &[],
             });
 
@@ -69,8 +100,20 @@ impl RectPass {
             pipeline,
             vertex_buffer: None,
             index_buffer: None,
+            uniform_buffer,
+            bind_group,
             num_indices: 0,
         }
+    }
+
+    pub fn update_viewport(&mut self, queue: &wgpu::Queue, width: f32, height: f32) {
+        let w = width.max(1.0);
+        let h = height.max(1.0);
+        queue.write_buffer(
+            &self.uniform_buffer,
+            0,
+            bytemuck::cast_slice(&[w, h, 0.0, 0.0]),
+        );
     }
 
     pub fn update_buffers(&mut self, device: &wgpu::Device, batch: &BatchBuilder) {
@@ -109,6 +152,7 @@ impl RenderPass for RectPass {
         if self.num_indices > 0 {
             if let (Some(vb), Some(ib)) = (&self.vertex_buffer, &self.index_buffer) {
                 pass.set_pipeline(&self.pipeline);
+                pass.set_bind_group(0, &self.bind_group, &[]);
                 pass.set_vertex_buffer(0, vb.slice(..));
                 pass.set_index_buffer(ib.slice(..), wgpu::IndexFormat::Uint32);
                 pass.draw_indexed(0..self.num_indices, 0, 0..1);

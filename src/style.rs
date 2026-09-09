@@ -935,38 +935,8 @@ fn apply_user_agent_defaults(
         }
     }
 
-    if !specified.contains_key("background-color") {
-        match tag_name {
-            "body" | "div" => {
-                computed.background_color = values::Color::rgb(248, 250, 252);
-            }
-            "h1" => {
-                computed.background_color = values::Color::rgb(240, 249, 255);
-            }
-            "img" => {
-                computed.background_color = values::Color::rgb(226, 232, 240);
-            }
-            _ => {}
-        }
-    }
-
-    if !specified.contains_key("color")
-        && computed.color == values::Color::BLACK
-        && tag_name == "h1"
-    {
-        computed.color = values::Color::rgb(3, 105, 161);
-    }
-
-    if !specified.contains_key("border") && !specified.contains_key("border-color") {
-        match tag_name {
-            "h1" => {
-                computed.border_color = values::Color::rgb(2, 132, 199);
-            }
-            "div" | "img" | "hr" => {
-                computed.border_color = values::Color::rgb(203, 213, 225);
-            }
-            _ => {}
-        }
+    if !specified.contains_key("border") && !specified.contains_key("border-color") && tag_name == "hr" {
+        computed.border_color = values::Color::rgb(203, 213, 225);
     }
 
     if !specified.contains_key("border")
@@ -975,16 +945,9 @@ fn apply_user_agent_defaults(
         && !specified.contains_key("border-top-width")
         && !specified.contains_key("border-right-width")
         && !specified.contains_key("border-bottom-width")
+        && tag_name == "hr"
     {
-        match tag_name {
-            "h1" => {
-                computed.border_width.left = 4.0;
-            }
-            "div" | "img" | "hr" => {
-                computed.border_width = values::Edges::uniform(1.0);
-            }
-            _ => {}
-        }
+        computed.border_width = values::Edges::uniform(1.0);
     }
 
     if !specified.contains_key("border")
