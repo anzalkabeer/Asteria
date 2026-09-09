@@ -108,6 +108,9 @@ impl TaskScheduler {
 
 // ─── Concurrent Threaded Pipeline Scheduler ───────────────────────
 
+/// Default fallback stylesheet used when a document contains no external or inline styles.
+pub const DEFAULT_FALLBACK_CSS: &[u8] = b"body { background-color: #1e1e2e; color: #cdd6f4; } h1 { color: #89b4fa; font-size: 24px; } p { color: #a6adc8; font-size: 16px; } div { background-color: #313244; }";
+
 /// Typed pipeline stages that can be dispatched asynchronously to worker threads.
 #[derive(Debug)]
 pub enum PipelineStage {
@@ -341,7 +344,7 @@ fn execute_stage(stage: PipelineStage) -> Result<TaskResult, String> {
                     css_bytes.push(b'\n');
                 }
                 if css_bytes.is_empty() {
-                    css_bytes.extend_from_slice(b"body { background-color: #1e1e2e; color: #cdd6f4; margin: 0; } h1 { color: #89b4fa; font-size: 24px; margin: 10px; } p { color: #a6adc8; font-size: 16px; margin: 5px; } div { background-color: #313244; padding: 10px; }");
+                    css_bytes.extend_from_slice(DEFAULT_FALLBACK_CSS);
                 }
                 let stylesheet = crate::css_parser::Stylesheet::parse(&css_bytes);
                 let (vp_w, vp_h) = viewport_size.unwrap_or((800.0, 600.0));

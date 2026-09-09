@@ -112,8 +112,6 @@ impl AsteriaWindow {
         let _ = processor.receive_network_chunk(html_bytes, true);
         let dom = processor.finish();
 
-        let sample_css_bytes = b"body { background-color: #1e1e2e; color: #cdd6f4; } h1 { color: #89b4fa; font-size: 24px; } p { color: #a6adc8; font-size: 16px; } div { background-color: #313244; }";
-
         let mut css_source = Vec::new();
         if let Some(res) = &active_tab.page_resources {
             for sheet in &res.stylesheets {
@@ -134,7 +132,7 @@ impl AsteriaWindow {
             }
         }
         if css_source.is_empty() {
-            css_source.extend_from_slice(sample_css_bytes);
+            css_source.extend_from_slice(crate::scheduler::DEFAULT_FALLBACK_CSS);
         }
 
         let stylesheet = Stylesheet::parse(&css_source);

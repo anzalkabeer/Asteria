@@ -52,7 +52,7 @@ fn main() {
 
     // ─── Async Scheduler Pipeline Stage Dispatch ──────────────────────
     let sample_html_bytes = b"<!DOCTYPE html><html><head><style>body { background-color: #1e1e2e; color: #cdd6f4; } h1 { color: #89b4fa; font-size: 24px; } p { color: #a6adc8; font-size: 16px; } div { background-color: #313244; }</style></head><body><h1>Asteria Browser Engine</h1><p>Hardware-accelerated GPU renderer running with wgpu + winit.</p><div><p>Interactive Viewport: Scroll, Hover, Click supported!</p></div></body></html>";
-    let sample_css_bytes = b"body { background-color: #1e1e2e; color: #cdd6f4; } h1 { color: #89b4fa; font-size: 24px; } p { color: #a6adc8; font-size: 16px; } div { background-color: #313244; }";
+    let sample_css_bytes = asteria::scheduler::DEFAULT_FALLBACK_CSS;
 
     let bytes = active_tab
         .page_resources
