@@ -21,6 +21,7 @@ pub mod renderer;
 pub mod scene;
 pub mod scheduler;
 pub mod segment;
+pub mod selection;
 pub mod shell;
 pub mod shell_ui;
 pub mod streaming_parser;

@@ -79,6 +79,8 @@ pub struct SceneNode {
     pub link_url: Option<String>,
     /// Active clip rectangle if this node is inside an overflow-hidden container
     pub clip: Option<Rect>,
+    /// 2D affine transformation matrix [a, b, c, d, tx, ty]
+    pub transform: [f32; 6],
 }
 
 impl Default for SceneNode {
@@ -93,6 +95,7 @@ impl Default for SceneNode {
             state: NodeState::Normal,
             link_url: None,
             clip: None,
+            transform: crate::values::IDENTITY_MATRIX,
         }
     }
 }
@@ -104,6 +107,8 @@ impl Default for SceneNode {
 pub struct TextRun {
     pub text: String,
     pub font_size: f32,
+    pub font_family: Vec<String>,
+    pub font_weight: f32,
 }
 
 // ─── Scene Graph (Flat Contiguous Storage) ───────────────────────
@@ -341,6 +346,7 @@ pub fn build_scene_graph(display_list: &DisplayList, segment_height: f32) -> Sce
     // Only SolidColor nodes (backgrounds) act as potential parents.
     let mut parent_stack: Vec<(SceneNodeId, Rect)> = Vec::new();
     let mut clip_stack: Vec<Rect> = Vec::new();
+    let mut transform_stack: Vec<[f32; 6]> = Vec::new();
 
     for cmd in &display_list.commands {
         let node_rect = cmd_bounding_rect(cmd);
@@ -356,6 +362,10 @@ pub fn build_scene_graph(display_list: &DisplayList, segment_height: f32) -> Sce
         }
         let parent_id = parent_stack.last().map(|(id, _)| *id);
         let active_clip = clip_stack.last().copied();
+        let active_transform = transform_stack
+            .last()
+            .copied()
+            .unwrap_or(crate::values::IDENTITY_MATRIX);
 
         match cmd {
             DisplayCommand::SolidColor {
@@ -375,6 +385,7 @@ pub fn build_scene_graph(display_list: &DisplayList, segment_height: f32) -> Sce
                         state: NodeState::Normal,
                         link_url: link_url.clone(),
                         clip: active_clip,
+                        transform: active_transform,
                     },
                     color_to_rgba(color),
                     None,
@@ -401,6 +412,7 @@ pub fn build_scene_graph(display_list: &DisplayList, segment_height: f32) -> Sce
                         state: NodeState::Normal,
                         link_url: link_url.clone(),
                         clip: active_clip,
+                        transform: active_transform,
                     },
                     color_to_rgba(color),
                     None,
@@ -432,6 +444,7 @@ pub fn build_scene_graph(display_list: &DisplayList, segment_height: f32) -> Sce
                         state: NodeState::Normal,
                         link_url: link_url.clone(),
                         clip: active_clip,
+                        transform: active_transform,
                     },
                     color_to_rgba(&shadow.color),
                     None,
@@ -447,6 +460,16 @@ pub fn build_scene_graph(display_list: &DisplayList, segment_height: f32) -> Sce
             }
             DisplayCommand::PopClip => {
                 clip_stack.pop();
+            }
+            DisplayCommand::PushTransform { transform } => {
+                let current_m = match transform_stack.last() {
+                    Some(parent_m) => crate::values::multiply_affine(parent_m, transform),
+                    None => *transform,
+                };
+                transform_stack.push(current_m);
+            }
+            DisplayCommand::PopTransform => {
+                transform_stack.pop();
             }
             DisplayCommand::Border {
                 color,
@@ -468,6 +491,7 @@ pub fn build_scene_graph(display_list: &DisplayList, segment_height: f32) -> Sce
                         state: NodeState::Normal,
                         link_url: link_url.clone(),
                         clip: active_clip,
+                        transform: active_transform,
                     },
                     color_to_rgba(color),
                     None,
@@ -481,6 +505,8 @@ pub fn build_scene_graph(display_list: &DisplayList, segment_height: f32) -> Sce
                 target_width,
                 font_size,
                 line_height,
+                font_family,
+                font_weight,
                 color,
                 link_url,
             } => {
@@ -499,11 +525,14 @@ pub fn build_scene_graph(display_list: &DisplayList, segment_height: f32) -> Sce
                         state: NodeState::Normal,
                         link_url: link_url.clone(),
                         clip: active_clip,
+                        transform: active_transform,
                     },
                     color_to_rgba(color),
                     Some(TextRun {
                         text: text.clone(),
                         font_size: *font_size,
+                        font_family: font_family.clone(),
+                        font_weight: *font_weight,
                     }),
                 );
                 z_order += 1;
@@ -534,11 +563,14 @@ pub fn build_scene_graph(display_list: &DisplayList, segment_height: f32) -> Sce
                         state: NodeState::Normal,
                         link_url: link_url.clone(),
                         clip: active_clip,
+                        transform: active_transform,
                     },
                     [1.0, 1.0, 1.0, 1.0], // White placeholder (texture replaces this)
                     Some(TextRun {
                         text: image_id.clone(),
                         font_size: 0.0,
+                        font_family: Vec::new(),
+                        font_weight: 400.0,
                     }),
                 );
                 z_order += 1;
@@ -591,6 +623,7 @@ fn cmd_bounding_rect(cmd: &DisplayCommand) -> Rect {
         }
         DisplayCommand::PushClip { rect } => *rect,
         DisplayCommand::PopClip => Rect::default(),
+        DisplayCommand::PushTransform { .. } | DisplayCommand::PopTransform => Rect::default(),
         DisplayCommand::Text {
             text,
             x,

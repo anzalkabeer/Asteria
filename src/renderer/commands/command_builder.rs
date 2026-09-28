@@ -5,6 +5,7 @@ pub enum RenderCommand {
     SolidRect {
         rect: [f32; 4],
         rgba: [f32; 4],
+        transform: [f32; 6],
     },
     Text {
         text: String,
@@ -37,6 +38,7 @@ impl CommandBuilder {
 
         for (i, node) in scene.nodes.iter().enumerate() {
             let color = scene.colors[i];
+            let transform = node.transform;
             match &node.kind {
                 crate::scene::SceneNodeKind::SolidRect
                 | crate::scene::SceneNodeKind::RoundedRect { .. }
@@ -44,6 +46,7 @@ impl CommandBuilder {
                     self.commands.push(RenderCommand::SolidRect {
                         rect: [node.rect.x, node.rect.y, node.rect.width, node.rect.height],
                         rgba: color,
+                        transform,
                     });
                 }
                 crate::scene::SceneNodeKind::Border { widths } => {
@@ -56,24 +59,28 @@ impl CommandBuilder {
                         self.commands.push(RenderCommand::SolidRect {
                             rect: [x, y, w, widths.top],
                             rgba: color,
+                            transform,
                         });
                     }
                     if widths.bottom > 0.0 {
                         self.commands.push(RenderCommand::SolidRect {
                             rect: [x, y + (h - widths.bottom).max(0.0), w, widths.bottom],
                             rgba: color,
+                            transform,
                         });
                     }
                     if widths.left > 0.0 {
                         self.commands.push(RenderCommand::SolidRect {
                             rect: [x, y, widths.left, h],
                             rgba: color,
+                            transform,
                         });
                     }
                     if widths.right > 0.0 {
                         self.commands.push(RenderCommand::SolidRect {
                             rect: [x + (w - widths.right).max(0.0), y, widths.right, h],
                             rgba: color,
+                            transform,
                         });
                     }
                 }
@@ -96,22 +103,27 @@ impl CommandBuilder {
                     self.commands.push(RenderCommand::SolidRect {
                         rect: [x, y, w, h],
                         rgba: [0.88, 0.91, 0.94, 1.0],
+                        transform,
                     });
                     self.commands.push(RenderCommand::SolidRect {
                         rect: [x, y, w, 1.0],
                         rgba: [0.80, 0.84, 0.88, 1.0],
+                        transform,
                     });
                     self.commands.push(RenderCommand::SolidRect {
                         rect: [x, y + (h - 1.0).max(0.0), w, 1.0],
                         rgba: [0.80, 0.84, 0.88, 1.0],
+                        transform,
                     });
                     self.commands.push(RenderCommand::SolidRect {
                         rect: [x, y, 1.0, h],
                         rgba: [0.80, 0.84, 0.88, 1.0],
+                        transform,
                     });
                     self.commands.push(RenderCommand::SolidRect {
                         rect: [x + (w - 1.0).max(0.0), y, 1.0, h],
                         rgba: [0.80, 0.84, 0.88, 1.0],
+                        transform,
                     });
 
                     if let Some(text_run) = &scene.texts[i] {

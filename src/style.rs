@@ -935,7 +935,10 @@ fn apply_user_agent_defaults(
         }
     }
 
-    if !specified.contains_key("border") && !specified.contains_key("border-color") && tag_name == "hr" {
+    if !specified.contains_key("border")
+        && !specified.contains_key("border-color")
+        && tag_name == "hr"
+    {
         computed.border_color = values::Color::rgb(203, 213, 225);
     }
 
@@ -1089,6 +1092,8 @@ fn copy_property(child: &mut ComputedStyle, parent: &ComputedStyle, prop: Proper
         PropertyId::BorderRadius => child.border_radius = parent.border_radius,
         PropertyId::BoxShadow => child.box_shadow = parent.box_shadow.clone(),
         PropertyId::Overflow => child.overflow = parent.overflow,
+        PropertyId::FontFamily => child.font_family = parent.font_family.clone(),
+        PropertyId::Transform => child.transform = parent.transform.clone(),
     }
 }
 

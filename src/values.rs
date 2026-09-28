@@ -394,6 +394,95 @@ impl BoxShadow {
     }
 }
 
+// ─── Transform Types (2D CSS Transforms) ──────────────────────────
+
+/// CSS 2D transform function declaration.
+#[derive(Debug, Clone, PartialEq)]
+pub enum TransformFunction {
+    Translate(f32, f32),
+    TranslateX(f32),
+    TranslateY(f32),
+    Scale(f32, f32),
+    ScaleX(f32),
+    ScaleY(f32),
+    Rotate(f32),    // angle in radians
+    Skew(f32, f32), // x and y angles in radians
+    SkewX(f32),
+    SkewY(f32),
+    Matrix([f32; 6]), // [a, b, c, d, tx, ty]
+}
+
+impl TransformFunction {
+    /// Convert this transform function into a standard 2D affine 3x2 matrix [a, b, c, d, tx, ty].
+    pub fn to_matrix(&self) -> [f32; 6] {
+        match self {
+            TransformFunction::Translate(tx, ty) => [1.0, 0.0, 0.0, 1.0, *tx, *ty],
+            TransformFunction::TranslateX(tx) => [1.0, 0.0, 0.0, 1.0, *tx, 0.0],
+            TransformFunction::TranslateY(ty) => [1.0, 0.0, 0.0, 1.0, 0.0, *ty],
+            TransformFunction::Scale(sx, sy) => [*sx, 0.0, 0.0, *sy, 0.0, 0.0],
+            TransformFunction::ScaleX(sx) => [*sx, 0.0, 0.0, 1.0, 0.0, 0.0],
+            TransformFunction::ScaleY(sy) => [1.0, 0.0, 0.0, *sy, 0.0, 0.0],
+            TransformFunction::Rotate(rad) => {
+                let (sin, cos) = rad.sin_cos();
+                [cos, sin, -sin, cos, 0.0, 0.0]
+            }
+            TransformFunction::Skew(ax, ay) => [1.0, ay.tan(), ax.tan(), 1.0, 0.0, 0.0],
+            TransformFunction::SkewX(ax) => [1.0, 0.0, ax.tan(), 1.0, 0.0, 0.0],
+            TransformFunction::SkewY(ay) => [1.0, ay.tan(), 0.0, 1.0, 0.0, 0.0],
+            TransformFunction::Matrix(m) => *m,
+        }
+    }
+}
+
+/// Standard 2D identity affine matrix: [1, 0, 0, 1, 0, 0]
+pub const IDENTITY_MATRIX: [f32; 6] = [1.0, 0.0, 0.0, 1.0, 0.0, 0.0];
+
+/// Check if an affine matrix is approximately identity
+pub fn is_identity_matrix(m: &[f32; 6]) -> bool {
+    (m[0] - 1.0).abs() < 1e-6
+        && m[1].abs() < 1e-6
+        && m[2].abs() < 1e-6
+        && (m[3] - 1.0).abs() < 1e-6
+        && m[4].abs() < 1e-6
+        && m[5].abs() < 1e-6
+}
+
+/// Multiply two 2D affine 3x2 matrices: m1 * m2
+pub fn multiply_affine(m1: &[f32; 6], m2: &[f32; 6]) -> [f32; 6] {
+    if is_identity_matrix(m1) {
+        return *m2;
+    }
+    if is_identity_matrix(m2) {
+        return *m1;
+    }
+    [
+        m1[0] * m2[0] + m1[2] * m2[1],
+        m1[1] * m2[0] + m1[3] * m2[1],
+        m1[0] * m2[2] + m1[2] * m2[3],
+        m1[1] * m2[2] + m1[3] * m2[3],
+        m1[0] * m2[4] + m1[2] * m2[5] + m1[4],
+        m1[1] * m2[4] + m1[3] * m2[5] + m1[5],
+    ]
+}
+
+/// Compose a sequence of transform functions left-to-right per CSS specification.
+pub fn compose_transform(functions: &[TransformFunction]) -> [f32; 6] {
+    let mut current = IDENTITY_MATRIX;
+    for func in functions {
+        let m = func.to_matrix();
+        current = multiply_affine(&current, &m);
+    }
+    current
+}
+
+/// Transform point (x, y) by 2D affine matrix [a, b, c, d, tx, ty].
+pub fn transform_point(m: &[f32; 6], x: f32, y: f32) -> (f32, f32) {
+    if is_identity_matrix(m) {
+        return (x, y);
+    }
+    (m[0] * x + m[2] * y + m[4], m[1] * x + m[3] * y + m[5])
+}
+
 // ─── Flexbox Types ───────────────────────────────────────────────
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -640,6 +729,7 @@ pub struct ComputedStyle {
     pub font_weight: f32, // 400 = normal, 700 = bold
     pub text_align: TextAlign,
     pub line_height: f32, // px
+    pub font_family: Vec<String>,
 
     // Flexbox
     pub flex_direction: FlexDirection,
@@ -674,6 +764,7 @@ pub struct ComputedStyle {
     pub border_radius: BorderRadius,
     pub box_shadow: Vec<BoxShadow>,
     pub overflow: Overflow,
+    pub transform: Vec<TransformFunction>,
 
     // CSS Variables
     pub variables: std::collections::HashMap<String, String>,
@@ -702,6 +793,7 @@ impl Default for ComputedStyle {
             background_color: Color::TRANSPARENT,
             font_size: 16.0,    // browser default
             font_weight: 400.0, // normal
+            font_family: vec!["sans-serif".to_string()],
             text_align: TextAlign::Left,
             line_height: 19.2, // 1.2 * 16px default
             flex_direction: FlexDirection::Row,
@@ -736,6 +828,7 @@ impl Default for ComputedStyle {
             border_radius: BorderRadius::ZERO,
             box_shadow: Vec::new(),
             overflow: Overflow::Visible,
+            transform: Vec::new(),
             variables: std::collections::HashMap::new(),
         }
     }
@@ -844,6 +937,14 @@ impl ComputedStyle {
                 }
             }
             PropertyId::Overflow => format!("{}", self.overflow),
+            PropertyId::FontFamily => self.font_family.join(", "),
+            PropertyId::Transform => {
+                if self.transform.is_empty() {
+                    "none".to_string()
+                } else {
+                    "<transform>".to_string()
+                }
+            }
         }
     }
 
@@ -999,6 +1100,8 @@ impl ComputedStyle {
                 self.box_shadow = parse_box_shadow(value, self.font_size, root_font_size)
             }
             PropertyId::Overflow => self.overflow = parse_overflow(value),
+            PropertyId::FontFamily => self.font_family = parse_font_family(value),
+            PropertyId::Transform => self.transform = parse_transform(value),
         }
     }
 }
@@ -2414,6 +2517,148 @@ fn parse_single_box_shadow(value: &str, em_base: f32, rem_base: f32) -> Option<B
     })
 }
 
+/// Parse a CSS font-family comma-separated list into individual family name strings.
+pub fn parse_font_family(value: &str) -> Vec<String> {
+    value
+        .split(',')
+        .map(|s| {
+            let s = s.trim();
+            if (s.starts_with('"') && s.ends_with('"'))
+                || (s.starts_with('\'') && s.ends_with('\''))
+            {
+                if s.len() >= 2 {
+                    s[1..s.len() - 1].trim().to_string()
+                } else {
+                    s.to_string()
+                }
+            } else {
+                s.to_string()
+            }
+        })
+        .filter(|s| !s.is_empty())
+        .collect()
+}
+
+/// Parse a CSS transform property string into a list of 2D transform functions.
+pub fn parse_transform(value: &str) -> Vec<TransformFunction> {
+    let mut functions = Vec::new();
+    let val = value.trim();
+    if val.eq_ignore_ascii_case("none") || val.is_empty() {
+        return functions;
+    }
+
+    let mut rest = val;
+    while let Some(open) = rest.find('(') {
+        let name_candidate = rest[..open].trim();
+        let name = name_candidate
+            .split_whitespace()
+            .last()
+            .unwrap_or(name_candidate);
+        let Some(close) = rest[open..].find(')') else {
+            break;
+        };
+        let args_str = &rest[open + 1..open + close];
+        let next_pos = open + close + 1;
+        rest = &rest[next_pos..];
+
+        let args: Vec<&str> = args_str
+            .split([',', ' '])
+            .map(|s| s.trim())
+            .filter(|s| !s.is_empty())
+            .collect();
+
+        let parse_angle = |s: &str| -> f32 {
+            let s = s.trim();
+            if let Some(deg) = s.strip_suffix("deg") {
+                deg.trim().parse::<f32>().unwrap_or(0.0).to_radians()
+            } else if let Some(rad) = s.strip_suffix("rad") {
+                rad.trim().parse::<f32>().unwrap_or(0.0)
+            } else if let Some(turn) = s.strip_suffix("turn") {
+                turn.trim().parse::<f32>().unwrap_or(0.0) * 2.0 * std::f32::consts::PI
+            } else if let Some(grad) = s.strip_suffix("grad") {
+                grad.trim().parse::<f32>().unwrap_or(0.0) * (std::f32::consts::PI / 200.0)
+            } else {
+                s.parse::<f32>().unwrap_or(0.0).to_radians()
+            }
+        };
+
+        let parse_len = |s: &str| -> f32 {
+            let s = s.trim().strip_suffix("px").unwrap_or(s.trim());
+            s.parse::<f32>().unwrap_or(0.0)
+        };
+
+        match name.to_ascii_lowercase().as_str() {
+            "translate" => {
+                let tx = args.first().map(|s| parse_len(s)).unwrap_or(0.0);
+                let ty = args.get(1).map(|s| parse_len(s)).unwrap_or(0.0);
+                functions.push(TransformFunction::Translate(tx, ty));
+            }
+            "translatex" => {
+                let tx = args.first().map(|s| parse_len(s)).unwrap_or(0.0);
+                functions.push(TransformFunction::TranslateX(tx));
+            }
+            "translatey" => {
+                let ty = args.first().map(|s| parse_len(s)).unwrap_or(0.0);
+                functions.push(TransformFunction::TranslateY(ty));
+            }
+            "scale" => {
+                let sx = args
+                    .first()
+                    .and_then(|s| s.parse::<f32>().ok())
+                    .unwrap_or(1.0);
+                let sy = args
+                    .get(1)
+                    .and_then(|s| s.parse::<f32>().ok())
+                    .unwrap_or(sx);
+                functions.push(TransformFunction::Scale(sx, sy));
+            }
+            "scalex" => {
+                let sx = args
+                    .first()
+                    .and_then(|s| s.parse::<f32>().ok())
+                    .unwrap_or(1.0);
+                functions.push(TransformFunction::ScaleX(sx));
+            }
+            "scaley" => {
+                let sy = args
+                    .first()
+                    .and_then(|s| s.parse::<f32>().ok())
+                    .unwrap_or(1.0);
+                functions.push(TransformFunction::ScaleY(sy));
+            }
+            "rotate" => {
+                let rad = args.first().map(|s| parse_angle(s)).unwrap_or(0.0);
+                functions.push(TransformFunction::Rotate(rad));
+            }
+            "skew" => {
+                let ax = args.first().map(|s| parse_angle(s)).unwrap_or(0.0);
+                let ay = args.get(1).map(|s| parse_angle(s)).unwrap_or(0.0);
+                functions.push(TransformFunction::Skew(ax, ay));
+            }
+            "skewx" => {
+                let ax = args.first().map(|s| parse_angle(s)).unwrap_or(0.0);
+                functions.push(TransformFunction::SkewX(ax));
+            }
+            "skewy" => {
+                let ay = args.first().map(|s| parse_angle(s)).unwrap_or(0.0);
+                functions.push(TransformFunction::SkewY(ay));
+            }
+            "matrix" if args.len() >= 6 => {
+                let a = args[0].parse::<f32>().unwrap_or(1.0);
+                let b = args[1].parse::<f32>().unwrap_or(0.0);
+                let c = args[2].parse::<f32>().unwrap_or(0.0);
+                let d = args[3].parse::<f32>().unwrap_or(1.0);
+                let tx = parse_len(args[4]);
+                let ty = parse_len(args[5]);
+                functions.push(TransformFunction::Matrix([a, b, c, d, tx, ty]));
+            }
+            _ => {}
+        }
+    }
+
+    functions
+}
+
 // ─── Tests ───────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -3131,5 +3376,43 @@ mod tests {
             16.0,
         );
         assert_eq!(style.border_spacing, 10.0);
+    }
+
+    #[test]
+    fn test_parse_font_family() {
+        let families = parse_font_family("\"Helvetica Neue\", Arial, sans-serif");
+        assert_eq!(families, vec!["Helvetica Neue", "Arial", "sans-serif"]);
+
+        let single = parse_font_family("monospace");
+        assert_eq!(single, vec!["monospace"]);
+
+        let with_single_quotes = parse_font_family("'Courier New', monospace");
+        assert_eq!(with_single_quotes, vec!["Courier New", "monospace"]);
+    }
+
+    #[test]
+    fn test_parse_transform_and_affine() {
+        let t = parse_transform("rotate(45deg) scale(2) translate(10px, 20px)");
+        assert_eq!(t.len(), 3);
+        match &t[0] {
+            TransformFunction::Rotate(rad) => {
+                assert!((rad - 45.0_f32.to_radians()).abs() < 1e-5);
+            }
+            _ => panic!("Expected Rotate"),
+        }
+        assert_eq!(t[1], TransformFunction::Scale(2.0, 2.0));
+        assert_eq!(t[2], TransformFunction::Translate(10.0, 20.0));
+
+        let m = compose_transform(&[
+            TransformFunction::Translate(10.0, 20.0),
+            TransformFunction::Scale(2.0, 3.0),
+        ]);
+        // Point (5, 5) transformed: first scale by (2, 3) -> (10, 15), then translate (10, 20) -> (20, 35)
+        let (px, py) = transform_point(&m, 5.0, 5.0);
+        assert!((px - 20.0).abs() < 1e-4);
+        assert!((py - 35.0).abs() < 1e-4);
+
+        let none = parse_transform("none");
+        assert!(none.is_empty());
     }
 }

@@ -32,7 +32,6 @@ pub enum AsteriaUserEvent {
 use crate::css_parser::Stylesheet;
 use crate::renderer::backend::wgpu_backend::WgpuBackend;
 use crate::renderer::commands::batch_builder::BatchBuilder;
-use crate::renderer::commands::command_builder::{CommandBuilder, RenderCommand};
 use crate::renderer::graph::render_graph::RenderGraph;
 use crate::renderer::passes::image_pass::ImagePass;
 use crate::renderer::passes::rect_pass::RectPass;
@@ -152,69 +151,25 @@ impl AsteriaWindow {
 
 // ─── Batch Builder Helper ─────────────────────────────────────────
 
-fn build_rect_batch(scene: &SceneGraph, scroll_y: f32, vp_w: f32, vp_h: f32) -> BatchBuilder {
-    let mut cmd_builder = CommandBuilder::new();
-    cmd_builder.build_from_scene(scene);
-
+fn build_rect_batch(
+    compositor: &crate::renderer::compositor::Compositor,
+    scene: &SceneGraph,
+    scroll_y: f32,
+    vp_w: f32,
+    vp_h: f32,
+    selection: &crate::selection::TextSelection,
+) -> BatchBuilder {
     let top_clip = HEADER_HEIGHT;
     let bottom_clip = (vp_h - STATUS_BAR_HEIGHT).max(HEADER_HEIGHT);
-
-    // Canvas background fill: Find the canvas/body background color from the scene (or fallback to #1e1e2e)
-    let canvas_bg = scene
-        .nodes
-        .iter()
-        .enumerate()
-        .find_map(|(i, n)| {
-            if matches!(n.kind, crate::scene::SceneNodeKind::SolidRect)
-                && n.rect.x <= 0.0
-                && n.rect.y <= 0.0
-                && n.rect.width > 50.0
-            {
-                Some(scene.colors[i])
-            } else {
-                None
-            }
-        })
-        .unwrap_or([0.118, 0.118, 0.180, 1.0]); // Catppuccin Mocha Base #1e1e2e
-
-    let mut batch = BatchBuilder::new();
-
-    // Flood the entire content viewport with the canvas background
-    batch.add_quad_direct(
-        0.0,
-        top_clip,
+    compositor.render_to_batch(
+        scene,
+        scroll_y,
         vp_w,
-        (bottom_clip - top_clip).max(0.0),
-        canvas_bg,
-    );
-
-    // Offset webpage content by HEADER_HEIGHT and scroll position, and clip to content bounds
-    let scrolled: Vec<_> = cmd_builder
-        .commands
-        .into_iter()
-        .filter_map(|c| match c {
-            RenderCommand::SolidRect { rect, rgba } => {
-                let mut r = rect;
-                r[1] = r[1] + HEADER_HEIGHT - scroll_y;
-
-                let r_top = r[1];
-                let r_bottom = r[1] + r[3];
-                if r_bottom <= top_clip || r_top >= bottom_clip {
-                    return None;
-                }
-                let visible_top = r_top.max(top_clip);
-                let visible_bottom = r_bottom.min(bottom_clip);
-                r[1] = visible_top;
-                r[3] = (visible_bottom - visible_top).max(0.0);
-                Some(RenderCommand::SolidRect { rect: r, rgba })
-            }
-            // Text is rendered via TextPass (glyphon)
-            RenderCommand::Text { .. } => None,
-        })
-        .collect();
-
-    batch.append_batches(&scrolled, vp_w);
-    batch
+        vp_h,
+        top_clip,
+        bottom_clip,
+        selection,
+    )
 }
 
 // ─── Text Pass Population ─────────────────────────────────────────
@@ -238,13 +193,21 @@ fn populate_text_pass(
             && let Some(text_run) = &scene.texts[i]
         {
             let color = scene.colors[i];
-            // Offset webpage text by HEADER_HEIGHT and scroll position
-            let y = node.rect.y + HEADER_HEIGHT - scroll_y;
-            text_pass.add_text_clipped(
+            let mut x = node.rect.x;
+            let mut y = node.rect.y + HEADER_HEIGHT - scroll_y;
+            if !crate::values::is_identity_matrix(&node.transform) {
+                let (tx, ty) =
+                    crate::values::transform_point(&node.transform, node.rect.x, node.rect.y);
+                x = tx;
+                y = ty + HEADER_HEIGHT - scroll_y;
+            }
+            text_pass.add_text_styled(
                 &text_run.text,
-                [node.rect.x, y],
+                [x, y],
                 font_size,
                 color,
+                &text_run.font_family,
+                text_run.font_weight,
                 Some(bounds),
             );
         }
@@ -285,6 +248,9 @@ pub fn run_window_loop(initial_scene: SceneGraph, tab_manager: TabManager) {
     let mut hovered_node: Option<SceneNodeId> = None;
     let mut needs_redraw = true;
     let mut shell_ui = ShellUiState::new();
+    let mut text_selection = crate::selection::TextSelection::new();
+    let mut compositor = crate::renderer::compositor::Compositor::new();
+    compositor.build_layers(&scene);
 
     // Sync omnibox with initial tab
     shell_ui.sync_with_tab_url(&asteria_window.tab_manager.active_tab().url);
@@ -333,6 +299,7 @@ pub fn run_window_loop(initial_scene: SceneGraph, tab_manager: TabManager) {
 
                         // Rebuild scene synchronously on resize to adapt to new layout width
                         scene = asteria_window.build_active_scene(None);
+                        compositor.build_layers(&scene);
 
                         needs_redraw = true;
                         asteria_window.window.request_redraw();
@@ -354,8 +321,44 @@ pub fn run_window_loop(initial_scene: SceneGraph, tab_manager: TabManager) {
                     } => {
                         let ctrl = asteria_window.modifiers.control_key();
                         let alt = asteria_window.modifiers.alt_key();
+                        let ctrl_or_super = ctrl || asteria_window.modifiers.super_key();
 
                         let mut handled = false;
+
+                        // Clipboard Copy: Ctrl+C / Cmd+C & Select All: Ctrl+A / Cmd+A
+                        if ctrl_or_super && !alt {
+                            match &logical_key {
+                                Key::Character(c)
+                                    if c.eq_ignore_ascii_case("c")
+                                        && text_selection.has_selection() =>
+                                {
+                                    if let Ok(copied) = text_selection.copy_to_clipboard(&scene) {
+                                        shell_ui.status_message = Some(format!(
+                                            "Copied {} chars to clipboard",
+                                            copied.len()
+                                        ));
+                                        needs_redraw = true;
+                                        asteria_window.window.request_redraw();
+                                        return;
+                                    }
+                                }
+                                Key::Character(c)
+                                    if c.eq_ignore_ascii_case("a") && !shell_ui.omnibox_focused =>
+                                {
+                                    text_selection.select_all(&scene);
+                                    if text_selection.has_selection() {
+                                        shell_ui.status_message = Some(format!(
+                                            "Selected {} text blocks",
+                                            text_selection.ranges.len()
+                                        ));
+                                        needs_redraw = true;
+                                        asteria_window.window.request_redraw();
+                                        return;
+                                    }
+                                }
+                                _ => {}
+                            }
+                        }
 
                         // ── Global shortcuts (always active) ─────────
                         match (ctrl, alt, &logical_key) {
@@ -433,9 +436,13 @@ pub fn run_window_loop(initial_scene: SceneGraph, tab_manager: TabManager) {
                                     handled = true;
                                 }
                                 Key::Named(NamedKey::Escape) => {
-                                    shell_ui.omnibox_text =
-                                        asteria_window.tab_manager.active_tab().url.clone();
-                                    shell_ui.unfocus_omnibox();
+                                    if shell_ui.omnibox_focused {
+                                        shell_ui.omnibox_text =
+                                            asteria_window.tab_manager.active_tab().url.clone();
+                                        shell_ui.unfocus_omnibox();
+                                    } else if text_selection.has_selection() {
+                                        text_selection.clear();
+                                    }
                                     needs_redraw = true;
                                     asteria_window.window.request_redraw();
                                     return;
@@ -493,6 +500,7 @@ pub fn run_window_loop(initial_scene: SceneGraph, tab_manager: TabManager) {
 
                         if handled {
                             scene = asteria_window.build_active_scene(Some(proxy.clone()));
+                            compositor.build_layers(&scene);
                             current_scroll_y = 0.0;
                             target_scroll_y = 0.0;
                             needs_redraw = true;
@@ -543,6 +551,13 @@ pub fn run_window_loop(initial_scene: SceneGraph, tab_manager: TabManager) {
                             if let Some(old_id) = hovered_node.take() {
                                 scene.set_node_state(old_id, NodeState::Normal);
                             }
+                        }
+
+                        if text_selection.is_active {
+                            let page_y = cursor_pos.1 - HEADER_HEIGHT + current_scroll_y;
+                            text_selection.update(cursor_pos.0, page_y, &scene);
+                            needs_redraw = true;
+                            asteria_window.window.request_redraw();
                         }
 
                         // Redraw if shell hover target changed
@@ -643,8 +658,10 @@ pub fn run_window_loop(initial_scene: SceneGraph, tab_manager: TabManager) {
                             }
                             ShellHitTarget::Webpage => {
                                 shell_ui.unfocus_omnibox();
-                                // Hit test webpage scene
                                 let page_y = cursor_pos.1 - HEADER_HEIGHT + current_scroll_y;
+                                text_selection.start(cursor_pos.0, page_y);
+
+                                // Hit test webpage scene
                                 if let Some(node_id) = scene.hit_test(cursor_pos.0, page_y) {
                                     scene.set_node_state(node_id, NodeState::Active);
 
@@ -674,8 +691,22 @@ pub fn run_window_loop(initial_scene: SceneGraph, tab_manager: TabManager) {
 
                         if rebuild_scene {
                             scene = asteria_window.build_active_scene(Some(proxy.clone()));
+                            compositor.build_layers(&scene);
+                            text_selection.clear();
                             current_scroll_y = 0.0;
                             target_scroll_y = 0.0;
+                            needs_redraw = true;
+                            asteria_window.window.request_redraw();
+                        }
+                    }
+
+                    WindowEvent::MouseInput {
+                        state: ElementState::Released,
+                        button: MouseButton::Left,
+                        ..
+                    } => {
+                        if text_selection.is_active {
+                            text_selection.finish(&scene);
                             needs_redraw = true;
                             asteria_window.window.request_redraw();
                         }
@@ -712,8 +743,15 @@ pub fn run_window_loop(initial_scene: SceneGraph, tab_manager: TabManager) {
                         let vp_w = asteria_window.window.inner_size().width as f32;
                         let vp_h = asteria_window.window.inner_size().height as f32;
 
-                        // Build webpage rect batch (canvas fill, offset by HEADER_HEIGHT, and clipped)
-                        let mut new_batch = build_rect_batch(&scene, current_scroll_y, vp_w, vp_h);
+                        // Build webpage rect batch via Layer Compositor
+                        let mut new_batch = build_rect_batch(
+                            &compositor,
+                            &scene,
+                            current_scroll_y,
+                            vp_w,
+                            vp_h,
+                            &text_selection,
+                        );
 
                         // Overlay shell chrome rects on top
                         shell_ui.render_shell_rects(
@@ -834,6 +872,8 @@ pub fn run_window_loop(initial_scene: SceneGraph, tab_manager: TabManager) {
             }
             Event::UserEvent(AsteriaUserEvent::SceneUpdated(new_scene)) => {
                 scene = new_scene;
+                compositor.build_layers(&scene);
+                text_selection.clear();
                 needs_redraw = true;
                 asteria_window.window.request_redraw();
             }

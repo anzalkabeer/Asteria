@@ -57,6 +57,7 @@ pub enum PropertyId {
     FontWeight,
     TextAlign,
     LineHeight,
+    FontFamily,
 
     // Flexbox
     FlexDirection,
@@ -97,6 +98,7 @@ pub enum PropertyId {
     BorderRadius,
     BoxShadow,
     Overflow,
+    Transform,
 }
 
 /// All known property IDs — useful for iterating over every property
@@ -132,6 +134,7 @@ pub const ALL_PROPERTIES: &[PropertyId] = &[
     PropertyId::FontWeight,
     PropertyId::TextAlign,
     PropertyId::LineHeight,
+    PropertyId::FontFamily,
     PropertyId::FlexDirection,
     PropertyId::FlexWrap,
     PropertyId::JustifyContent,
@@ -164,6 +167,7 @@ pub const ALL_PROPERTIES: &[PropertyId] = &[
     PropertyId::BorderRadius,
     PropertyId::BoxShadow,
     PropertyId::Overflow,
+    PropertyId::Transform,
 ];
 
 /// Returns true if this property is inherited by default.
@@ -181,6 +185,7 @@ pub fn is_inherited(id: PropertyId) -> bool {
         PropertyId::FontWeight => true,
         PropertyId::TextAlign => true,
         PropertyId::LineHeight => true,
+        PropertyId::FontFamily => true,
 
         // Everything else does NOT inherit
         PropertyId::Display => false,
@@ -240,6 +245,7 @@ pub fn is_inherited(id: PropertyId) -> bool {
         PropertyId::BorderRadius => false,
         PropertyId::BoxShadow => false,
         PropertyId::Overflow => false,
+        PropertyId::Transform => false,
     }
 }
 
@@ -302,6 +308,7 @@ pub fn property_from_name(name: &str) -> Option<PropertyId> {
         "font-weight" => Some(PropertyId::FontWeight),
         "text-align" => Some(PropertyId::TextAlign),
         "line-height" => Some(PropertyId::LineHeight),
+        "font-family" => Some(PropertyId::FontFamily),
 
         // Flexbox
         "flex-direction" => Some(PropertyId::FlexDirection),
@@ -340,6 +347,7 @@ pub fn property_from_name(name: &str) -> Option<PropertyId> {
         "border-radius" => Some(PropertyId::BorderRadius),
         "box-shadow" => Some(PropertyId::BoxShadow),
         "overflow" => Some(PropertyId::Overflow),
+        "transform" => Some(PropertyId::Transform),
 
         // Shorthands — handled specially in style.rs
         "margin" | "padding" | "flex" => None,
@@ -412,6 +420,8 @@ pub fn property_id_to_name(id: PropertyId) -> &'static str {
         PropertyId::BorderRadius => "border-radius",
         PropertyId::BoxShadow => "box-shadow",
         PropertyId::Overflow => "overflow",
+        PropertyId::FontFamily => "font-family",
+        PropertyId::Transform => "transform",
     }
 }
 
@@ -457,6 +467,7 @@ mod tests {
         assert!(is_inherited(PropertyId::FontWeight));
         assert!(is_inherited(PropertyId::TextAlign));
         assert!(is_inherited(PropertyId::LineHeight));
+        assert!(is_inherited(PropertyId::FontFamily));
     }
 
     #[test]
@@ -470,6 +481,7 @@ mod tests {
         assert!(!is_inherited(PropertyId::BackgroundColor));
         assert!(!is_inherited(PropertyId::Top));
         assert!(!is_inherited(PropertyId::FlexDirection));
+        assert!(!is_inherited(PropertyId::Transform));
     }
 
     #[test]
@@ -488,10 +500,17 @@ mod tests {
         );
         assert_eq!(property_from_name("z-index"), Some(PropertyId::ZIndex));
         assert_eq!(property_from_name("font-size"), Some(PropertyId::FontSize));
+        assert_eq!(
+            property_from_name("font-family"),
+            Some(PropertyId::FontFamily)
+        );
+        assert_eq!(property_from_name("transform"), Some(PropertyId::Transform));
         assert_eq!(property_from_name("unknown-prop"), None);
         assert_eq!(PropertyId::ZIndex.name(), "z-index");
         assert_eq!(PropertyId::Top.name(), "top");
         assert_eq!(PropertyId::FlexDirection.name(), "flex-direction");
+        assert_eq!(PropertyId::FontFamily.name(), "font-family");
+        assert_eq!(PropertyId::Transform.name(), "transform");
     }
 
     #[test]
@@ -535,6 +554,6 @@ mod tests {
         for &prop in ALL_PROPERTIES {
             let _ = is_inherited(prop);
         }
-        assert_eq!(ALL_PROPERTIES.len(), 60);
+        assert_eq!(ALL_PROPERTIES.len(), 62);
     }
 }

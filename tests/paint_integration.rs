@@ -219,3 +219,76 @@ fn test_overflow_hidden_clip_emission() {
     assert!(has_push_clip);
     assert!(has_pop_clip);
 }
+
+#[test]
+fn test_transform_display_list_and_scene_graph() {
+    let html = r#"<html><body><div id="transformed" style="transform: translate(10px, 20px); width: 100px; height: 100px; background-color: red;">Content</div></body></html>"#;
+    let css = r#""#;
+
+    let bytes = html.as_bytes();
+    let mut processor = asteria::streaming_parser::StreamingHtmlProcessor::new();
+    let _ = processor.receive_network_chunk(bytes, true);
+    let dom = processor.finish();
+
+    let stylesheet = Stylesheet::parse(css.as_bytes());
+    let styled = resolve_styles(&dom, &stylesheet, bytes);
+    let layout = layout_document(&styled, &dom, bytes, 800.0, 600.0).unwrap();
+
+    let display_list = build_display_list(&layout, &dom, bytes);
+
+    let has_push_transform = display_list
+        .commands
+        .iter()
+        .any(|cmd| matches!(cmd, DisplayCommand::PushTransform { .. }));
+    let has_pop_transform = display_list
+        .commands
+        .iter()
+        .any(|cmd| matches!(cmd, DisplayCommand::PopTransform));
+
+    assert!(has_push_transform, "Expected PushTransform in display list");
+    assert!(has_pop_transform, "Expected PopTransform in display list");
+
+    let scene = asteria::scene::build_scene_graph(&display_list, 256.0);
+    // Find node with non-identity transform
+    let transformed_node = scene
+        .nodes
+        .iter()
+        .find(|n| !asteria::values::is_identity_matrix(&n.transform));
+    assert!(
+        transformed_node.is_some(),
+        "Expected at least one SceneNode with non-identity transform"
+    );
+}
+
+#[test]
+fn test_custom_font_propagation_to_display_list() {
+    let html = r#"<html><body><p style="font-family: monospace; font-weight: 700;">Monospace text</p></body></html>"#;
+    let css = r#""#;
+
+    let bytes = html.as_bytes();
+    let mut processor = asteria::streaming_parser::StreamingHtmlProcessor::new();
+    let _ = processor.receive_network_chunk(bytes, true);
+    let dom = processor.finish();
+
+    let stylesheet = Stylesheet::parse(css.as_bytes());
+    let styled = resolve_styles(&dom, &stylesheet, bytes);
+    let layout = layout_document(&styled, &dom, bytes, 800.0, 600.0).unwrap();
+
+    let display_list = build_display_list(&layout, &dom, bytes);
+
+    let text_cmd = display_list.commands.iter().find(|cmd| {
+        matches!(
+            cmd,
+            DisplayCommand::Text {
+                font_family,
+                font_weight,
+                ..
+            } if font_family == &vec!["monospace".to_string()] && *font_weight == 700.0
+        )
+    });
+
+    assert!(
+        text_cmd.is_some(),
+        "Expected DisplayCommand::Text with monospace and 700 font weight"
+    );
+}

@@ -1,7 +1,7 @@
 use crate::renderer::graph::render_pass::RenderPass;
 use glyphon::{
-    Attrs, Buffer, Cache, Color, FontSystem, Metrics, Resolution, Shaping, SwashCache, TextArea,
-    TextAtlas, TextBounds, TextRenderer, Viewport,
+    Attrs, Buffer, Cache, Color, Family, FontSystem, Metrics, Resolution, Shaping, SwashCache,
+    TextArea, TextAtlas, TextBounds, TextRenderer, Viewport, Weight,
 };
 
 struct TextBufferItem {
@@ -63,6 +63,20 @@ impl TextPass {
         color: [f32; 4],
         bounds: Option<[i32; 4]>,
     ) {
+        self.add_text_styled(text, pos, font_size, color, &[], 400.0, bounds);
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn add_text_styled(
+        &mut self,
+        text: &str,
+        pos: [f32; 2],
+        font_size: f32,
+        color: [f32; 4],
+        font_families: &[String],
+        font_weight: f32,
+        bounds: Option<[i32; 4]>,
+    ) {
         let line_height = font_size * 1.2;
         let mut buffer = Buffer::new(&mut self.font_system, Metrics::new(font_size, line_height));
 
@@ -80,7 +94,33 @@ impl TextPass {
             Some(self.width as f32),
             Some(self.height as f32),
         );
-        buffer.set_text(&mut self.font_system, text, Attrs::new(), Shaping::Advanced);
+
+        let family = font_families
+            .iter()
+            .find_map(|f| {
+                let trimmed = f.trim();
+                if trimmed.eq_ignore_ascii_case("serif") {
+                    Some(Family::Serif)
+                } else if trimmed.eq_ignore_ascii_case("sans-serif") {
+                    Some(Family::SansSerif)
+                } else if trimmed.eq_ignore_ascii_case("monospace") {
+                    Some(Family::Monospace)
+                } else if trimmed.eq_ignore_ascii_case("cursive") {
+                    Some(Family::Cursive)
+                } else if trimmed.eq_ignore_ascii_case("fantasy") {
+                    Some(Family::Fantasy)
+                } else if !trimmed.is_empty() {
+                    Some(Family::Name(trimmed))
+                } else {
+                    None
+                }
+            })
+            .unwrap_or(Family::SansSerif);
+
+        let weight = Weight(font_weight.clamp(1.0, 1000.0) as u16);
+
+        let attrs = Attrs::new().family(family).weight(weight);
+        buffer.set_text(&mut self.font_system, text, attrs, Shaping::Advanced);
         buffer.shape_until_scroll(&mut self.font_system, false);
 
         self.buffers.push(TextBufferItem {

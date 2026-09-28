@@ -326,3 +326,43 @@ fn test_var_in_shorthand_border() {
         asteria::values::Color::rgb(255, 0, 0)
     );
 }
+
+#[test]
+fn test_font_family_inheritance_and_cascade() {
+    let (styled, _, _) = styled_tree(
+        "<div class='parent'><p class='child'>Hello</p></div>",
+        ".parent { font-family: 'Helvetica Neue', Arial, sans-serif; }",
+    );
+    let parent = &styled.children[0];
+    let child = &parent.children[0];
+
+    assert_eq!(
+        parent.styles.font_family,
+        vec!["Helvetica Neue", "Arial", "sans-serif"]
+    );
+    // font-family must inherit to children
+    assert_eq!(
+        child.styles.font_family,
+        vec!["Helvetica Neue", "Arial", "sans-serif"]
+    );
+}
+
+#[test]
+fn test_css_transform_cascade() {
+    let (styled, _, _) = styled_tree(
+        "<div class='box'>Content</div>",
+        ".box { transform: rotate(45deg) scale(1.5); }",
+    );
+    let box_node = &styled.children[0];
+    assert_eq!(box_node.styles.transform.len(), 2);
+    match &box_node.styles.transform[0] {
+        asteria::values::TransformFunction::Rotate(rad) => {
+            assert!((rad - 45.0_f32.to_radians()).abs() < 1e-4);
+        }
+        _ => panic!("Expected rotate"),
+    }
+    assert_eq!(
+        box_node.styles.transform[1],
+        asteria::values::TransformFunction::Scale(1.5, 1.5)
+    );
+}

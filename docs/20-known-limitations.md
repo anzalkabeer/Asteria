@@ -97,11 +97,11 @@
 | Rounded corners | ✅ | Emits RoundedRect display commands |
 | Box shadows | ✅ | Emits BoxShadow commands before element background |
 | Alpha blending / opacity | ✅ | Cascading opacity modulating color alpha channels |
-| CSS transforms | ❌ | Not supported |
-| Layer compositing | ❌ | No GPU layer separation |
-| Subpixel text antialiasing | Partial | Depends on glyphon and GPU driver |
-| Custom fonts | ❌ | System default font only |
-| Text selection | ❌ | Not supported |
+| CSS transforms | ✅ | 2D transforms (translate, rotate, scale, skew, matrix) with transform-origin, stacking context creation, and affine vertex tessellation |
+| Layer compositing | ✅ | GPU layer separation with CompositorLayer, layer promotion for transforms/stacking contexts/translucent subtrees, viewport culling, and batch compositing |
+| Subpixel text antialiasing | ✅ | Supported via glyphon surface format and font hinting defaults |
+| Custom fonts | ✅ | font-family cascade & mapping to system fonts (serif, sans-serif, monospace, cursive, fantasy, named fonts) + font-weight mapping |
+| Text selection | ✅ | Interactive click-and-drag selection across text nodes, select-all (Ctrl+A / Cmd+A), visual highlight rects, and clipboard copy (Ctrl+C / Cmd+C) |
 
 ---
 
@@ -138,7 +138,7 @@
 | Bookmarks | ❌ | Not supported |
 | Settings | ❌ | Not supported |
 | Find in page | ❌ | Not supported |
-| Text selection and copy | ❌ | Not supported |
+| Text selection and copy | ✅ | Interactive drag selection, Ctrl+A select-all, visual highlight, and clipboard integration via arboard |
 | Right-click context menu | ❌ | Not supported |
 | Print | ❌ | Not supported |
 | Developer tools panel | ❌ | CLI-only devtools |

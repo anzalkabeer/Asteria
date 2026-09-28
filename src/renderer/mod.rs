@@ -1,5 +1,6 @@
 pub mod backend;
 pub mod commands;
+pub mod compositor;
 pub mod graph;
 pub mod passes;
 pub mod resources;

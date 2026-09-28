@@ -171,6 +171,7 @@ fn test_scene_graph_flat_storage() {
             state: NodeState::Normal,
             link_url: None,
             clip: None,
+            transform: asteria::values::IDENTITY_MATRIX,
         },
         [1.0, 0.0, 0.0, 1.0],
         None,
@@ -201,6 +202,7 @@ fn test_scene_graph_dirty_propagation() {
             state: NodeState::Normal,
             link_url: None,
             clip: None,
+            transform: asteria::values::IDENTITY_MATRIX,
         },
         [0.0; 4],
         None,
@@ -223,6 +225,7 @@ fn test_scene_graph_dirty_propagation() {
             state: NodeState::Normal,
             link_url: None,
             clip: None,
+            transform: asteria::values::IDENTITY_MATRIX,
         },
         [1.0, 0.0, 0.0, 1.0],
         None,
@@ -259,6 +262,8 @@ fn test_build_scene_graph_from_display_list() {
         target_width: 800.0,
         font_size: 16.0,
         line_height: 19.2,
+        font_family: vec!["sans-serif".to_string()],
+        font_weight: 400.0,
         color: Color::new(255, 255, 255, 255),
         link_url: None,
     });
@@ -480,6 +485,7 @@ fn test_hit_test_finds_topmost_node() {
             state: NodeState::Normal,
             link_url: None,
             clip: None,
+            transform: asteria::values::IDENTITY_MATRIX,
         },
         [0.9, 0.9, 0.9, 1.0],
         None,
@@ -502,6 +508,7 @@ fn test_hit_test_finds_topmost_node() {
             state: NodeState::Normal,
             link_url: None,
             clip: None,
+            transform: asteria::values::IDENTITY_MATRIX,
         },
         [0.2, 0.5, 1.0, 1.0],
         None,
@@ -536,6 +543,7 @@ fn test_hit_test_miss_returns_none() {
             state: NodeState::Normal,
             link_url: None,
             clip: None,
+            transform: asteria::values::IDENTITY_MATRIX,
         },
         [1.0, 0.0, 0.0, 1.0],
         None,
@@ -569,6 +577,7 @@ fn test_hit_test_edge_boundary() {
             state: NodeState::Normal,
             link_url: None,
             clip: None,
+            transform: asteria::values::IDENTITY_MATRIX,
         },
         [0.0, 1.0, 0.0, 1.0],
         None,
@@ -602,6 +611,7 @@ fn test_invalidate_after_hit() {
             state: NodeState::Normal,
             link_url: None,
             clip: None,
+            transform: asteria::values::IDENTITY_MATRIX,
         },
         [1.0, 1.0, 0.0, 1.0],
         None,
@@ -642,6 +652,7 @@ fn test_node_state_invalidation() {
             state: NodeState::Normal,
             link_url: None,
             clip: None,
+            transform: asteria::values::IDENTITY_MATRIX,
         },
         [1.0, 0.0, 0.0, 1.0],
         None,
@@ -684,6 +695,7 @@ fn test_dirty_segments_query() {
             state: NodeState::Normal,
             link_url: None,
             clip: None,
+            transform: asteria::values::IDENTITY_MATRIX,
         },
         [0.0; 4],
         None,
@@ -706,6 +718,7 @@ fn test_dirty_segments_query() {
             state: NodeState::Normal,
             link_url: None,
             clip: None,
+            transform: asteria::values::IDENTITY_MATRIX,
         },
         [0.0; 4],
         None,
@@ -736,6 +749,7 @@ fn test_node_link_url_retrieval() {
             state: NodeState::Normal,
             link_url: Some("https://asteria.dev".to_string()),
             clip: None,
+            transform: asteria::values::IDENTITY_MATRIX,
         },
         [0.0; 4],
         None,
@@ -764,6 +778,7 @@ fn test_clean_scene_empty_dirty_segments() {
             state: NodeState::Normal,
             link_url: None,
             clip: None,
+            transform: asteria::values::IDENTITY_MATRIX,
         },
         [0.0; 4],
         None,
@@ -773,4 +788,181 @@ fn test_clean_scene_empty_dirty_segments() {
         scene.dirty_segments().is_empty(),
         "Clean scene should return 0 dirty segments"
     );
+}
+
+// ─── Text Selection and Compositor Integration Tests ─────────────
+
+#[test]
+fn test_text_selection_multi_node_and_copy() {
+    let mut scene = SceneGraph::new();
+
+    scene.push(
+        SceneNode {
+            rect: Rect {
+                x: 0.0,
+                y: 10.0,
+                width: 200.0,
+                height: 24.0,
+            },
+            kind: SceneNodeKind::Text { font_size: 16.0 },
+            parent: None,
+            z_order: 0,
+            segment_id: 0,
+            dirty: false,
+            state: NodeState::Normal,
+            link_url: None,
+            clip: None,
+            transform: asteria::values::IDENTITY_MATRIX,
+        },
+        [0.0, 0.0, 0.0, 1.0],
+        Some(asteria::scene::TextRun {
+            text: "Heading Title".to_string(),
+            font_size: 16.0,
+            font_family: vec!["sans-serif".to_string()],
+            font_weight: 700.0,
+        }),
+    );
+
+    scene.push(
+        SceneNode {
+            rect: Rect {
+                x: 0.0,
+                y: 40.0,
+                width: 300.0,
+                height: 20.0,
+            },
+            kind: SceneNodeKind::Text { font_size: 14.0 },
+            parent: None,
+            z_order: 0,
+            segment_id: 0,
+            dirty: false,
+            state: NodeState::Normal,
+            link_url: None,
+            clip: None,
+            transform: asteria::values::IDENTITY_MATRIX,
+        },
+        [0.0, 0.0, 0.0, 1.0],
+        Some(asteria::scene::TextRun {
+            text: "Paragraph text content below heading.".to_string(),
+            font_size: 14.0,
+            font_family: vec!["sans-serif".to_string()],
+            font_weight: 400.0,
+        }),
+    );
+
+    let mut selection = asteria::selection::TextSelection::new();
+    // Drag from heading down into paragraph
+    selection.start(10.0, 15.0);
+    selection.update(150.0, 45.0, &scene);
+    selection.finish(&scene);
+
+    assert!(selection.has_selection());
+    assert_eq!(
+        selection.ranges.len(),
+        2,
+        "Selection should span both text nodes"
+    );
+
+    let text = selection.get_selected_text(&scene);
+    assert!(text.contains("Heading") || text.contains("Title"));
+    assert!(text.contains("Paragraph"));
+
+    let copy_result = selection.copy_to_clipboard(&scene);
+    assert!(copy_result.is_ok());
+}
+
+#[test]
+fn test_compositor_layer_promotion_and_culling() {
+    let mut scene = SceneGraph::new();
+
+    // Node 0: Root normal rect
+    scene.push(
+        SceneNode {
+            rect: Rect {
+                x: 0.0,
+                y: 0.0,
+                width: 400.0,
+                height: 200.0,
+            },
+            kind: SceneNodeKind::SolidRect,
+            parent: None,
+            z_order: 0,
+            segment_id: 0,
+            dirty: false,
+            state: NodeState::Normal,
+            link_url: None,
+            clip: None,
+            transform: asteria::values::IDENTITY_MATRIX,
+        },
+        [1.0, 1.0, 1.0, 1.0],
+        None,
+    );
+
+    // Node 1: Promoted transformed element
+    scene.push(
+        SceneNode {
+            rect: Rect {
+                x: 50.0,
+                y: 50.0,
+                width: 100.0,
+                height: 100.0,
+            },
+            kind: SceneNodeKind::SolidRect,
+            parent: None,
+            z_order: 2,
+            segment_id: 0,
+            dirty: false,
+            state: NodeState::Normal,
+            link_url: None,
+            clip: None,
+            transform: [1.5, 0.0, 0.0, 1.5, 10.0, 10.0],
+        },
+        [0.0, 0.5, 1.0, 1.0],
+        None,
+    );
+
+    // Node 2: Element with stacking context z_order = 1
+    scene.push(
+        SceneNode {
+            rect: Rect {
+                x: 0.0,
+                y: 1200.0,
+                width: 200.0,
+                height: 100.0,
+            },
+            kind: SceneNodeKind::SolidRect,
+            parent: None,
+            z_order: 1,
+            segment_id: 0,
+            dirty: false,
+            state: NodeState::Normal,
+            link_url: None,
+            clip: None,
+            transform: asteria::values::IDENTITY_MATRIX,
+        },
+        [0.2, 0.8, 0.2, 1.0],
+        None,
+    );
+
+    let mut comp = asteria::renderer::compositor::Compositor::new();
+    comp.build_layers(&scene);
+
+    assert_eq!(comp.layer_count(), 3);
+    assert_eq!(comp.promoted_layer_count(), 2);
+
+    // Check layer ordering (sorted by z_order: 0, 1, 2)
+    assert_eq!(comp.layers[0].z_order, 0);
+    assert_eq!(comp.layers[1].z_order, 1);
+    assert_eq!(comp.layers[2].z_order, 2);
+
+    // Check layer-level culling for Node 2 at y=1200
+    // When viewport is 0..600, node 2 at y=1200 is culled
+    assert!(comp.layers[1].is_culled(0.0, 50.0, 600.0));
+    // When scrolled to 1000, node 2 is visible
+    assert!(!comp.layers[1].is_culled(1000.0, 50.0, 600.0));
+
+    // Render to batch
+    let sel = asteria::selection::TextSelection::new();
+    let batch = comp.render_to_batch(&scene, 0.0, 800.0, 600.0, 50.0, 550.0, &sel);
+    assert!(!batch.is_empty());
 }

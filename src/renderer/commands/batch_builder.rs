@@ -27,6 +27,10 @@ impl BatchBuilder {
         }
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.indices.is_empty()
+    }
+
     pub fn clear(&mut self) {
         self.vertices.clear();
         self.indices.clear();
@@ -45,8 +49,12 @@ impl BatchBuilder {
         };
         for cmd in commands {
             match cmd {
-                RenderCommand::SolidRect { rect, rgba } => {
-                    self.add_quad(rect[0], rect[1], rect[2], rect[3], *rgba);
+                RenderCommand::SolidRect {
+                    rect,
+                    rgba,
+                    transform,
+                } => {
+                    self.add_quad_transformed(rect[0], rect[1], rect[2], rect[3], *rgba, transform);
                 }
                 RenderCommand::Text {
                     text,
@@ -121,24 +129,60 @@ impl BatchBuilder {
     }
 
     fn add_quad(&mut self, x: f32, y: f32, w: f32, h: f32, rgba: [f32; 4]) {
+        self.add_quad_transformed(x, y, w, h, rgba, &crate::values::IDENTITY_MATRIX);
+    }
+
+    fn add_quad_transformed(
+        &mut self,
+        x: f32,
+        y: f32,
+        w: f32,
+        h: f32,
+        rgba: [f32; 4],
+        transform: &[f32; 6],
+    ) {
         let base_idx = self.vertices.len() as u32;
 
-        self.vertices.push(Vertex {
-            position: [x, y],
-            color: rgba,
-        });
-        self.vertices.push(Vertex {
-            position: [x + w, y],
-            color: rgba,
-        });
-        self.vertices.push(Vertex {
-            position: [x + w, y + h],
-            color: rgba,
-        });
-        self.vertices.push(Vertex {
-            position: [x, y + h],
-            color: rgba,
-        });
+        if crate::values::is_identity_matrix(transform) {
+            self.vertices.push(Vertex {
+                position: [x, y],
+                color: rgba,
+            });
+            self.vertices.push(Vertex {
+                position: [x + w, y],
+                color: rgba,
+            });
+            self.vertices.push(Vertex {
+                position: [x + w, y + h],
+                color: rgba,
+            });
+            self.vertices.push(Vertex {
+                position: [x, y + h],
+                color: rgba,
+            });
+        } else {
+            let p0 = crate::values::transform_point(transform, x, y);
+            let p1 = crate::values::transform_point(transform, x + w, y);
+            let p2 = crate::values::transform_point(transform, x + w, y + h);
+            let p3 = crate::values::transform_point(transform, x, y + h);
+
+            self.vertices.push(Vertex {
+                position: [p0.0, p0.1],
+                color: rgba,
+            });
+            self.vertices.push(Vertex {
+                position: [p1.0, p1.1],
+                color: rgba,
+            });
+            self.vertices.push(Vertex {
+                position: [p2.0, p2.1],
+                color: rgba,
+            });
+            self.vertices.push(Vertex {
+                position: [p3.0, p3.1],
+                color: rgba,
+            });
+        }
 
         self.indices.extend_from_slice(&[
             base_idx,

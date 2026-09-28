@@ -47,6 +47,10 @@ pub enum DisplayCommand {
         rect: Rect,
     },
     PopClip,
+    PushTransform {
+        transform: [f32; 6],
+    },
+    PopTransform,
     Text {
         text: String,
         x: f32,
@@ -54,6 +58,8 @@ pub enum DisplayCommand {
         target_width: f32,
         font_size: f32,
         line_height: f32,
+        font_family: Vec<String>,
+        font_weight: f32,
         color: Color,
         link_url: Option<String>,
     },
@@ -74,7 +80,10 @@ impl DisplayCommand {
             DisplayCommand::RoundedRect { link_url, .. } => link_url.as_deref(),
             DisplayCommand::Border { link_url, .. } => link_url.as_deref(),
             DisplayCommand::BoxShadow { link_url, .. } => link_url.as_deref(),
-            DisplayCommand::PushClip { .. } | DisplayCommand::PopClip => None,
+            DisplayCommand::PushClip { .. }
+            | DisplayCommand::PopClip
+            | DisplayCommand::PushTransform { .. }
+            | DisplayCommand::PopTransform => None,
             DisplayCommand::Text { link_url, .. } => link_url.as_deref(),
             DisplayCommand::Image { link_url, .. } => link_url.as_deref(),
         }
@@ -132,6 +141,24 @@ fn render_stacking_context(
         });
     }
 
+    let has_transform = layout_box
+        .styled_node
+        .map(|s| !s.styles.transform.is_empty())
+        .unwrap_or(false);
+
+    if has_transform {
+        let rect = layout_box.dimensions.border_box();
+        let ox = rect.x + rect.width * 0.5;
+        let oy = rect.y + rect.height * 0.5;
+        let m = crate::values::compose_transform(&layout_box.styled_node.unwrap().styles.transform);
+        let tx_eff = m[4] + ox - m[0] * ox - m[2] * oy;
+        let ty_eff = m[5] + oy - m[1] * ox - m[3] * oy;
+        let m_origin = [m[0], m[1], m[2], m[3], tx_eff, ty_eff];
+        display_list.push(DisplayCommand::PushTransform {
+            transform: m_origin,
+        });
+    }
+
     // 1. Render stacking context root element's background and borders
     if layout_box.styled_node.is_some() {
         render_background(layout_box, display_list, dom, source, current_opacity);
@@ -173,6 +200,10 @@ fn render_stacking_context(
         render_stacking_context(child, dom, source, display_list, child_op);
     }
 
+    if has_transform {
+        display_list.push(DisplayCommand::PopTransform);
+    }
+
     if is_clipped {
         display_list.push(DisplayCommand::PopClip);
     }
@@ -194,7 +225,10 @@ fn collect_stacking_context_descendants<'a>(
 
         let is_positioned = child
             .styled_node
-            .map(|n| n.styles.position != crate::values::Position::Static)
+            .map(|n| {
+                n.styles.position != crate::values::Position::Static
+                    || !n.styles.transform.is_empty()
+            })
             .unwrap_or(false);
 
         if is_positioned {
@@ -405,6 +439,8 @@ fn render_text(
             target_width: rect.width,
             font_size: styled.styles.font_size,
             line_height: styled.styles.line_height,
+            font_family: styled.styles.font_family.clone(),
+            font_weight: styled.styles.font_weight,
             color: final_color,
             link_url,
         });
@@ -542,6 +578,10 @@ impl fmt::Display for DisplayCommand {
                 )
             }
             DisplayCommand::PopClip => write!(f, "PopClip"),
+            DisplayCommand::PushTransform { transform } => {
+                write!(f, "PushTransform {:?}", transform)
+            }
+            DisplayCommand::PopTransform => write!(f, "PopTransform"),
         }
     }
 }
