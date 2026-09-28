@@ -32,9 +32,15 @@ impl StreamingHtmlProcessor {
     pub fn receive_network_chunk(&mut self, chunk: &[u8], is_final: bool) -> Vec<NodeId> {
         if self.buffer.len() + chunk.len() > Self::MAX_DOCUMENT_SIZE {
             eprintln!(
-                "Warning: Document exceeds {}MB limit, truncating",
+                "Warning: Document exceeds {}MB limit, dropping incoming chunk",
                 Self::MAX_DOCUMENT_SIZE / (1024 * 1024)
             );
+            if is_final {
+                let tokens = self.tokenizer.process_chunk(&self.buffer, true);
+                return self
+                    .parser
+                    .push_tokens(&mut self.dom, &tokens, &self.buffer);
+            }
             return Vec::new();
         }
         self.buffer.extend_from_slice(chunk);

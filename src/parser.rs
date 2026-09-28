@@ -66,6 +66,8 @@ pub struct Parser {
     /// Stack of open element NodeIds — the current "insertion path"
     /// The top of the stack is the current parent for new nodes.
     open_elements: Vec<NodeId>,
+    /// Track tags ignored due to exceeding MAX_DOM_DEPTH so their end tags don't pop an outer element.
+    ignored_tags: Vec<Vec<u8>>,
 }
 
 impl Default for Parser {
@@ -79,6 +81,7 @@ impl Parser {
         // Assume Document root (NodeId(0)) is always the starting point
         Parser {
             open_elements: vec![NodeId(0)],
+            ignored_tags: Vec::new(),
         }
     }
 
@@ -112,15 +115,20 @@ impl Parser {
         dirty: &mut Vec<NodeId>,
     ) {
         let parent = self.current_parent();
-
-        let node_id = dom.add_element(parent, token.start, token.end, &token.attributes);
+        let tag_name = &source[token.start as usize..token.end as usize];
 
         if !is_void_element(source, token.start, token.end) {
             if self.open_elements.len() >= MAX_DOM_DEPTH {
-                return; // Silently refuse to nest deeper
+                let node_id = dom.add_element(parent, token.start, token.end, &token.attributes);
+                dirty.push(node_id);
+                dirty.push(parent);
+                self.ignored_tags.push(tag_name.to_ascii_lowercase());
+                return;
             }
+            let node_id = dom.add_element(parent, token.start, token.end, &token.attributes);
             self.open_elements.push(node_id);
         } else {
+            let node_id = dom.add_element(parent, token.start, token.end, &token.attributes);
             // Void elements complete immediately, mark them dirty
             dirty.push(node_id);
         }
@@ -137,6 +145,16 @@ impl Parser {
         dirty: &mut Vec<NodeId>,
     ) {
         let end_tag_name = &source[token.start as usize..token.end as usize];
+
+        // Track ignored start tags and discard their matching end tags
+        if let Some(pos) = self
+            .ignored_tags
+            .iter()
+            .rposition(|t| tag_names_match(t, end_tag_name))
+        {
+            self.ignored_tags.remove(pos);
+            return;
+        }
 
         let mut match_index = None;
         for i in (1..self.open_elements.len()).rev() {
@@ -170,7 +188,9 @@ impl Parser {
 
         if !is_void_element(source, token.start, token.end) {
             if self.open_elements.len() >= MAX_DOM_DEPTH {
-                return; // Silently refuse to nest deeper
+                dirty.push(node_id);
+                dirty.push(parent);
+                return;
             }
             self.open_elements.push(node_id);
         } else {

@@ -16,7 +16,7 @@
 |---|---|---|
 | Standard elements (`div`, `p`, `h1`, `a`, etc.) | ✅ | Supported |
 | Attributes (`class`, `id`, `style`, `href`, etc.) | ✅ | Supported |
-| Character entities (`&amp;`, `&lt;`, `&#x1F600;`) | ❌ | Not decoded; rendered as raw text |
+| Character entities (`&amp;`, `&lt;`, `&#x1F600;`) | ✅ | Supported via entity decoding |
 | `<template>` elements | ❌ | Not supported |
 | `<script>` execution | ❌ | Parsed but not executed |
 | `<form>` elements | ❌ | No form handling |
@@ -40,18 +40,18 @@
 | Inheritance | ✅ | `color`, `font-size`, and other inherited properties |
 | Shorthand expansion (`margin`, `padding`, `border`) | ✅ | Supported |
 | `@media` viewport queries | ✅ | `min-width`, `max-width` |
-| `!important` | ❌ | Not yet implemented |
-| `@import` | ❌ | External stylesheet inclusion not supported |
+| `!important` | ✅ | Supported with declaration priority sorting |
+| `@import` | ✅ | Supported for external stylesheets |
 | `@keyframes` / CSS animations | ❌ | Not supported |
 | CSS transitions | ❌ | Not supported |
-| `var()` / custom properties | ❌ | Not supported |
+| `var()` / custom properties | ✅ | Supported with variable substitution |
 | `::before` / `::after` pseudo-elements | ❌ | Not supported |
 | `:nth-child()`, `:not()` pseudo-classes | ❌ | Not supported |
-| Attribute selectors (`[type="text"]`) | ❌ | Not supported |
-| `calc()` | ❌ | Not supported |
-| CSS Grid | ❌ | Not supported |
+| Attribute selectors (`[type="text"]`) | ✅ | Supported with attribute presence and operators |
+| `calc()` | ✅ | Supported for mathematical expressions |
+| CSS Grid | ✅ | Supported via grid formatting context |
 | `opacity` | ✅ | Fully supported with hierarchical cascade and alpha modulation |
-| `transform` | ❌ | Not supported |
+| `transform` | ✅ | 2D transforms (translate, rotate, scale, skew, matrix) supported |
 | `box-shadow` | ✅ | Multiple shadows, blur, spread, color, and inset |
 | `border-radius` | ✅ | 1-4 value shorthand parsing and rounded rect commands |
 | `text-decoration` | ❌ | Not supported |
@@ -59,7 +59,7 @@
 | `z-index` (full stacking contexts) | Partial | Values tracked but not fully sorted |
 | CSS gradients | ❌ | Not supported |
 | `float` | ❌ | Not supported |
-| `position: absolute / fixed / sticky` | ❌ | Not supported |
+| `position: absolute / fixed / sticky` | ✅ | absolute and fixed positioning supported out-of-flow |
 
 ---
 
@@ -70,16 +70,16 @@
 | Block formatting context | ✅ | Vertical stacking, auto-width, margin centering |
 | Inline formatting context | ✅ | Horizontal flow with line wrapping |
 | Flex row layout (`display: flex`) | ✅ | Horizontal row with explicit widths |
-| `flex-direction: column` | ❌ | Not yet implemented |
-| `flex-wrap` | ❌ | Not yet implemented |
+| `flex-direction: column` | ✅ | Supported in flex layout |
+| `flex-wrap` | ✅ | Supported for multi-line flex containers |
 | `justify-content` / `align-items` | ❌ | Not yet implemented |
 | `flex-grow` / `flex-shrink` | ❌ | Not yet implemented |
-| CSS Grid | ❌ | Not supported |
+| CSS Grid | ✅ | Supported via grid formatting context |
 | `min-width` / `max-width` | ❌ | Not supported |
 | `min-height` / `max-height` | ❌ | Not supported |
-| `box-sizing: border-box` | ❌ | Always content-box |
+| `box-sizing: border-box` | ✅ | Supported across layout box sizing |
 | Percentage heights | ❌ | Not resolved |
-| Positioned elements | ❌ | `absolute`, `fixed`, `sticky` not supported |
+| Positioned elements | ✅ | absolute and fixed positioned elements supported |
 | Float layout | ❌ | Not supported |
 | Incremental layout | ❌ | Full reflow on every change |
 | Table layout | ✅ | Multi-pass table formatting context, column sizing, row sizing, colspan, rowspan, vertical alignment |
@@ -133,8 +133,8 @@
 | Scrolling | ✅ | Mouse wheel |
 | Link clicking | ✅ | Hit testing + navigation |
 | Window resize reflow | ✅ | Live content reflow |
-| Address bar | ❌ | No URL input UI |
-| Tab bar UI | ❌ | Tabs managed via keyboard only |
+| Address bar | ✅ | Interactive omnibox URL input UI with navigation |
+| Tab bar UI | ✅ | Clickable tab bar UI with tab switching and closing |
 | Bookmarks | ❌ | Not supported |
 | Settings | ❌ | Not supported |
 | Find in page | ❌ | Not supported |

@@ -69,19 +69,32 @@ impl TlsConnector {
             )));
         }
 
-        let clean = domain
+        let s = domain
             .trim()
             .trim_start_matches("https://")
             .trim_start_matches("http://")
             .split('/')
             .next()
-            .unwrap_or(domain)
-            .split(':')
-            .next()
-            .unwrap_or(domain)
-            .trim_end_matches('.');
+            .unwrap_or(domain);
 
-        if clean.is_empty() || clean.starts_with('.') || clean.contains("..") || clean.contains(' ')
+        let host = if s.starts_with('[') {
+            if let Some(close_bracket) = s.find(']') {
+                &s[1..close_bracket]
+            } else {
+                s
+            }
+        } else if s.parse::<std::net::IpAddr>().is_ok() {
+            s
+        } else {
+            s.split(':').next().unwrap_or(s)
+        };
+
+        let clean = host.trim_end_matches('.');
+
+        let is_ip = clean.parse::<std::net::IpAddr>().is_ok();
+        if clean.is_empty()
+            || clean.contains(' ')
+            || (!is_ip && (clean.starts_with('.') || clean.contains("..")))
         {
             return Err(NetworkError::TlsError(format!(
                 "Invalid TLS server name '{}'",

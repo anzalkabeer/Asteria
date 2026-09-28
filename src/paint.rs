@@ -174,6 +174,7 @@ fn render_stacking_context(
     let mut neg_positioned = Vec::new();
     let mut in_flow_commands = DisplayList::new();
     let mut pos_positioned = Vec::new();
+    let mut active_clips = Vec::new();
 
     collect_stacking_context_descendants(
         layout_box,
@@ -183,21 +184,34 @@ fn render_stacking_context(
         dom,
         source,
         current_opacity,
+        &mut active_clips,
     );
 
     // 3. Negative z-index positioned descendants (< 0), sorted by z-index
-    neg_positioned.sort_by_key(|(z, _, _)| *z);
-    for (_, child, child_op) in neg_positioned {
+    neg_positioned.sort_by_key(|(z, _, _, _)| *z);
+    for (_, child, child_op, clips) in neg_positioned {
+        for clip in &clips {
+            display_list.push(DisplayCommand::PushClip { rect: *clip });
+        }
         render_stacking_context(child, dom, source, display_list, child_op);
+        for _ in 0..clips.len() {
+            display_list.push(DisplayCommand::PopClip);
+        }
     }
 
     // 4. Normal in-flow descendant content
     display_list.commands.extend(in_flow_commands.commands);
 
     // 5. Auto / non-negative z-index positioned descendants (>= 0), sorted by z-index
-    pos_positioned.sort_by_key(|(z, _, _)| *z);
-    for (_, child, child_op) in pos_positioned {
+    pos_positioned.sort_by_key(|(z, _, _, _)| *z);
+    for (_, child, child_op, clips) in pos_positioned {
+        for clip in &clips {
+            display_list.push(DisplayCommand::PushClip { rect: *clip });
+        }
         render_stacking_context(child, dom, source, display_list, child_op);
+        for _ in 0..clips.len() {
+            display_list.push(DisplayCommand::PopClip);
+        }
     }
 
     if has_transform {
@@ -209,14 +223,16 @@ fn render_stacking_context(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn collect_stacking_context_descendants<'a>(
     parent: &'a LayoutBox<'a>,
-    neg_positioned: &mut Vec<(i32, &'a LayoutBox<'a>, f32)>,
+    neg_positioned: &mut Vec<(i32, &'a LayoutBox<'a>, f32, Vec<Rect>)>,
     in_flow_commands: &mut DisplayList,
-    pos_positioned: &mut Vec<(i32, &'a LayoutBox<'a>, f32)>,
+    pos_positioned: &mut Vec<(i32, &'a LayoutBox<'a>, f32, Vec<Rect>)>,
     dom: &Dom,
     source: &[u8],
     parent_opacity: f32,
+    active_clips: &mut Vec<Rect>,
 ) {
     for child in &parent.children {
         let child_opacity = (parent_opacity
@@ -237,9 +253,9 @@ fn collect_stacking_context_descendants<'a>(
                 .and_then(|n| n.styles.z_index)
                 .unwrap_or(0);
             if z < 0 {
-                neg_positioned.push((z, child, parent_opacity));
+                neg_positioned.push((z, child, parent_opacity, active_clips.clone()));
             } else {
-                pos_positioned.push((z, child, parent_opacity));
+                pos_positioned.push((z, child, parent_opacity, active_clips.clone()));
             }
         } else {
             let is_child_clipped = child
@@ -248,9 +264,9 @@ fn collect_stacking_context_descendants<'a>(
                 .unwrap_or(false);
 
             if is_child_clipped {
-                in_flow_commands.push(DisplayCommand::PushClip {
-                    rect: child.dimensions.padding_box(),
-                });
+                let clip_rect = child.dimensions.padding_box();
+                in_flow_commands.push(DisplayCommand::PushClip { rect: clip_rect });
+                active_clips.push(clip_rect);
             }
 
             // Normal flow: render in-flow box decorations and text
@@ -273,9 +289,11 @@ fn collect_stacking_context_descendants<'a>(
                 dom,
                 source,
                 child_opacity,
+                active_clips,
             );
 
             if is_child_clipped {
+                active_clips.pop();
                 in_flow_commands.push(DisplayCommand::PopClip);
             }
         }
@@ -284,7 +302,8 @@ fn collect_stacking_context_descendants<'a>(
 
 /// Validate whether a link or resource URL is safe for browser navigation/loading.
 /// Disallows control characters, null bytes, and dangerous pseudo-schemes (e.g., `javascript:`, `data:`, `vbscript:`).
-pub fn is_safe_link_url(raw_url: &str) -> bool {
+/// Accepts an optional document scheme to restrict `file:` URLs to file-based documents only.
+pub fn is_safe_link_url(raw_url: &str, doc_scheme: Option<&str>) -> bool {
     let trimmed = raw_url.trim();
     if trimmed.is_empty() {
         return false;
@@ -302,7 +321,13 @@ pub fn is_safe_link_url(raw_url: &str) -> bool {
             .chars()
             .all(|c| c.is_ascii_alphanumeric() || c == '+' || c == '-' || c == '.')
         {
-            return matches!(scheme.as_str(), "http" | "https" | "file");
+            if scheme == "http" || scheme == "https" {
+                return true;
+            }
+            if scheme == "file" {
+                return doc_scheme == Some("file");
+            }
+            return false;
         }
     }
 
@@ -310,7 +335,23 @@ pub fn is_safe_link_url(raw_url: &str) -> bool {
     true
 }
 
+fn detect_document_scheme<'a>(dom: &Dom, source: &'a [u8]) -> Option<&'a str> {
+    for i in 0..dom.nodes.len() {
+        let node = dom.get(crate::dom::NodeId(i as u32));
+        if node.tag_name(source).eq_ignore_ascii_case("base")
+            && let Some(scheme) = node
+                .get_attribute("href", source)
+                .and_then(|href| href.split_once(':'))
+                .map(|(scheme, _)| scheme.trim())
+        {
+            return Some(scheme);
+        }
+    }
+    None
+}
+
 fn find_link_url(dom: &Dom, source: &[u8], node_id: Option<NodeId>) -> Option<String> {
+    let doc_scheme = detect_document_scheme(dom, source);
     let mut curr = node_id;
     while let Some(id) = curr {
         let node = dom.get(id);
@@ -318,7 +359,7 @@ fn find_link_url(dom: &Dom, source: &[u8], node_id: Option<NodeId>) -> Option<St
             && let Some(href) = node.get_attribute("href", source)
         {
             let trimmed = href.trim();
-            if is_safe_link_url(trimmed) {
+            if is_safe_link_url(trimmed, doc_scheme) {
                 return Some(trimmed.to_string());
             }
             return None;
@@ -452,12 +493,13 @@ fn render_image(layout_box: &LayoutBox, dom: &Dom, source: &[u8], display_list: 
         return;
     };
 
+    let doc_scheme = detect_document_scheme(dom, source);
     let node = dom.get(styled.node_id);
     if node.tag_name(source).eq_ignore_ascii_case("img")
         && let Some(src_val) = node.get_attribute("src", source)
     {
         let trimmed_src = src_val.trim();
-        if is_safe_link_url(trimmed_src) {
+        if is_safe_link_url(trimmed_src, doc_scheme) {
             let rect = layout_box.dimensions.content;
             let link_url = find_link_url(dom, source, Some(styled.node_id));
             display_list.push(DisplayCommand::Image {
@@ -602,35 +644,44 @@ mod tests {
 
     #[test]
     fn test_is_safe_link_url_allowed_schemes() {
-        assert!(is_safe_link_url("http://example.com"));
-        assert!(is_safe_link_url("https://example.com/path?query=1#hash"));
-        assert!(is_safe_link_url("file:///tmp/index.html"));
-        assert!(is_safe_link_url("/relative/path"));
-        assert!(is_safe_link_url("./local.html"));
-        assert!(is_safe_link_url("../parent.html"));
-        assert!(is_safe_link_url("#anchor"));
-        assert!(is_safe_link_url("?search=test"));
-        assert!(is_safe_link_url("image.png"));
+        assert!(is_safe_link_url("http://example.com", None));
+        assert!(is_safe_link_url(
+            "https://example.com/path?query=1#hash",
+            None
+        ));
+        assert!(is_safe_link_url("file:///tmp/index.html", Some("file")));
+        assert!(!is_safe_link_url("file:///tmp/index.html", Some("http")));
+        assert!(!is_safe_link_url("file:///tmp/index.html", None));
+        assert!(is_safe_link_url("/relative/path", None));
+        assert!(is_safe_link_url("./local.html", None));
+        assert!(is_safe_link_url("../parent.html", None));
+        assert!(is_safe_link_url("#anchor", None));
+        assert!(is_safe_link_url("?search=test", None));
+        assert!(is_safe_link_url("image.png", None));
     }
 
     #[test]
     fn test_is_safe_link_url_blocked_schemes() {
-        assert!(!is_safe_link_url("javascript:alert(1)"));
-        assert!(!is_safe_link_url("JAVASCRIPT:void(0)"));
+        assert!(!is_safe_link_url("javascript:alert(1)", None));
+        assert!(!is_safe_link_url("JAVASCRIPT:void(0)", None));
         assert!(!is_safe_link_url(
-            "data:text/html,<script>alert(1)</script>"
+            "data:text/html,<script>alert(1)</script>",
+            None
         ));
-        assert!(!is_safe_link_url("vbscript:msgbox(1)"));
-        assert!(!is_safe_link_url("blob:http://example.com/uuid"));
-        assert!(!is_safe_link_url("custom-scheme://test"));
+        assert!(!is_safe_link_url("vbscript:msgbox(1)", None));
+        assert!(!is_safe_link_url("blob:http://example.com/uuid", None));
+        assert!(!is_safe_link_url("custom-scheme://test", None));
     }
 
     #[test]
     fn test_is_safe_link_url_control_chars() {
-        assert!(!is_safe_link_url(""));
-        assert!(!is_safe_link_url("   "));
-        assert!(!is_safe_link_url("https://example.com\0evil"));
-        assert!(!is_safe_link_url("https://example.com\r\nHeader: evil"));
-        assert!(!is_safe_link_url("http://example.com/\x08test"));
+        assert!(!is_safe_link_url("", None));
+        assert!(!is_safe_link_url("   ", None));
+        assert!(!is_safe_link_url("https://example.com\0evil", None));
+        assert!(!is_safe_link_url(
+            "https://example.com\r\nHeader: evil",
+            None
+        ));
+        assert!(!is_safe_link_url("http://example.com/\x08test", None));
     }
 }

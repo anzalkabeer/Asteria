@@ -79,7 +79,18 @@ impl Tokenizer {
             // If we are at the end of the current buffer
             if self.pos == input.len() {
                 if is_eof {
-                    if self.pos > self.token_start {
+                    let is_unfinished = matches!(
+                        self.state,
+                        State::Comment
+                            | State::Doctype
+                            | State::TagName
+                            | State::BeforeAttributeValue
+                            | State::AttributeValueDoubleQuoted
+                            | State::AttributeValueSingleQuoted
+                            | State::AttributeValueUnquoted
+                            | State::AfterAttributeValue
+                    );
+                    if self.pos > self.token_start && !is_unfinished {
                         self.emit_text();
                     }
                     self.tokens.push(Token {

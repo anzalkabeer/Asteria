@@ -521,12 +521,30 @@ fn build_styled_node(
             }
 
             // ── Step 2: Expand shorthands before cascade sorting ──
-            // Every shorthand declaration generates longhand declarations retaining
-            // the exact same specificity, origin, source_order, and important metadata.
+            // Build the variable map from custom-property declarations in declarations first
+            let mut custom_vars = parent_style.variables.clone();
+            for decl in &declarations {
+                if decl.property.starts_with("--") {
+                    custom_vars.insert(decl.property.to_string(), decl.value.to_string());
+                }
+            }
+
             let mut normalized_decls = Vec::with_capacity(declarations.len());
             for decl in declarations {
                 let prop = decl.property.as_ref();
-                let val_trimmed = decl.value.trim();
+                let substituted_str: String;
+                let val_trimmed: &str = if decl.value.contains("var(") {
+                    let mut active_stack = std::collections::HashSet::new();
+                    substituted_str = substitute_vars_internal(
+                        decl.value.trim(),
+                        &custom_vars,
+                        &mut active_stack,
+                    )
+                    .unwrap_or_else(|| decl.value.trim().to_string());
+                    &substituted_str
+                } else {
+                    decl.value.trim()
+                };
                 let val_lower = val_trimmed.to_ascii_lowercase();
                 let is_css_wide =
                     val_lower == "inherit" || val_lower == "initial" || val_lower == "unset";
@@ -973,18 +991,34 @@ fn apply_user_agent_defaults(
         }
     }
 
-    if !specified.contains_key("margin")
-        && !specified.contains_key("margin-top")
-        && tag_name == "body"
-    {
-        computed.margin = values::Margin::uniform(8.0);
+    if tag_name == "body" {
+        if !specified.contains_key("margin") && !specified.contains_key("margin-top") {
+            computed.margin.top = Some(8.0);
+        }
+        if !specified.contains_key("margin") && !specified.contains_key("margin-right") {
+            computed.margin.right = Some(8.0);
+        }
+        if !specified.contains_key("margin") && !specified.contains_key("margin-bottom") {
+            computed.margin.bottom = Some(8.0);
+        }
+        if !specified.contains_key("margin") && !specified.contains_key("margin-left") {
+            computed.margin.left = Some(8.0);
+        }
     }
 
-    if !specified.contains_key("padding")
-        && !specified.contains_key("padding-top")
-        && (tag_name == "h1" || tag_name == "div")
-    {
-        computed.padding = values::Edges::uniform(12.0);
+    if tag_name == "h1" || tag_name == "div" {
+        if !specified.contains_key("padding") && !specified.contains_key("padding-top") {
+            computed.padding.top = 12.0;
+        }
+        if !specified.contains_key("padding") && !specified.contains_key("padding-right") {
+            computed.padding.right = 12.0;
+        }
+        if !specified.contains_key("padding") && !specified.contains_key("padding-bottom") {
+            computed.padding.bottom = 12.0;
+        }
+        if !specified.contains_key("padding") && !specified.contains_key("padding-left") {
+            computed.padding.left = 12.0;
+        }
     }
 
     if !specified.contains_key("font-weight") && tag_name == "th" {

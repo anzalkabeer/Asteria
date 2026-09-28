@@ -109,11 +109,18 @@ impl Stream {
     pub fn peek_nonblocking(&self, buf: &mut [u8]) -> io::Result<usize> {
         let sock = match self {
             Stream::Plain(s) => s,
-            Stream::Tls(t) => &t.get_ref().sock,
+            Stream::Tls(t) => {
+                if !t.get_ref().conn.wants_read() {
+                    // Rustls has buffered plaintext or has closed/received close_notify
+                    return Ok(1);
+                }
+                &t.get_ref().sock
+            }
         };
         sock.set_nonblocking(true)?;
         let res = sock.peek(buf);
-        let _ = sock.set_nonblocking(false);
+        let unblock_res = sock.set_nonblocking(false);
+        unblock_res?;
         res
     }
 

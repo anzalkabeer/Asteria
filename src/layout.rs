@@ -11,7 +11,7 @@
 use crate::dom::{Dom, NodeKind};
 use crate::style::StyledNode;
 use crate::values;
-use crate::values::Display;
+use crate::values::{Display, LengthOrPercentage};
 
 // ─── Geometry & Box Model ─────────────────────────────────────────
 
@@ -264,16 +264,69 @@ impl<'a> LayoutBox<'a> {
         self.dimensions.content.y = initial_y;
 
         // 5. Layout children with self as their containing block
-        let self_dim = self.dimensions;
         let self_cb = self.dimensions.padding_box();
-        for child in &mut self.children {
-            child.layout_internal(self_dim, Some(self_cb), viewport, dom, source);
+        match self.box_type {
+            BoxType::BlockNode | BoxType::AnonymousBlock => {
+                self.layout_block_children(Some(self_cb), viewport, dom, source);
+            }
+            BoxType::FlexNode => {
+                let saved_x = self.dimensions.content.x;
+                let saved_y = self.dimensions.content.y;
+                let mut cb = self.dimensions;
+                cb.content = self.dimensions.margin_box();
+                self.layout_flex(cb, Some(self_cb), viewport, dom, source);
+                self.dimensions.content.x = saved_x;
+                self.dimensions.content.y = saved_y;
+            }
+            BoxType::GridNode => {
+                let saved_x = self.dimensions.content.x;
+                let saved_y = self.dimensions.content.y;
+                let mut cb = self.dimensions;
+                cb.content = self.dimensions.margin_box();
+                self.layout_grid(cb, Some(self_cb), viewport, dom, source);
+                self.dimensions.content.x = saved_x;
+                self.dimensions.content.y = saved_y;
+            }
+            BoxType::TableNode => {
+                let saved_x = self.dimensions.content.x;
+                let saved_y = self.dimensions.content.y;
+                let mut cb = self.dimensions;
+                cb.content = self.dimensions.margin_box();
+                self.layout_table(cb, Some(self_cb), viewport, dom, source);
+                self.dimensions.content.x = saved_x;
+                self.dimensions.content.y = saved_y;
+            }
+            BoxType::InlineNode => {
+                let dim = self.dimensions;
+                for child in &mut self.children {
+                    child.layout_internal(dim, Some(self_cb), viewport, dom, source);
+                }
+            }
         }
 
-        // 6. If height is content-driven, calculate height from children
-        if explicit_h.is_none() && (top_opt.is_none() || bottom_opt.is_none()) {
+        // Layout out-of-flow positioned children
+        for child in &mut self.children {
+            if child.is_out_of_flow() {
+                child.layout_positioned_child(self_cb, viewport, dom, source);
+            }
+        }
+
+        // 6. Resolve final height (explicit, stretched, or content-driven)
+        if let Some(h) = explicit_h {
+            let ch = if style.is_some_and(|s| s.box_sizing == values::BoxSizing::BorderBox) {
+                (h - pt - pb - bt - bb).max(0.0)
+            } else {
+                h
+            };
+            self.dimensions.content.height = ch;
+        } else if let (Some(t), Some(b)) = (top_opt, bottom_opt) {
+            self.dimensions.content.height = (cb.height - t - b - extra_h).max(0.0);
+        } else {
             let mut max_bottom: f32 = 0.0;
             for child in &self.children {
+                if child.is_out_of_flow() {
+                    continue;
+                }
                 let bottom_y =
                     child.dimensions.margin_box().y + child.dimensions.margin_box().height;
                 let rel_bottom = bottom_y - self.dimensions.content.y;
@@ -375,16 +428,31 @@ impl<'a> LayoutBox<'a> {
                 self.layout_block_children(Some(next_cb), viewport, dom, source);
             }
             BoxType::FlexNode => {
-                let dim = self.dimensions;
-                self.layout_flex(dim, Some(next_cb), viewport, dom, source);
+                let saved_x = self.dimensions.content.x;
+                let saved_y = self.dimensions.content.y;
+                let mut cb = self.dimensions;
+                cb.content = self.dimensions.margin_box();
+                self.layout_flex(cb, Some(next_cb), viewport, dom, source);
+                self.dimensions.content.x = saved_x;
+                self.dimensions.content.y = saved_y;
             }
             BoxType::GridNode => {
-                let dim = self.dimensions;
-                self.layout_grid(dim, Some(next_cb), viewport, dom, source);
+                let saved_x = self.dimensions.content.x;
+                let saved_y = self.dimensions.content.y;
+                let mut cb = self.dimensions;
+                cb.content = self.dimensions.margin_box();
+                self.layout_grid(cb, Some(next_cb), viewport, dom, source);
+                self.dimensions.content.x = saved_x;
+                self.dimensions.content.y = saved_y;
             }
             BoxType::TableNode => {
-                let dim = self.dimensions;
-                self.layout_table(dim, Some(next_cb), viewport, dom, source);
+                let saved_x = self.dimensions.content.x;
+                let saved_y = self.dimensions.content.y;
+                let mut cb = self.dimensions;
+                cb.content = self.dimensions.margin_box();
+                self.layout_table(cb, Some(next_cb), viewport, dom, source);
+                self.dimensions.content.x = saved_x;
+                self.dimensions.content.y = saved_y;
             }
             BoxType::InlineNode => {
                 let dim = self.dimensions;
@@ -609,9 +677,33 @@ impl<'a> LayoutBox<'a> {
                 let border_bottom = style.map(|s| s.border_width.bottom).unwrap_or(0.0);
 
                 // Compute intrinsic content width and height from text / child layout
-                let content_w = compute_intrinsic_inline_width(child.styled_node, dom, source);
+                let intrinsic_w = compute_intrinsic_inline_width(child.styled_node, dom, source);
+                let content_w = style
+                    .and_then(|s| s.width.resolve_against(container_max_w))
+                    .unwrap_or(intrinsic_w);
+
                 let font_size = style.map(|s| s.font_size).unwrap_or(16.0);
-                let content_h = style.map(|s| s.line_height).unwrap_or(font_size * 1.2);
+                let line_h = style.map(|s| s.line_height).unwrap_or(font_size * 1.2);
+                let parent_h = self.dimensions.content.height;
+                let content_h = style
+                    .and_then(|s| match s.height {
+                        LengthOrPercentage::Percentage(_) => {
+                            if parent_h > 0.0 {
+                                s.height.resolve_against(parent_h)
+                            } else {
+                                None
+                            }
+                        }
+                        LengthOrPercentage::Calc { percentage, .. } if percentage != 0.0 => {
+                            if parent_h > 0.0 {
+                                s.height.resolve_against(parent_h)
+                            } else {
+                                None
+                            }
+                        }
+                        _ => s.height.resolve_against(parent_h),
+                    })
+                    .unwrap_or(line_h);
 
                 let outer_w = content_w
                     + margin_left
@@ -726,10 +818,30 @@ impl<'a> LayoutBox<'a> {
 
     /// Override content height if explicitly specified on the element's style
     fn calculate_block_height(&mut self, containing_block: Dimensions) {
-        if let Some(h) = self.styled_node.and_then(|n| {
-            n.styles
+        let is_cb_height_definite = containing_block.content.height > 0.0;
+        if let Some(h) = self.styled_node.and_then(|n| match n.styles.height {
+            LengthOrPercentage::Percentage(_) => {
+                if is_cb_height_definite {
+                    n.styles
+                        .height
+                        .resolve_against(containing_block.content.height)
+                } else {
+                    None
+                }
+            }
+            LengthOrPercentage::Calc { percentage, .. } if percentage != 0.0 => {
+                if is_cb_height_definite {
+                    n.styles
+                        .height
+                        .resolve_against(containing_block.content.height)
+                } else {
+                    None
+                }
+            }
+            _ => n
+                .styles
                 .height
-                .resolve_against(containing_block.content.height)
+                .resolve_against(containing_block.content.height),
         }) {
             self.dimensions.content.height = h;
         }
@@ -1901,18 +2013,28 @@ impl<'a> LayoutBox<'a> {
                     RowLocation::InGroup(i, j) => &self.children[i].children[j].children[cell_idx],
                 };
 
+                let max_rowspan_in_group = match row_locations[r] {
+                    RowLocation::InGroup(group_idx, row_in_group) => self.children[group_idx]
+                        .children
+                        .len()
+                        .saturating_sub(row_in_group)
+                        .max(1),
+                    RowLocation::Direct(_) => num_rows.saturating_sub(r).max(1),
+                };
+
                 let (colspan, rowspan) = if let Some(sn) = cell.styled_node {
                     let node = dom.get(sn.node_id);
                     let cs = node
                         .get_attribute("colspan", source)
                         .and_then(|s| s.trim().parse::<usize>().ok())
                         .unwrap_or(1)
-                        .max(1);
+                        .clamp(1, 1000);
                     let rs = node
                         .get_attribute("rowspan", source)
                         .and_then(|s| s.trim().parse::<usize>().ok())
                         .unwrap_or(1)
-                        .max(1);
+                        .clamp(1, 65534)
+                        .min(max_rowspan_in_group);
                     (cs, rs)
                 } else {
                     (1, 1)

@@ -852,6 +852,12 @@ pub fn run_window_loop(initial_scene: SceneGraph, tab_manager: TabManager) {
                         backend.queue.submit(std::iter::once(encoder.finish()));
                         frame.present();
 
+                        if let Some(text_pass) = render_graph
+                            .find_pass_mut::<crate::renderer::passes::text_pass::TextPass>(
+                        ) {
+                            text_pass.trim_atlas();
+                        }
+
                         scene.clear_dirty();
                     }
 

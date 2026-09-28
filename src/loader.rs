@@ -487,8 +487,16 @@ fn resolve_path(href: &str, base_dir: Option<&Path>) -> String {
     let href_path = Path::new(href);
 
     if let Some(base) = base_dir {
-        // Always resolve relative to base directory.
-        // Strip leading '/' from absolute paths to force them relative to base.
+        // Reject paths with a root or a platform prefix before joining them to base
+        if href_path.has_root()
+            || href_path
+                .components()
+                .any(|c| matches!(c, std::path::Component::Prefix(_)))
+        {
+            eprintln!("Warning: Blocked root or prefixed path: {}", href);
+            return String::new();
+        }
+
         let relative = href_path.strip_prefix("/").unwrap_or(href_path);
         let joined = base.join(relative);
 
@@ -499,6 +507,7 @@ fn resolve_path(href: &str, base_dir: Option<&Path>) -> String {
                 eprintln!("Warning: Blocked path traversal escape for {}", href);
                 return String::new();
             }
+            return normalize_path_string(&joined_canon.to_string_lossy());
         } else {
             let mut depth = 0;
             for comp in relative.components() {

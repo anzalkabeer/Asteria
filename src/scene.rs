@@ -349,15 +349,25 @@ pub fn build_scene_graph(display_list: &DisplayList, segment_height: f32) -> Sce
     let mut transform_stack: Vec<[f32; 6]> = Vec::new();
 
     for cmd in &display_list.commands {
-        let node_rect = cmd_bounding_rect(cmd);
+        let is_state_cmd = matches!(
+            cmd,
+            DisplayCommand::PushClip { .. }
+                | DisplayCommand::PopClip
+                | DisplayCommand::PushTransform { .. }
+                | DisplayCommand::PopTransform
+        );
 
-        // Pop containers that no longer contain the current node.
-        // This keeps the stack proportional to nesting depth, not total node count.
-        while let Some((_, top_rect)) = parent_stack.last() {
-            if !rect_contains(top_rect, &node_rect) {
-                parent_stack.pop();
-            } else {
-                break;
+        if !is_state_cmd {
+            let node_rect = cmd_bounding_rect(cmd);
+
+            // Pop containers that no longer contain the current node.
+            // This keeps the stack proportional to nesting depth, not total node count.
+            while let Some((_, top_rect)) = parent_stack.last() {
+                if !rect_contains(top_rect, &node_rect) {
+                    parent_stack.pop();
+                } else {
+                    break;
+                }
             }
         }
         let parent_id = parent_stack.last().map(|(id, _)| *id);

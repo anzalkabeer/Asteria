@@ -70,9 +70,9 @@
 
 ---
 
-### 2.2 [PARTIALLY RESOLVED] `table`, `tr`, `td`, `th` display defaults (`style.rs`)
+### 2.2 [RESOLVED] `table`, `tr`, `td`, `th` display defaults (`style.rs`)
 
-> **Status:** Partially resolved in Batch 3. `table`, `thead`, `tbody`, `tfoot`, `tr`, and `caption` now receive `display: block` as a minimum UA default. Proper `display: table`/`display: table-row`/`display: table-cell` semantics are still pending full table layout engine work.
+> **Status:** Resolved. The UA stylesheet in `apply_user_agent_defaults` applies table display defaults (`table` -> `Display::Table`, `tr` -> `Display::TableRow`, `td`/`th` -> `Display::TableCell`, `thead`/`tbody`/`tfoot` -> table row groups, `caption` -> `Display::TableCaption`), which are rendered via the existing `layout_table` implementation in `layout.rs`.
 
 ---
 
@@ -300,7 +300,7 @@ The animation system defines `AnimationSpec`, keyframe types, timing functions, 
 
 ### 5.2 [RESOLVED] Property ID lookup synchronization (`properties.rs`)
 
-> **Status:** Resolved in Final Batch. `properties.rs` maintains canonical `property_from_name()` and `property_id_to_name()` mappings tested with exhaustive coverage across all 35 properties.
+> **Status:** Resolved in Final Batch. `properties.rs` maintains canonical `property_from_name()` and `property_id_to_name()` mappings tested with exhaustive coverage across all 62 properties.
 
 ---
 
@@ -539,18 +539,18 @@ The HTML tokenizer is a complex state machine processing arbitrary byte input. T
 | Category | Active Count | Severity |
 |----------|--------------|----------|
 | Critical Bugs | 0 *(7 resolved)* | 🟢 Complete |
-| Logic Flaws | 0 *(11 resolved)* | 🟢 Complete |
+| Logic Flaws | 4 *(7 resolved)* | 🟡 Medium |
 | Spec Non-Compliance | 0 *(9 resolved)* | 🟢 Complete |
-| Architecture Flaws | 5 *(4 resolved)* | 🟡 Medium |
-| Code Quality | 0 *(7 resolved)* | 🟢 Complete |
-| Performance Issues | 0 *(6 resolved)* | 🟢 Complete |
-| Security Concerns | 0 *(5 resolved)* | 🟢 Complete |
-| Test Coverage Gaps | 0 *(9 resolved)* | 🟢 Complete |
-| **Total Active** | **5** *(58 resolved)* | |
+| Architecture Flaws | 7 *(2 resolved)* | 🟡 Medium |
+| Code Quality | 3 *(4 resolved)* | 🟢 Low |
+| Performance Issues | 6 *(0 resolved)* | 🟡 Medium |
+| Security Concerns | 4 *(1 resolved)* | 🔴 High |
+| Test Coverage Gaps | 9 *(0 resolved)* | 🟡 Medium |
+| **Total Active** | **33** *(30 resolved)* | |
 
 The most impactful active issues to fix next are:
-1. **Percentage length resolution** (#1.1) — compute width/height % against containing block
-2. **`box-sizing: border-box`** (#3.6) — box model border-box support
-3. **`margin: auto` horizontal centering** (#3.1) — keyword detection and underflow centering
-4. **`!important` declaration priority** (#3.2) — cascade sorting with important flag
-5. **Stacking Context & `z-index`** (#4.9) — display list paint order
+1. **Flex gap calculation** (#2.7) — replace hardcoded 16px with computed row/column gap
+2. **`var()` circular substitution guard** (#2.9) — detect cycles in CSS variable resolution
+3. **Arena allocator in DOM** (#4.2) — utilize existing arena allocator for DOM nodes
+4. **O(elements × rules) selector matching** (#6.1) — introduce rule indexing by class/id/tag
+5. **HTTP request header injection protection** (#7.2) — validate header names and values against CRLF injection

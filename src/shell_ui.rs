@@ -617,7 +617,9 @@ impl ShellUiState {
         let available_chars = ((omni_w - OMNIBOX_GO_WIDTH - 16.0) / 7.5).max(1.0) as usize;
 
         // Protocol indicator
-        let (protocol_label, url_display) = if self.omnibox_text.starts_with("https://") {
+        let (protocol_label, url_display) = if self.omnibox_focused {
+            ("", self.omnibox_text.as_str())
+        } else if self.omnibox_text.starts_with("https://") {
             ("HTTPS ", &self.omnibox_text[8..])
         } else if self.omnibox_text.starts_with("http://") {
             ("HTTP ", &self.omnibox_text[7..])

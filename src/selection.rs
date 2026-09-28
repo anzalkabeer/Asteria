@@ -182,7 +182,7 @@ impl TextSelection {
 
         for (i, node) in scene.nodes.iter().enumerate() {
             if let SceneNodeKind::Text { font_size } = node.kind {
-                let Some(text_run) = &scene.texts[i] else {
+                let Some(Some(text_run)) = scene.texts.get(i) else {
                     continue;
                 };
                 let text = &text_run.text;
@@ -268,12 +268,12 @@ impl TextSelection {
             return Err("No text selected".to_string());
         }
 
-        if let Ok(mut clipboard) = arboard::Clipboard::new() {
-            let _ = clipboard.set_text(&text);
-            Ok(text)
-        } else {
-            Ok(text)
-        }
+        let mut clipboard =
+            arboard::Clipboard::new().map_err(|e| format!("Clipboard error: {e}"))?;
+        clipboard
+            .set_text(&text)
+            .map_err(|e| format!("Clipboard error: {e}"))?;
+        Ok(text)
     }
 }
 

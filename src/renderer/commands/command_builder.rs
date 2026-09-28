@@ -41,14 +41,14 @@ impl CommandBuilder {
             let transform = node.transform;
             match &node.kind {
                 crate::scene::SceneNodeKind::SolidRect
-                | crate::scene::SceneNodeKind::RoundedRect { .. }
-                | crate::scene::SceneNodeKind::BoxShadow { .. } => {
+                | crate::scene::SceneNodeKind::RoundedRect { .. } => {
                     self.commands.push(RenderCommand::SolidRect {
                         rect: [node.rect.x, node.rect.y, node.rect.width, node.rect.height],
                         rgba: color,
                         transform,
                     });
                 }
+                crate::scene::SceneNodeKind::BoxShadow { .. } => {}
                 crate::scene::SceneNodeKind::Border { widths } => {
                     let x = node.rect.x;
                     let y = node.rect.y;

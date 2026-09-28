@@ -1,7 +1,7 @@
 use crate::layout::Rect;
 use crate::renderer::commands::batch_builder::BatchBuilder;
 use crate::renderer::commands::command_builder::RenderCommand;
-use crate::scene::{SceneGraph, SceneNodeId, SceneNodeKind};
+use crate::scene::{SceneGraph, SceneNode, SceneNodeId, SceneNodeKind};
 use crate::selection::TextSelection;
 use crate::values::{IDENTITY_MATRIX, is_identity_matrix};
 
@@ -125,15 +125,35 @@ impl CompositorLayer {
                 color[3] *= self.opacity;
             }
 
-            if matches!(node.kind, SceneNodeKind::SolidRect) {
-                let mut transform = self.transform;
-                if is_identity_matrix(&transform) {
+            let expanded_rects = expand_node_rects(node);
+            let mut transform = self.transform;
+
+            if is_identity_matrix(&transform) {
+                for base_rect in expanded_rects {
                     let mut r = [
-                        node.rect.x,
-                        node.rect.y + top_clip - scroll,
-                        node.rect.width,
-                        node.rect.height,
+                        base_rect[0],
+                        base_rect[1] + top_clip - scroll,
+                        base_rect[2],
+                        base_rect[3],
                     ];
+
+                    if let Some(clip) = node.clip {
+                        let clip_x = clip.x;
+                        let clip_y = clip.y + top_clip - scroll;
+                        let clip_w = clip.width;
+                        let clip_h = clip.height;
+
+                        let x1 = r[0].max(clip_x);
+                        let y1 = r[1].max(clip_y);
+                        let x2 = (r[0] + r[2]).min(clip_x + clip_w);
+                        let y2 = (r[1] + r[3]).min(clip_y + clip_h);
+
+                        if x2 <= x1 || y2 <= y1 {
+                            continue;
+                        }
+                        r = [x1, y1, x2 - x1, y2 - y1];
+                    }
+
                     let r_top = r[1];
                     let r_bottom = r[1] + r[3];
                     if r_bottom <= top_clip || r_top >= bottom_clip {
@@ -143,16 +163,68 @@ impl CompositorLayer {
                     let vis_bottom = r_bottom.min(bottom_clip);
                     r[1] = vis_top;
                     r[3] = (vis_bottom - vis_top).max(0.0);
+
                     commands.push(RenderCommand::SolidRect {
                         rect: r,
                         rgba: color,
                         transform,
                     });
-                } else {
-                    // Offset layer translation by top_clip and scroll
-                    transform[5] += top_clip - scroll;
+                }
+            } else {
+                transform[5] += top_clip - scroll;
+
+                for base_rect in expanded_rects {
+                    let mut rx = base_rect[0];
+                    let mut ry = base_rect[1];
+                    let mut rw = base_rect[2];
+                    let mut rh = base_rect[3];
+
+                    if let Some(clip) = node.clip {
+                        let x1 = rx.max(clip.x);
+                        let y1 = ry.max(clip.y);
+                        let x2 = (rx + rw).min(clip.x + clip.width);
+                        let y2 = (ry + rh).min(clip.y + clip.height);
+                        if x2 <= x1 || y2 <= y1 {
+                            continue;
+                        }
+                        rx = x1;
+                        ry = y1;
+                        rw = x2 - x1;
+                        rh = y2 - y1;
+                    }
+
+                    let p0 = crate::values::transform_point(&transform, rx, ry);
+                    let p1 = crate::values::transform_point(&transform, rx + rw, ry);
+                    let p2 = crate::values::transform_point(&transform, rx + rw, ry + rh);
+                    let p3 = crate::values::transform_point(&transform, rx, ry + rh);
+
+                    let min_y = p0.1.min(p1.1).min(p2.1).min(p3.1);
+                    let max_y = p0.1.max(p1.1).max(p2.1).max(p3.1);
+
+                    if max_y <= top_clip || min_y >= bottom_clip {
+                        continue;
+                    }
+
+                    if min_y < top_clip || max_y > bottom_clip {
+                        let clamp_top_ratio = if max_y > min_y {
+                            ((top_clip - min_y).max(0.0) / (max_y - min_y)).clamp(0.0, 1.0)
+                        } else {
+                            0.0
+                        };
+                        let clamp_bottom_ratio = if max_y > min_y {
+                            ((max_y - bottom_clip).max(0.0) / (max_y - min_y)).clamp(0.0, 1.0)
+                        } else {
+                            0.0
+                        };
+                        ry += rh * clamp_top_ratio;
+                        rh = (rh * (1.0 - clamp_top_ratio - clamp_bottom_ratio)).max(0.0);
+                        if rh <= 0.0 {
+                            continue;
+                        }
+                    }
+
                     commands.push(RenderCommand::SolidRect {
-                        rect: [node.rect.x, node.rect.y, node.rect.width, node.rect.height],
+                        rect: [rx, ry, rw, rh],
                         rgba: color,
                         transform,
                     });
@@ -160,6 +232,35 @@ impl CompositorLayer {
             }
         }
         commands
+    }
+}
+
+fn expand_node_rects(node: &SceneNode) -> Vec<[f32; 4]> {
+    match &node.kind {
+        SceneNodeKind::SolidRect | SceneNodeKind::RoundedRect { .. } => {
+            vec![[node.rect.x, node.rect.y, node.rect.width, node.rect.height]]
+        }
+        SceneNodeKind::Border { widths } => {
+            let x = node.rect.x;
+            let y = node.rect.y;
+            let w = node.rect.width;
+            let h = node.rect.height;
+            let mut rects = Vec::new();
+            if widths.top > 0.0 {
+                rects.push([x, y, w, widths.top]);
+            }
+            if widths.bottom > 0.0 {
+                rects.push([x, y + (h - widths.bottom).max(0.0), w, widths.bottom]);
+            }
+            if widths.left > 0.0 {
+                rects.push([x, y, widths.left, h]);
+            }
+            if widths.right > 0.0 {
+                rects.push([x + (w - widths.right).max(0.0), y, widths.right, h]);
+            }
+            rects
+        }
+        _ => Vec::new(),
     }
 }
 
@@ -185,7 +286,8 @@ impl Compositor {
         root_layer.z_order = 0;
 
         let mut next_layer_id = 1;
-        let mut promoted_layers = Vec::new();
+        let mut current_run = root_layer;
+        let mut had_nodes_in_run = false;
 
         for (i, node) in scene.nodes.iter().enumerate() {
             let has_transform = !is_identity_matrix(&node.transform);
@@ -194,26 +296,37 @@ impl Compositor {
                 && (node.rect.width > 200.0 || node.rect.height > 200.0);
 
             // Promote transformed elements, distinct stacking contexts, or large translucent overlays
-            if has_transform || has_stacking_order || has_opacity {
+            let should_promote = has_transform || has_stacking_order || has_opacity;
+
+            if should_promote {
+                if had_nodes_in_run {
+                    current_run.update_bounds(scene);
+                    self.layers.push(current_run);
+                    current_run =
+                        CompositorLayer::new(next_layer_id, SceneNodeId(i as u32), Rect::default());
+                    current_run.is_promoted = false;
+                    current_run.z_order = node.z_order;
+                    next_layer_id += 1;
+                    had_nodes_in_run = false;
+                }
                 let mut layer =
                     CompositorLayer::new(next_layer_id, SceneNodeId(i as u32), node.rect);
                 layer.transform = node.transform;
                 layer.z_order = node.z_order;
                 layer.is_promoted = true;
                 layer.node_indices.push(i);
-                promoted_layers.push(layer);
+                layer.update_bounds(scene);
+                self.layers.push(layer);
                 next_layer_id += 1;
             } else {
-                root_layer.node_indices.push(i);
+                current_run.node_indices.push(i);
+                had_nodes_in_run = true;
             }
         }
 
-        root_layer.update_bounds(scene);
-        self.layers.push(root_layer);
-
-        for mut layer in promoted_layers {
-            layer.update_bounds(scene);
-            self.layers.push(layer);
+        if had_nodes_in_run || current_run.id == 0 {
+            current_run.update_bounds(scene);
+            self.layers.push(current_run);
         }
 
         // Sort layers by stacking context z_order so compositing paints in correct CSS order

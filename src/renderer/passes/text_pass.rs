@@ -139,6 +139,10 @@ impl TextPass {
     pub fn clear(&mut self) {
         self.buffers.clear();
     }
+
+    pub fn trim_atlas(&mut self) {
+        self.atlas.trim();
+    }
 }
 
 impl RenderPass for TextPass {
@@ -187,11 +191,22 @@ impl RenderPass for TextPass {
             &mut self.font_system,
             &mut self.atlas,
             &self.viewport,
-            text_areas,
+            text_areas.iter().cloned(),
             &mut self.swash_cache,
         );
         if let Err(glyphon::PrepareError::AtlasFull) = result {
             self.atlas.trim();
+            if let Err(e) = self.renderer.prepare(
+                device,
+                queue,
+                &mut self.font_system,
+                &mut self.atlas,
+                &self.viewport,
+                text_areas,
+                &mut self.swash_cache,
+            ) {
+                eprintln!("[ASTERIA] Text prepare retry error: {e:?}");
+            }
         } else if let Err(e) = result {
             eprintln!("[ASTERIA] Text prepare error: {e:?}");
         }

@@ -410,17 +410,30 @@ impl HttpClient {
             request.url.scheme, request.url.host, request.url.port
         );
         let req_bytes = request.to_request_bytes();
-        let stream = self.acquire_stream(&request.url)?;
+        let stream = match self.acquire_stream(&request.url) {
+            Ok(s) => s,
+            Err(e) => {
+                self.pool.disconnect(&pool_key);
+                return Err(e);
+            }
+        };
 
         // Write the HTTP request
-        stream
-            .write_all(&req_bytes)
-            .map_err(|e| NetworkError::WriteError {
+        if let Err(e) = stream.write_all(&req_bytes) {
+            self.pool.disconnect(&pool_key);
+            return Err(NetworkError::WriteError {
                 message: e.to_string(),
-            })?;
+            });
+        }
 
         // Read the response
-        let mut response = read_response(stream)?;
+        let mut response = match read_response(stream) {
+            Ok(r) => r,
+            Err(e) => {
+                self.pool.disconnect(&pool_key);
+                return Err(e);
+            }
+        };
         response.url = request.url.raw.clone();
 
         let is_close = response
@@ -450,17 +463,30 @@ impl HttpClient {
         };
 
         let req_bytes = request.to_request_bytes();
-        let stream = self.acquire_stream(&request.url)?;
+        let stream = match self.acquire_stream(&request.url) {
+            Ok(s) => s,
+            Err(e) => {
+                self.pool.disconnect(&pool_key);
+                return Err(e);
+            }
+        };
 
         // Write request
-        stream
-            .write_all(&req_bytes)
-            .map_err(|e| NetworkError::WriteError {
+        if let Err(e) = stream.write_all(&req_bytes) {
+            self.pool.disconnect(&pool_key);
+            return Err(NetworkError::WriteError {
                 message: e.to_string(),
-            })?;
+            });
+        }
 
         // Read headers
-        let (status_code, _, headers, leftover) = read_response_headers(stream)?;
+        let (status_code, _, headers, leftover) = match read_response_headers(stream) {
+            Ok(h) => h,
+            Err(e) => {
+                self.pool.disconnect(&pool_key);
+                return Err(e);
+            }
+        };
 
         let is_chunked = headers.iter().any(|(k, v)| {
             k.to_lowercase() == "transfer-encoding" && v.to_lowercase().contains("chunked")
@@ -485,17 +511,26 @@ impl HttpClient {
 
         let mut reader = std::io::Cursor::new(leftover).chain(stream);
 
-        if is_chunked {
-            stream_chunked_body(&mut reader, &url_str, &sender)?;
+        let mut is_eof_body = false;
+        let body_res = if is_chunked {
+            stream_chunked_body(&mut reader, &url_str, &sender)
         } else if let Some(len) = content_length {
-            stream_exact_body(&mut reader, len, &url_str, &sender)?;
+            stream_exact_body(&mut reader, len, &url_str, &sender)
         } else {
-            stream_eof_body(&mut reader, &url_str, &sender)?;
+            let res = stream_eof_body(&mut reader, &url_str, &sender);
+            is_eof_body = true;
+            res
+        };
+
+        if let Err(e) = body_res {
+            self.pool.disconnect(&pool_key);
+            return Err(e);
         }
 
-        let is_close = headers.iter().any(|(k, v)| {
-            k.eq_ignore_ascii_case("connection") && v.to_ascii_lowercase().contains("close")
-        });
+        let is_close = is_eof_body
+            || headers.iter().any(|(k, v)| {
+                k.eq_ignore_ascii_case("connection") && v.to_ascii_lowercase().contains("close")
+            });
         if is_close {
             self.pool.disconnect(&pool_key);
         }
@@ -583,7 +618,7 @@ fn read_response_headers<R: std::io::Read>(
 
 /// Reads and parses an HTTP response from a TCP stream.
 fn read_response<R: std::io::Read>(stream: &mut R) -> Result<HttpResponse, NetworkError> {
-    let (status_code, status_text, headers, leftover) = read_response_headers(stream)?;
+    let (status_code, status_text, mut headers, leftover) = read_response_headers(stream)?;
     let mut reader = std::io::Cursor::new(leftover).chain(stream);
 
     let is_chunked = headers.iter().any(|(k, v)| {
@@ -603,6 +638,7 @@ fn read_response<R: std::io::Read>(stream: &mut R) -> Result<HttpResponse, Netwo
         // No body length specified, read until EOF
         let mut body = Vec::new();
         let _ = reader.read_to_end(&mut body);
+        headers.push(("connection".to_string(), "close".to_string()));
         body
     };
 

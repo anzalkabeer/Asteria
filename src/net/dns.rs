@@ -62,6 +62,9 @@ pub fn is_private_or_loopback_ip(ip: &IpAddr) -> bool {
                 || v4.is_unspecified()
         }
         IpAddr::V6(v6) => {
+            if let Some(mapped_v4) = v6.to_ipv4_mapped() {
+                return is_private_or_loopback_ip(&IpAddr::V4(mapped_v4));
+            }
             v6.is_loopback()
                 || v6.is_unspecified()
                 || (v6.segments()[0] & 0xfe00) == 0xfc00 // Unique local address (fc00::/7)
@@ -72,7 +75,8 @@ pub fn is_private_or_loopback_ip(ip: &IpAddr) -> bool {
 
 /// Helper to check if a hostname is an intrinsically local hostname (e.g. localhost, .local, .internal, or loopback IP).
 pub fn is_local_hostname(hostname: &str) -> bool {
-    let lower = hostname.to_ascii_lowercase();
+    let unadorned = hostname.strip_suffix('.').unwrap_or(hostname);
+    let lower = unadorned.to_ascii_lowercase();
     lower == "localhost"
         || lower.ends_with(".localhost")
         || lower.ends_with(".local")

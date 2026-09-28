@@ -1030,7 +1030,14 @@ impl ComputedStyle {
             PropertyId::BorderColor => self.border_color = parse_color(value),
             PropertyId::BorderStyle => self.border_style = parse_border_style(value),
 
-            PropertyId::Color => self.color = parse_color(value),
+            PropertyId::Color => {
+                if let Some(css_color) = try_parse_css_color(value) {
+                    self.color = match css_color {
+                        CssColor::Rgba(c) => c,
+                        CssColor::CurrentColor => Color::BLACK,
+                    };
+                }
+            }
             PropertyId::BackgroundColor => self.background_color = parse_color(value),
 
             // font-size is special: em/% are relative to PARENT's font-size
@@ -2126,6 +2133,7 @@ fn parse_grid_tracks_inner(value: &str) -> Vec<GridTrack> {
                 let paren_start = i + func_name_len;
                 let mut depth = 1;
                 let mut end = paren_start;
+                let mut found_closing = false;
                 for (j, c) in value[paren_start..].char_indices() {
                     match c {
                         '(' => depth += 1,
@@ -2133,11 +2141,15 @@ fn parse_grid_tracks_inner(value: &str) -> Vec<GridTrack> {
                             depth -= 1;
                             if depth == 0 {
                                 end = paren_start + j;
+                                found_closing = true;
                                 break;
                             }
                         }
                         _ => {}
                     }
+                }
+                if !found_closing {
+                    break;
                 }
                 let func_str = &value[i..=end];
                 if lower.starts_with("repeat(") {

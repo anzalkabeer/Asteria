@@ -101,15 +101,20 @@ impl AnimationManager {
         self.animations.retain_mut(|anim| {
             anim.elapsed += dt;
 
-            // Calculate progress clamped between 0 and 1
-            let cycle_elapsed = if anim.iteration_count <= 0.0
-                || anim.elapsed < anim.duration * anim.iteration_count
-            {
-                anim.elapsed % anim.duration
-            } else {
+            let duration = if anim.duration > 0.0 {
                 anim.duration
+            } else {
+                0.001
             };
-            let progress = (cycle_elapsed / anim.duration).clamp(0.0, 1.0);
+
+            // Calculate progress clamped between 0 and 1
+            let cycle_elapsed =
+                if anim.iteration_count <= 0.0 || anim.elapsed < duration * anim.iteration_count {
+                    anim.elapsed % duration
+                } else {
+                    duration
+                };
+            let progress = (cycle_elapsed / duration).clamp(0.0, 1.0);
             let eased = ease(progress, &anim.timing_function);
 
             // Send a placeholder update (PropertyId::Width) for keyframe progress mapping
@@ -118,7 +123,7 @@ impl AnimationManager {
             if anim.iteration_count <= 0.0 {
                 true // infinite loop
             } else {
-                anim.elapsed < anim.duration * anim.iteration_count
+                anim.elapsed < duration * anim.iteration_count
             }
         });
 
