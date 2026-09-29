@@ -332,9 +332,13 @@ mod tests {
         assert!(!selected.is_empty());
         assert!(selected.starts_with("Hell"));
 
-        // Copy test
-        let copied = sel.copy_to_clipboard(&scene);
-        assert!(copied.is_ok());
+        // Copy test - verify the text is extractable (clipboard may not be available in headless CI)
+        let text = sel.get_selected_text(&scene);
+        assert!(!text.is_empty());
+        if arboard::Clipboard::new().is_ok() {
+            let copied = sel.copy_to_clipboard(&scene);
+            assert!(copied.is_ok());
+        }
     }
 
     #[test]
