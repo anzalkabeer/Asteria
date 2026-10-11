@@ -1,0 +1,59 @@
+﻿commit 7ca9f80268a1d76e698560db82463e7960aa7845
+Author: dependabot[bot] <49699333+dependabot[bot]@users.noreply.github.com>
+Date:   Wed Oct 7 00:37:29 2026 +0000
+
+    build: bump lazy_static from 1.5.0 to 1.5.1 (#48698)
+    
+    Bumps [lazy_static](https://github.com/rust-lang-nursery/lazy-static.rs)
+    from 1.5.0 to 1.5.1.
+    <details>
+    <summary>Commits</summary>
+    <ul>
+    <li>See full diff in <a
+    href="https://github.com/rust-lang-nursery/lazy-static.rs/commits">compare
+    view</a></li>
+    </ul>
+    </details>
+    <br />
+    
+    
+    [![Dependabot compatibility
+    score](https://dependabot-badges.githubapp.com/badges/compatibility_score?dependency-name=lazy_static&package-manager=cargo&previous-version=1.5.0&new-version=1.5.1)](https://docs.github.com/en/github/managing-security-vulnerabilities/about-dependabot-security-updates#about-compatibility-scores)
+    
+    Dependabot will resolve any conflicts with this PR as long as you don't
+    alter it yourself. You can also trigger a rebase manually by commenting
+    `@dependabot rebase`.
+    
+    [//]: # (dependabot-automerge-start)
+    [//]: # (dependabot-automerge-end)
+    
+    ---
+    
+    <details>
+    <summary>Dependabot commands and options</summary>
+    <br />
+    
+    You can trigger Dependabot actions by commenting on this PR:
+    - `@dependabot rebase` will rebase this PR
+    - `@dependabot recreate` will recreate this PR, overwriting any edits
+    that have been made to it
+    - `@dependabot show <dependency name> ignore conditions` will show all
+    of the ignore conditions of the specified dependency
+    - `@dependabot ignore this major version` will close this PR and stop
+    Dependabot creating any more for this major version (unless you reopen
+    the PR or upgrade to it yourself)
+    - `@dependabot ignore this minor version` will close this PR and stop
+    Dependabot creating any more for this minor version (unless you reopen
+    the PR or upgrade to it yourself)
+    - `@dependabot ignore this dependency` will close this PR and stop
+    Dependabot creating any more for this dependency (unless you reopen the
+    PR or upgrade to it yourself)
+    
+    
+    </details>
+    
+    Signed-off-by: dependabot[bot] <support@github.com>
+    Co-authored-by: dependabot[bot] <49699333+dependabot[bot]@users.noreply.github.com>
+
+ Cargo.lock | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)

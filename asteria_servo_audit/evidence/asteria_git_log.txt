@@ -1,0 +1,9 @@
+﻿commit 3cdd5155caf544794c3d11f45dfc839665d9759b
+Author: anzalkabeer <anzalkabeer28@gmail.com>
+Date:   Tue Sep 29 09:47:19 2026 +0530
+
+    fixed tbe failing test due to CI enviorement
+
+ src/selection.rs              | 10 +++++++---
+ tests/renderer_integration.rs |  6 ++++--
+ 2 files changed, 11 insertions(+), 5 deletions(-)
