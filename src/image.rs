@@ -65,46 +65,44 @@ impl ImageDecoder {
     pub fn decode_image(&self, id: &str, data: &[u8]) -> Result<DecodeImage, String> {
         // Safety limits to prevent OOM from crafted image headers
         const MAX_IMAGE_DIMENSION: u32 = 16384;
-        const MAX_PIXEL_BYTES: usize = 256 * 1024 * 1024; // 256MB
+        const MAX_PIXEL_BYTES: usize = 256 * 1024 * 1024; // 256 MiB
 
         let format = detect_image_format(data)
             .ok_or_else(|| format!("Unknown image format for '{}'", id))?;
-        let (fallback_width, fallback_height) = parse_image_dimensions(format, data);
 
-        // Try decoding with the `image` crate (PNG, JPEG, WebP, etc.)
-        if let Ok(dyn_img) = image::load_from_memory(data) {
-            let rgba = dyn_img.to_rgba8();
-            let (width, height) = rgba.dimensions();
+        let mut reader = image::ImageReader::new(std::io::Cursor::new(data));
+        let mut limits = image::Limits::default();
+        limits.max_alloc = Some(MAX_PIXEL_BYTES as u64);
+        limits.max_image_width = Some(MAX_IMAGE_DIMENSION);
+        limits.max_image_height = Some(MAX_IMAGE_DIMENSION);
+        reader.limits(limits.clone());
 
-            if width > MAX_IMAGE_DIMENSION || height > MAX_IMAGE_DIMENSION {
-                return Err(format!(
-                    "Image '{}' dimensions {}x{} exceed maximum {}",
-                    id, width, height, MAX_IMAGE_DIMENSION
-                ));
+        let reader = match reader.with_guessed_format() {
+            Ok(r) => r,
+            Err(_) => {
+                let img_format = match format {
+                    ImageFormat::Png => image::ImageFormat::Png,
+                    ImageFormat::Jpeg => image::ImageFormat::Jpeg,
+                    ImageFormat::WebP => image::ImageFormat::WebP,
+                    ImageFormat::Gif => image::ImageFormat::Gif,
+                    ImageFormat::Bmp => image::ImageFormat::Bmp,
+                    ImageFormat::Tiff => image::ImageFormat::Tiff,
+                    _ => return Err(format!("Unsupported image format for '{}'", id)),
+                };
+                let mut r = image::ImageReader::new(std::io::Cursor::new(data));
+                r.set_format(img_format);
+                r.limits(limits);
+                r
             }
+        };
 
-            let raw_pixels = rgba.into_raw();
-            if raw_pixels.len() > MAX_PIXEL_BYTES {
-                return Err(format!(
-                    "Image '{}' too large: {} bytes exceeds {}MB limit",
-                    id,
-                    raw_pixels.len(),
-                    MAX_PIXEL_BYTES / (1024 * 1024)
-                ));
-            }
+        let dyn_img = reader
+            .decode()
+            .map_err(|e| format!("Failed to decode image '{}': {}", id, e))?;
 
-            return Ok(DecodeImage {
-                id: id.to_string(),
-                format,
-                width,
-                height,
-                data: raw_pixels,
-            });
-        }
+        let width = dyn_img.width();
+        let height = dyn_img.height();
 
-        // Fallback for partial/synthetic test headers (e.g. test_image_cache_boundary_hit_and_miss)
-        let width = fallback_width;
-        let height = fallback_height;
         if width > MAX_IMAGE_DIMENSION || height > MAX_IMAGE_DIMENSION {
             return Err(format!(
                 "Image '{}' dimensions {}x{} exceed maximum {}",
@@ -113,12 +111,12 @@ impl ImageDecoder {
         }
 
         let pixel_count = (width as usize)
-            .max(1)
-            .checked_mul((height as usize).max(1))
+            .checked_mul(height as usize)
             .ok_or_else(|| format!("Image '{}' pixel count overflow", id))?;
         let byte_count = pixel_count
             .checked_mul(4)
             .ok_or_else(|| format!("Image '{}' byte count overflow", id))?;
+
         if byte_count > MAX_PIXEL_BYTES {
             return Err(format!(
                 "Image '{}' too large: {} bytes exceeds {}MB limit",
@@ -128,17 +126,15 @@ impl ImageDecoder {
             ));
         }
 
-        let mut decoded_bytes = vec![0u8; byte_count];
-        for (index, byte) in decoded_bytes.iter_mut().enumerate() {
-            *byte = (index % data.len().max(1)) as u8;
-        }
+        let rgba = dyn_img.to_rgba8();
+        let raw_pixels = rgba.into_raw();
 
         Ok(DecodeImage {
             id: id.to_string(),
             format,
             width,
             height,
-            data: decoded_bytes,
+            data: raw_pixels,
         })
     }
 }
@@ -300,6 +296,62 @@ pub fn decode_image(id: &str, data: &[u8]) -> Result<DecodeImage, String> {
     ImageDecoder::new().decode_image(id, data)
 }
 
+/// Test helper for decoding synthetic/mock image headers.
+/// Confines synthetic header parsing and test pixel generation to test scenarios.
+pub fn decode_synthetic_test_image(id: &str, data: &[u8]) -> Result<DecodeImage, String> {
+    const MAX_IMAGE_DIMENSION: u32 = 16384;
+    const MAX_PIXEL_BYTES: usize = 256 * 1024 * 1024;
+
+    let format = detect_image_format(data)
+        .ok_or_else(|| format!("Unknown image format for '{}'", id))?;
+    let (width, height) = parse_image_dimensions(format, data);
+
+    if width > MAX_IMAGE_DIMENSION || height > MAX_IMAGE_DIMENSION {
+        return Err(format!(
+            "Image '{}' dimensions {}x{} exceed maximum {}",
+            id, width, height, MAX_IMAGE_DIMENSION
+        ));
+    }
+
+    let pixel_count = (width as usize)
+        .max(1)
+        .checked_mul((height as usize).max(1))
+        .ok_or_else(|| format!("Image '{}' pixel count overflow", id))?;
+    let byte_count = pixel_count
+        .checked_mul(4)
+        .ok_or_else(|| format!("Image '{}' byte count overflow", id))?;
+    if byte_count > MAX_PIXEL_BYTES {
+        return Err(format!(
+            "Image '{}' too large: {} bytes exceeds {}MB limit",
+            id,
+            byte_count,
+            MAX_PIXEL_BYTES / (1024 * 1024)
+        ));
+    }
+
+    let mut decoded_bytes = vec![0u8; byte_count];
+    for (index, byte) in decoded_bytes.iter_mut().enumerate() {
+        *byte = (index % data.len().max(1)) as u8;
+    }
+
+    Ok(DecodeImage {
+        id: id.to_string(),
+        format,
+        width,
+        height,
+        data: decoded_bytes,
+    })
+}
+
+/// Helper to generate a valid minimal PNG byte vector for unit and integration tests.
+pub fn make_test_png(width: u32, height: u32) -> Vec<u8> {
+    let img = image::RgbaImage::new(width.max(1), height.max(1));
+    let mut bytes = Vec::new();
+    let mut cursor = std::io::Cursor::new(&mut bytes);
+    img.write_to(&mut cursor, image::ImageFormat::Png).expect("Encode PNG");
+    bytes
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -317,5 +369,27 @@ mod tests {
         assert_eq!(decoded.format, ImageFormat::Png);
         assert_eq!(decoded.data.len(), 64 * 64 * 4);
         assert_eq!(&decoded.data[0..4], &[255, 0, 0, 255]);
+    }
+
+    #[test]
+    fn test_corrupt_png_rejected_by_production_decoder() {
+        let fake_png = [
+            0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            100, 0, 0, 0, 50,
+        ];
+        let result = decode_image("corrupt.png", &fake_png);
+        assert!(result.is_err(), "Production decoder must propagate error on incomplete PNG header");
+    }
+
+    #[test]
+    fn test_synthetic_test_helper_decodes_mock_headers() {
+        let fake_png = [
+            0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            100, 0, 0, 0, 50,
+        ];
+        let decoded = decode_synthetic_test_image("mock.png", &fake_png).unwrap();
+        assert_eq!(decoded.width, 100);
+        assert_eq!(decoded.height, 50);
+        assert_eq!(decoded.format, ImageFormat::Png);
     }
 }

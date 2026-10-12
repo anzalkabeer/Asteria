@@ -47,17 +47,17 @@ impl Url {
             return Err(NetworkError::InvalidUrl("Empty host".into()));
         }
 
-        let (host_port, path_query_fragment) = if let Some(path_start) = rest.find('/') {
-            (&rest[..path_start], &rest[path_start..])
-        } else {
-            (rest, "/")
-        };
+        let authority_end = rest
+            .find(|c| c == '/' || c == '?' || c == '#')
+            .unwrap_or(rest.len());
+        let host_port = &rest[..authority_end];
+        let path_query_fragment = &rest[authority_end..];
 
         if host_port.is_empty() {
             return Err(NetworkError::InvalidUrl("Empty host".into()));
         }
 
-        // Separate fragment (#) first, then query (?) from the path.
+        // Separate fragment (#) first, then query (?) from the remainder.
         // RFC 3986: the fragment comes after the query: path?query#fragment
         let (path_and_query, fragment) = match path_query_fragment.find('#') {
             Some(pos) => (
@@ -67,7 +67,7 @@ impl Url {
             None => (path_query_fragment, None),
         };
 
-        let (path, query) = match path_and_query.find('?') {
+        let (path_str, query) = match path_and_query.find('?') {
             Some(pos) => (
                 &path_and_query[..pos],
                 Some(path_and_query[pos + 1..].to_string()),
@@ -75,8 +75,8 @@ impl Url {
             None => (path_and_query, None),
         };
 
-        // Ensure path is never empty
-        let path = if path.is_empty() { "/" } else { path };
+        // Ensure path defaults to "/" when empty or absent
+        let path = if path_str.is_empty() { "/" } else { path_str };
 
         let (host, port) = if let Some(colon_pos) = host_port.find(':') {
             let h = &host_port[..colon_pos];
@@ -1246,6 +1246,28 @@ mod tests {
 
         let url3 = Url::parse("http://example.com/").unwrap();
         assert_eq!(url3.request_target(), "/");
+    }
+
+    #[test]
+    fn test_url_without_path_with_query_resolves_hostname_only() {
+        let url = Url::parse("http://example.com?query=1&page=2#top").unwrap();
+        assert_eq!(url.scheme, "http");
+        assert_eq!(url.host, "example.com");
+        assert_eq!(url.port, 80);
+        assert_eq!(url.path, "/");
+        assert_eq!(url.query, Some("query=1&page=2".to_string()));
+        assert_eq!(url.fragment, Some("top".to_string()));
+        assert_eq!(url.request_target(), "/?query=1&page=2");
+
+        // Verify HttpClient DNS resolution resolves ONLY the hostname without path or query
+        let mut client = HttpClient::new();
+        client.dns.pin_host(
+            "example.com",
+            vec![std::net::IpAddr::V4(std::net::Ipv4Addr::new(127, 0, 0, 1))],
+        );
+        let resolved = client.dns.resolve(&url.host);
+        assert!(resolved.is_ok(), "DNS must resolve the clean hostname");
+        assert_eq!(url.host, "example.com");
     }
 
     // ─── SPEC-04: Bounded Body Tests ───────────

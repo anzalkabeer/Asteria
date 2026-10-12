@@ -425,10 +425,7 @@ fn test_segment_builder_dirty_rect_intersection() {
 #[test]
 fn test_lazy_decode_skips_offscreen_images() {
     let mut cache = asteria::image::ImageCache::new();
-    let fake_png = [
-        0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 100, 0, 0,
-        0, 50,
-    ];
+    let test_png = asteria::image::make_test_png(100, 50);
 
     let viewport = Rect {
         x: 0.0,
@@ -445,7 +442,7 @@ fn test_lazy_decode_skips_offscreen_images() {
         height: 50.0,
     };
     let result =
-        cache.get_or_decode_if_visible("offscreen.png", &fake_png, &offscreen_rect, &viewport);
+        cache.get_or_decode_if_visible("offscreen.png", &test_png, &offscreen_rect, &viewport);
     assert!(result.unwrap().is_none());
     assert_eq!(cache.len(), 0); // Nothing cached
 
@@ -457,7 +454,7 @@ fn test_lazy_decode_skips_offscreen_images() {
         height: 50.0,
     };
     let result =
-        cache.get_or_decode_if_visible("onscreen.png", &fake_png, &onscreen_rect, &viewport);
+        cache.get_or_decode_if_visible("onscreen.png", &test_png, &onscreen_rect, &viewport);
     assert!(result.unwrap().is_some());
     assert_eq!(cache.len(), 1);
 }

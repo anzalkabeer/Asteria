@@ -125,6 +125,17 @@ impl CompositorLayer {
                 color[3] *= self.opacity;
             }
 
+            let is_image = matches!(node.kind, SceneNodeKind::Image);
+            let image_id = if is_image {
+                if let Some(text_run) = scene.texts.get(idx).and_then(|t| t.as_ref()) {
+                    text_run.text.clone()
+                } else {
+                    node.link_url.clone().unwrap_or_default()
+                }
+            } else {
+                String::new()
+            };
+
             let expanded_rects = expand_node_rects(node);
             let mut transform = self.transform;
 
@@ -164,11 +175,19 @@ impl CompositorLayer {
                     r[1] = vis_top;
                     r[3] = (vis_bottom - vis_top).max(0.0);
 
-                    commands.push(RenderCommand::SolidRect {
-                        rect: r,
-                        rgba: color,
-                        transform,
-                    });
+                    if is_image {
+                        commands.push(RenderCommand::Image {
+                            rect: r,
+                            image_id: image_id.clone(),
+                            transform,
+                        });
+                    } else {
+                        commands.push(RenderCommand::SolidRect {
+                            rect: r,
+                            rgba: color,
+                            transform,
+                        });
+                    }
                 }
             } else {
                 transform[5] += top_clip - scroll;
@@ -223,11 +242,19 @@ impl CompositorLayer {
                         }
                     }
 
-                    commands.push(RenderCommand::SolidRect {
-                        rect: [rx, ry, rw, rh],
-                        rgba: color,
-                        transform,
-                    });
+                    if is_image {
+                        commands.push(RenderCommand::Image {
+                            rect: [rx, ry, rw, rh],
+                            image_id: image_id.clone(),
+                            transform,
+                        });
+                    } else {
+                        commands.push(RenderCommand::SolidRect {
+                            rect: [rx, ry, rw, rh],
+                            rgba: color,
+                            transform,
+                        });
+                    }
                 }
             }
         }
@@ -551,5 +578,56 @@ mod tests {
         let selection = TextSelection::new();
         let batch = comp.render_to_batch(&scene, 0.0, 800.0, 600.0, 60.0, 560.0, &selection);
         assert!(!batch.is_empty());
+    }
+
+    #[test]
+    fn test_compositor_preserves_image_node_identity() {
+        let mut scene = SceneGraph::new();
+        scene.push(
+            SceneNode {
+                rect: Rect {
+                    x: 20.0,
+                    y: 30.0,
+                    width: 100.0,
+                    height: 80.0,
+                },
+                kind: SceneNodeKind::Image,
+                parent: None,
+                z_order: 1,
+                segment_id: 0,
+                dirty: false,
+                state: NodeState::Normal,
+                link_url: None,
+                clip: None,
+                transform: IDENTITY_MATRIX,
+            },
+            [1.0, 1.0, 1.0, 1.0],
+            Some(crate::scene::TextRun {
+                text: "test_logo.png".to_string(),
+                font_size: 0.0,
+                font_family: Vec::new(),
+                font_weight: 400.0,
+            }),
+        );
+
+        let mut comp = Compositor::new();
+        comp.build_layers(&scene);
+
+        let commands: Vec<_> = comp
+            .layers
+            .iter()
+            .flat_map(|l| l.build_commands(&scene, 0.0, 0.0, 600.0))
+            .collect();
+        assert_eq!(commands.len(), 1);
+        match &commands[0] {
+            RenderCommand::Image { rect, image_id, .. } => {
+                assert_eq!(image_id, "test_logo.png");
+                assert_eq!(rect[0], 20.0);
+                assert_eq!(rect[1], 30.0);
+                assert_eq!(rect[2], 100.0);
+                assert_eq!(rect[3], 80.0);
+            }
+            _ => panic!("Expected RenderCommand::Image, got {:?}", commands[0]),
+        }
     }
 }

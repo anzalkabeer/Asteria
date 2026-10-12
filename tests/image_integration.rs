@@ -23,22 +23,30 @@ fn test_detect_image_format() {
 #[test]
 fn test_image_cache_boundary_hit_and_miss() {
     let mut cache = ImageCache::new();
-    let fake_png = [
-        0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        100, // width: 100
-        0, 0, 0, 50, // height: 50
-    ];
+    let test_png = asteria::image::make_test_png(100, 50);
 
     // Cache miss -> decode and store
-    let img1 = cache.get_or_decode("logo.png", &fake_png).unwrap();
+    let img1 = cache.get_or_decode("logo.png", &test_png).unwrap();
     assert_eq!(img1.width, 100);
     assert_eq!(img1.height, 50);
     assert_eq!(cache.len(), 1);
 
     // Cache hit -> return cached without decoding again
-    let img2 = cache.get_or_decode("logo.png", &fake_png).unwrap();
+    let img2 = cache.get_or_decode("logo.png", &test_png).unwrap();
     assert_eq!(img2.width, 100);
     assert_eq!(cache.len(), 1); // no extra cache entry
+}
+
+#[test]
+fn test_image_cache_propagates_decode_failure() {
+    let mut cache = ImageCache::new();
+    let incomplete_png = [
+        0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        100, 0, 0, 0, 50,
+    ];
+
+    let result = cache.get_or_decode("bad.png", &incomplete_png);
+    assert!(result.is_err(), "Cache must propagate decoder failure on corrupt PNG");
 }
 
 #[test]

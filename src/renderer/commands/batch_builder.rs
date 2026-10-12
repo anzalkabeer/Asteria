@@ -57,18 +57,12 @@ impl BatchBuilder {
                     self.add_quad_transformed(rect[0], rect[1], rect[2], rect[3], *rgba, transform);
                 }
                 RenderCommand::Image {
-                    rect,
+                    rect: _,
                     image_id: _,
-                    transform,
+                    transform: _,
                 } => {
-                    self.add_quad_transformed(
-                        rect[0],
-                        rect[1],
-                        rect[2],
-                        rect[3],
-                        [1.0, 1.0, 1.0, 1.0],
-                        transform,
-                    );
+                    // Images are textured quads rendered by ImagePass rather than RectPass.
+                    // Do not emit untextured white quads into the solid rect geometry batch.
                 }
                 RenderCommand::Text {
                     text,
