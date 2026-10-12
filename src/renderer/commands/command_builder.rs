@@ -13,7 +13,11 @@ pub enum RenderCommand {
         rgba: [f32; 4],
         font_size: f32,
     },
-    // Image { rect: [f32; 4], image_id: String },
+    Image {
+        rect: [f32; 4],
+        image_id: String,
+        transform: [f32; 6],
+    },
 }
 
 pub struct CommandBuilder {
@@ -97,53 +101,20 @@ impl CommandBuilder {
                 crate::scene::SceneNodeKind::Image => {
                     let x = node.rect.x;
                     let y = node.rect.y;
-                    let w = node.rect.width.max(120.0);
-                    let h = node.rect.height.max(80.0);
+                    let w = node.rect.width;
+                    let h = node.rect.height;
 
-                    self.commands.push(RenderCommand::SolidRect {
+                    let image_id = if let Some(text_run) = &scene.texts[i] {
+                        text_run.text.clone()
+                    } else {
+                        String::new()
+                    };
+
+                    self.commands.push(RenderCommand::Image {
                         rect: [x, y, w, h],
-                        rgba: [0.88, 0.91, 0.94, 1.0],
+                        image_id,
                         transform,
                     });
-                    self.commands.push(RenderCommand::SolidRect {
-                        rect: [x, y, w, 1.0],
-                        rgba: [0.80, 0.84, 0.88, 1.0],
-                        transform,
-                    });
-                    self.commands.push(RenderCommand::SolidRect {
-                        rect: [x, y + (h - 1.0).max(0.0), w, 1.0],
-                        rgba: [0.80, 0.84, 0.88, 1.0],
-                        transform,
-                    });
-                    self.commands.push(RenderCommand::SolidRect {
-                        rect: [x, y, 1.0, h],
-                        rgba: [0.80, 0.84, 0.88, 1.0],
-                        transform,
-                    });
-                    self.commands.push(RenderCommand::SolidRect {
-                        rect: [x + (w - 1.0).max(0.0), y, 1.0, h],
-                        rgba: [0.80, 0.84, 0.88, 1.0],
-                        transform,
-                    });
-
-                    if let Some(text_run) = &scene.texts[i] {
-                        let raw = &text_run.text;
-                        let char_count = raw.chars().count();
-                        let label = if raw.is_empty() {
-                            "[IMG]".to_string()
-                        } else if char_count > 14 {
-                            let truncated: String = raw.chars().take(12).collect();
-                            format!("[IMG: {}..]", truncated)
-                        } else {
-                            raw.clone()
-                        };
-                        self.commands.push(RenderCommand::Text {
-                            rect: [x + 8.0, y + (h / 2.0) - 8.0, w - 16.0, 16.0],
-                            rgba: [0.2, 0.35, 0.55, 1.0],
-                            text: label,
-                            font_size: 12.0,
-                        });
-                    }
                 }
                 _ => {}
             }

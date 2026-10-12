@@ -237,7 +237,9 @@ impl CompositorLayer {
 
 fn expand_node_rects(node: &SceneNode) -> Vec<[f32; 4]> {
     match &node.kind {
-        SceneNodeKind::SolidRect | SceneNodeKind::RoundedRect { .. } => {
+        SceneNodeKind::SolidRect
+        | SceneNodeKind::RoundedRect { .. }
+        | SceneNodeKind::Image => {
             vec![[node.rect.x, node.rect.y, node.rect.width, node.rect.height]]
         }
         SceneNodeKind::Border { widths } => {

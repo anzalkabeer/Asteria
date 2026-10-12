@@ -1,11 +1,11 @@
 use crate::renderer::commands::batch_builder::{BatchBuilder, Vertex};
 use crate::renderer::graph::render_pass::RenderPass;
+use crate::renderer::resources::buffer_pool::GeometryBufferPool;
 use wgpu::util::DeviceExt;
 
 pub struct RectPass {
     pipeline: wgpu::RenderPipeline,
-    vertex_buffer: Option<wgpu::Buffer>,
-    index_buffer: Option<wgpu::Buffer>,
+    geometry_pool: GeometryBufferPool,
     uniform_buffer: wgpu::Buffer,
     bind_group: wgpu::BindGroup,
     num_indices: u32,
@@ -98,8 +98,7 @@ impl RectPass {
 
         Self {
             pipeline,
-            vertex_buffer: None,
-            index_buffer: None,
+            geometry_pool: GeometryBufferPool::new(),
             uniform_buffer,
             bind_group,
             num_indices: 0,
@@ -116,29 +115,26 @@ impl RectPass {
         );
     }
 
-    pub fn update_buffers(&mut self, device: &wgpu::Device, batch: &BatchBuilder) {
+    pub fn update_buffers(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        batch: &BatchBuilder,
+    ) {
         if batch.indices.is_empty() {
             self.num_indices = 0;
             return;
         }
 
-        self.vertex_buffer = Some(
-            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("Rect Vertex Buffer"),
-                contents: bytemuck::cast_slice(&batch.vertices),
-                usage: wgpu::BufferUsages::VERTEX,
-            }),
-        );
-
-        self.index_buffer = Some(
-            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("Rect Index Buffer"),
-                contents: bytemuck::cast_slice(&batch.indices),
-                usage: wgpu::BufferUsages::INDEX,
-            }),
-        );
+        let v_bytes = bytemuck::cast_slice(&batch.vertices);
+        let i_bytes = bytemuck::cast_slice(&batch.indices);
+        self.geometry_pool.upload(device, queue, v_bytes, i_bytes);
 
         self.num_indices = batch.indices.len() as u32;
+    }
+
+    pub fn geometry_pool(&self) -> &GeometryBufferPool {
+        &self.geometry_pool
     }
 }
 
@@ -150,7 +146,10 @@ impl RenderPass for RectPass {
     #[allow(clippy::collapsible_if)]
     fn render<'a>(&'a self, pass: &mut wgpu::RenderPass<'a>) {
         if self.num_indices > 0 {
-            if let (Some(vb), Some(ib)) = (&self.vertex_buffer, &self.index_buffer) {
+            if let (Some(vb), Some(ib)) = (
+                self.geometry_pool.vertex_buffer(),
+                self.geometry_pool.index_buffer(),
+            ) {
                 pass.set_pipeline(&self.pipeline);
                 pass.set_bind_group(0, &self.bind_group, &[]);
                 pass.set_vertex_buffer(0, vb.slice(..));

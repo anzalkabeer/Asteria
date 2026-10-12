@@ -763,7 +763,7 @@ pub fn run_window_loop(initial_scene: SceneGraph, tab_manager: TabManager) {
 
                         if let Some(rp) = render_graph.find_pass_mut::<RectPass>() {
                             rp.update_viewport(&backend.queue, vp_w, vp_h);
-                            rp.update_buffers(&backend.device, &new_batch);
+                            rp.update_buffers(&backend.device, &backend.queue, &new_batch);
                         }
 
                         if let Some(tp) = render_graph.find_pass_mut::<TextPass>() {

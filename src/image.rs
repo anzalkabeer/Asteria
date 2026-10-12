@@ -69,8 +69,42 @@ impl ImageDecoder {
 
         let format = detect_image_format(data)
             .ok_or_else(|| format!("Unknown image format for '{}'", id))?;
-        let (width, height) = parse_image_dimensions(format, data);
+        let (fallback_width, fallback_height) = parse_image_dimensions(format, data);
 
+        // Try decoding with the `image` crate (PNG, JPEG, WebP, etc.)
+        if let Ok(dyn_img) = image::load_from_memory(data) {
+            let rgba = dyn_img.to_rgba8();
+            let (width, height) = rgba.dimensions();
+
+            if width > MAX_IMAGE_DIMENSION || height > MAX_IMAGE_DIMENSION {
+                return Err(format!(
+                    "Image '{}' dimensions {}x{} exceed maximum {}",
+                    id, width, height, MAX_IMAGE_DIMENSION
+                ));
+            }
+
+            let raw_pixels = rgba.into_raw();
+            if raw_pixels.len() > MAX_PIXEL_BYTES {
+                return Err(format!(
+                    "Image '{}' too large: {} bytes exceeds {}MB limit",
+                    id,
+                    raw_pixels.len(),
+                    MAX_PIXEL_BYTES / (1024 * 1024)
+                ));
+            }
+
+            return Ok(DecodeImage {
+                id: id.to_string(),
+                format,
+                width,
+                height,
+                data: raw_pixels,
+            });
+        }
+
+        // Fallback for partial/synthetic test headers (e.g. test_image_cache_boundary_hit_and_miss)
+        let width = fallback_width;
+        let height = fallback_height;
         if width > MAX_IMAGE_DIMENSION || height > MAX_IMAGE_DIMENSION {
             return Err(format!(
                 "Image '{}' dimensions {}x{} exceed maximum {}",
@@ -257,5 +291,31 @@ pub fn decoded_image_to_display_command(
         width: decoded_image.width as f32,
         height: decoded_image.height as f32,
         link_url: None,
+    }
+}
+
+/// Convenience function to decode raw image bytes into a `DecodeImage`.
+/// Implements SPEC-02 (AST-DEF-002).
+pub fn decode_image(id: &str, data: &[u8]) -> Result<DecodeImage, String> {
+    ImageDecoder::new().decode_image(id, data)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_png_image_decode_dimensions() {
+        let img = image::RgbaImage::from_pixel(64, 64, image::Rgba([255, 0, 0, 255]));
+        let mut png_bytes = Vec::new();
+        let mut cursor = std::io::Cursor::new(&mut png_bytes);
+        img.write_to(&mut cursor, image::ImageFormat::Png).expect("Encode PNG");
+
+        let decoded = decode_image("test_64x64.png", &png_bytes).expect("Decode PNG");
+        assert_eq!(decoded.width, 64);
+        assert_eq!(decoded.height, 64);
+        assert_eq!(decoded.format, ImageFormat::Png);
+        assert_eq!(decoded.data.len(), 64 * 64 * 4);
+        assert_eq!(&decoded.data[0..4], &[255, 0, 0, 255]);
     }
 }

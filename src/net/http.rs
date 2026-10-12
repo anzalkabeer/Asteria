@@ -16,6 +16,8 @@ pub struct Url {
     pub host: String,
     pub port: u16,
     pub path: String,
+    pub query: Option<String>,
+    pub fragment: Option<String>,
     pub raw: String,
 }
 
@@ -23,6 +25,7 @@ impl Url {
     /// Parses a URL string into a `Url` struct.
     ///
     /// Must handle: `http://host`, `http://host:port`, `http://host/path`, `http://host:port/path`
+    /// Also handles query strings (`?key=value`) and fragment identifiers (`#section`).
     /// Defaults to port 80 for HTTP and path "/" if not specified.
     pub fn parse(url: &str) -> Result<Url, NetworkError> {
         let raw = url.to_string();
@@ -44,7 +47,7 @@ impl Url {
             return Err(NetworkError::InvalidUrl("Empty host".into()));
         }
 
-        let (host_port, path) = if let Some(path_start) = rest.find('/') {
+        let (host_port, path_query_fragment) = if let Some(path_start) = rest.find('/') {
             (&rest[..path_start], &rest[path_start..])
         } else {
             (rest, "/")
@@ -53,6 +56,27 @@ impl Url {
         if host_port.is_empty() {
             return Err(NetworkError::InvalidUrl("Empty host".into()));
         }
+
+        // Separate fragment (#) first, then query (?) from the path.
+        // RFC 3986: the fragment comes after the query: path?query#fragment
+        let (path_and_query, fragment) = match path_query_fragment.find('#') {
+            Some(pos) => (
+                &path_query_fragment[..pos],
+                Some(path_query_fragment[pos + 1..].to_string()),
+            ),
+            None => (path_query_fragment, None),
+        };
+
+        let (path, query) = match path_and_query.find('?') {
+            Some(pos) => (
+                &path_and_query[..pos],
+                Some(path_and_query[pos + 1..].to_string()),
+            ),
+            None => (path_and_query, None),
+        };
+
+        // Ensure path is never empty
+        let path = if path.is_empty() { "/" } else { path };
 
         let (host, port) = if let Some(colon_pos) = host_port.find(':') {
             let h = &host_port[..colon_pos];
@@ -73,8 +97,24 @@ impl Url {
             host: host.to_string(),
             port,
             path: path.to_string(),
+            query,
+            fragment,
             raw,
         })
+    }
+
+    /// Returns the RFC 9110 compliant request target (path + query, no fragment).
+    /// Fragments MUST NOT be sent over the wire per RFC 9110 §7.1.
+    pub fn request_target(&self) -> String {
+        let path = if self.path.is_empty() {
+            "/"
+        } else {
+            &self.path
+        };
+        match &self.query {
+            Some(q) if !q.is_empty() => format!("{}?{}", path, q),
+            _ => path.to_string(),
+        }
     }
 
     /// Returns the host and port in "host:port" format.
@@ -200,8 +240,8 @@ impl HttpRequest {
     /// Serializes the request into HTTP/1.1 wire format bytes with CRLF injection protection.
     pub fn to_request_bytes(&self) -> Vec<u8> {
         let mut req = String::new();
-        let safe_path = sanitize_request_path(&self.url.path);
-        req.push_str(&format!("{} {} HTTP/1.1\r\n", self.method, safe_path));
+        let request_target = sanitize_request_path(&self.url.request_target());
+        req.push_str(&format!("{} {} HTTP/1.1\r\n", self.method, request_target));
 
         let mut has_host = false;
         let mut has_connection = false;
@@ -635,9 +675,22 @@ fn read_response<R: std::io::Read>(stream: &mut R) -> Result<HttpResponse, Netwo
     } else if let Some(len) = content_length {
         read_exact_body(&mut reader, len)?
     } else {
-        // No body length specified, read until EOF
+        // No body length specified, read until EOF up to MAX_RESPONSE_BODY_SIZE
         let mut body = Vec::new();
-        let _ = reader.read_to_end(&mut body);
+        let mut chunk = [0u8; 8192];
+        loop {
+            let n = reader.read(&mut chunk).map_err(|e| NetworkError::Io(e.to_string()))?;
+            if n == 0 {
+                break;
+            }
+            if body.len().saturating_add(n) > MAX_RESPONSE_BODY_SIZE {
+                return Err(NetworkError::Other(format!(
+                    "Response body too large: exceeds {}MB limit",
+                    MAX_RESPONSE_BODY_SIZE / (1024 * 1024)
+                )));
+            }
+            body.extend_from_slice(&chunk[..n]);
+        }
         headers.push(("connection".to_string(), "close".to_string()));
         body
     };
@@ -682,6 +735,14 @@ fn read_chunked_body<R: std::io::Read>(stream: &mut R) -> Result<Vec<u8>, Networ
             break;
         }
 
+        // Check size limit before allocating chunk buffer to prevent OOM
+        if body.len().saturating_add(size) > MAX_RESPONSE_BODY_SIZE {
+            return Err(NetworkError::Other(format!(
+                "Response body too large: chunked body exceeds {}MB limit",
+                MAX_RESPONSE_BODY_SIZE / (1024 * 1024)
+            )));
+        }
+
         // Read chunk data
         let mut chunk = vec![0u8; size];
         stream
@@ -698,8 +759,8 @@ fn read_chunked_body<R: std::io::Read>(stream: &mut R) -> Result<Vec<u8>, Networ
     Ok(body)
 }
 
-/// Maximum response body size: 64MB.
-const MAX_RESPONSE_BODY_SIZE: usize = 64 * 1024 * 1024;
+/// Maximum response body size: 100MB per SPEC-04.
+pub const MAX_RESPONSE_BODY_SIZE: usize = 100 * 1024 * 1024;
 
 /// Reads an exact number of bytes for the HTTP response body.
 fn read_exact_body<R: std::io::Read>(
@@ -762,6 +823,14 @@ fn stream_chunked_body<R: std::io::Read>(
             break;
         }
 
+        // Bound chunked streaming to MAX_RESPONSE_BODY_SIZE to prevent OOM
+        if offset.saturating_add(size) > MAX_RESPONSE_BODY_SIZE {
+            return Err(NetworkError::Other(format!(
+                "Response body too large: chunked stream exceeds {}MB limit",
+                MAX_RESPONSE_BODY_SIZE / (1024 * 1024)
+            )));
+        }
+
         let mut chunk = vec![0u8; size];
         stream
             .read_exact(&mut chunk)
@@ -790,6 +859,13 @@ fn stream_exact_body<R: std::io::Read>(
     url: &str,
     sender: &std::sync::mpsc::Sender<crate::net::bus::ResourceBusEvent>,
 ) -> Result<(), NetworkError> {
+    if length > MAX_RESPONSE_BODY_SIZE {
+        return Err(NetworkError::Other(format!(
+            "Response body too large: {} bytes exceeds {}MB limit",
+            length,
+            MAX_RESPONSE_BODY_SIZE / (1024 * 1024)
+        )));
+    }
     let mut remaining = length;
     let mut offset = 0;
     let mut buf = [0u8; 8192];
@@ -845,6 +921,12 @@ fn stream_eof_body<R: std::io::Read>(
                 break;
             }
             Ok(n) => {
+                if offset.saturating_add(n) > MAX_RESPONSE_BODY_SIZE {
+                    return Err(NetworkError::Other(format!(
+                        "Response body too large: stream exceeds {}MB limit",
+                        MAX_RESPONSE_BODY_SIZE / (1024 * 1024)
+                    )));
+                }
                 let _ = sender.send(crate::net::bus::ResourceBusEvent::ChunkReceived {
                     url: url.to_string(),
                     chunk_data: buf[..n].to_vec(),
@@ -1088,5 +1170,110 @@ mod tests {
         let mut cursor = std::io::Cursor::new(invalid_data);
         let result = read_chunked_body(&mut cursor);
         assert!(result.is_err());
+    }
+
+    // ─── SPEC-03: RFC 9110 URL Normalization Tests ───────────
+
+    #[test]
+    fn test_url_parse_separates_query_and_fragment() {
+        let url = Url::parse("http://example.com/page?key=value#section").unwrap();
+        assert_eq!(url.path, "/page");
+        assert_eq!(url.query, Some("key=value".to_string()));
+        assert_eq!(url.fragment, Some("section".to_string()));
+    }
+
+    #[test]
+    fn test_url_parse_query_only() {
+        let url = Url::parse("http://example.com/search?q=rust").unwrap();
+        assert_eq!(url.path, "/search");
+        assert_eq!(url.query, Some("q=rust".to_string()));
+        assert_eq!(url.fragment, None);
+    }
+
+    #[test]
+    fn test_url_parse_fragment_only() {
+        let url = Url::parse("http://example.com/doc#sec").unwrap();
+        assert_eq!(url.path, "/doc");
+        assert_eq!(url.query, None);
+        assert_eq!(url.fragment, Some("sec".to_string()));
+    }
+
+    #[test]
+    fn test_url_parse_no_query_no_fragment() {
+        let url = Url::parse("http://example.com/plain").unwrap();
+        assert_eq!(url.path, "/plain");
+        assert_eq!(url.query, None);
+        assert_eq!(url.fragment, None);
+    }
+
+    #[test]
+    fn test_url_request_target_strips_fragment() {
+        // SPEC-03 Acceptance Criterion 1
+        let url = Url::parse("http://example.com/doc#sec").unwrap();
+        let req = HttpRequest {
+            method: HttpMethod::Get,
+            url,
+            headers: Vec::new(),
+        };
+        let bytes = req.to_request_bytes();
+        let str_rep = String::from_utf8(bytes).unwrap();
+        assert!(str_rep.starts_with("GET /doc HTTP/1.1\r\n"), "Request line was: {}", str_rep.lines().next().unwrap());
+        assert!(!str_rep.contains("#sec"), "Fragment leaked into wire format");
+    }
+
+    #[test]
+    fn test_url_request_target_preserves_query() {
+        // SPEC-03 Acceptance Criterion 2
+        let url = Url::parse("http://example.com/search?q=rust#top").unwrap();
+        let req = HttpRequest {
+            method: HttpMethod::Get,
+            url,
+            headers: Vec::new(),
+        };
+        let bytes = req.to_request_bytes();
+        let str_rep = String::from_utf8(bytes).unwrap();
+        assert!(str_rep.starts_with("GET /search?q=rust HTTP/1.1\r\n"), "Request line was: {}", str_rep.lines().next().unwrap());
+        assert!(!str_rep.contains("#top"), "Fragment leaked into wire format");
+    }
+
+    #[test]
+    fn test_url_request_target_method() {
+        let url = Url::parse("http://example.com/path?a=1&b=2#frag").unwrap();
+        assert_eq!(url.request_target(), "/path?a=1&b=2");
+
+        let url2 = Url::parse("http://example.com/page").unwrap();
+        assert_eq!(url2.request_target(), "/page");
+
+        let url3 = Url::parse("http://example.com/").unwrap();
+        assert_eq!(url3.request_target(), "/");
+    }
+
+    // ─── SPEC-04: Bounded Body Tests ───────────
+
+    #[test]
+    fn test_read_exact_body_rejects_oversized() {
+        let oversized_len = MAX_RESPONSE_BODY_SIZE + 1;
+        let mut cursor = std::io::Cursor::new(vec![0u8; 0]);
+        let result = read_exact_body(&mut cursor, oversized_len);
+        assert!(result.is_err(), "Exact body exceeding MAX_RESPONSE_BODY_SIZE must be rejected");
+    }
+
+    #[test]
+    fn test_read_exact_body_accepts_within_limit() {
+        let data = vec![42u8; 1024];
+        let mut cursor = std::io::Cursor::new(data.clone());
+        let result = read_exact_body(&mut cursor, 1024);
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), data);
+    }
+
+    #[test]
+    fn test_read_chunked_body_bounded_rejects_oversized() {
+        // Chunk claims a size larger than MAX_RESPONSE_BODY_SIZE
+        let oversized = MAX_RESPONSE_BODY_SIZE + 1;
+        let chunk_header = format!("{:x}\r\n", oversized);
+        let mut cursor = std::io::Cursor::new(chunk_header.into_bytes());
+        let result = read_chunked_body(&mut cursor);
+        assert!(result.is_err(), "Chunked body claiming size > MAX_RESPONSE_BODY_SIZE must be rejected");
     }
 }

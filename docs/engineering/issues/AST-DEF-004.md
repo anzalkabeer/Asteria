@@ -3,7 +3,7 @@
 - **Classification:** CONFIRMED DEFECT / RELIABILITY
 - **Severity:** High
 - **Priority:** P0
-- **Status:** **CONFIRMED**
+- **Status:** **RESOLVED**
 - **Affected Subsystem:** Networking & HTTP Client
 - **Specification Link:** [`../specifications/SPEC-04.md`](../specifications/SPEC-04.md)
 
@@ -30,3 +30,11 @@ The socket reader lacks a configurable maximum response size check and does not 
 
 ## 4. Desired Behaviour
 Enforce a strict 100 MB body limit default, reject oversize payloads with an explicit error, and support streaming chunks into the HTML parser.
+
+---
+
+## 5. Resolution & Verification
+- Enforced `pub const MAX_RESPONSE_BODY_SIZE: usize = 100 * 1024 * 1024;` (100 MB) limit across all body reading routines in `src/net/http.rs`.
+- Guarded `read_exact_body`, `read_chunked_body` (both single chunk and accumulated chunks), and unbounded EOF loops against exceeding `MAX_RESPONSE_BODY_SIZE`.
+- Guarded streaming pipelines (`stream_chunked_body`, `stream_exact_body`, `stream_eof_body`) with bounded size checks.
+- Verified via unit tests: `test_read_exact_body_rejects_oversized`, `test_read_exact_body_accepts_within_limit`, `test_read_chunked_body_bounded_rejects_oversized`.

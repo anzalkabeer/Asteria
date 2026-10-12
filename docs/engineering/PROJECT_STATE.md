@@ -48,24 +48,26 @@ Asteria currently exists as a single monolithic Cargo package (`asteria 0.1.0`) 
 - **TLS / HTTPS Networking:** Native encrypted HTTPS connections function via `rustls` without OpenSSL dependencies.
 
 ### Verified Known Limitations (Substantiated Deficiencies)
-- **Immediate-Mode Redraw Lag ([`AST-DEF-001`](issues/AST-DEF-001.md)):** Scrolling and cursor motion rebuild all vertex buffers and iterate the entire display list on CPU, introducing frame stutter.
-- **Non-Functional Image Rendering ([`AST-DEF-002`](issues/AST-DEF-002.md)):** `decode_image` produces mock byte patterns; `ImagePass` in `renderer.rs` is never bound in `render()`; `<img>` tags display as grey rectangles with `[IMG]`.
-- **URL Parser RFC 9110 Bug ([`AST-DEF-003`](issues/AST-DEF-003.md)):** HTTP GET requests transmit `#` fragments in request lines, violating HTTP specifications.
-- **Unbounded Network Buffer ([`AST-DEF-004`](issues/AST-DEF-004.md)):** Responses accumulate synchronously in memory without chunk bounding or backpressure.
-- **Font Metric Disconnect ([`AST-ARC-002`](issues/AST-ARC-002.md)):** Layout line breaks use hardcoded character ratios (`estimate_char_width_ratio`) rather than font metrics, desyncing line wraps from GPU glyphs.
-- **Incomplete Flexbox & Missing Grid ([`AST-ARC-003`](issues/AST-ARC-003.md)):** Handcrafted flexbox lacks multi-line wrapping and flex-grow/shrink factors; CSS Grid is unimplemented.
-- **Dead Memory Infrastructure ([`AST-INC-001`](issues/AST-INC-001.md)):** `FrameArena`, `Pool<T>`, and 140+ pre-seeded `Symbol` constants are completely unused in engine hot paths.
-- **No JavaScript Engine ([`AST-INC-003`](issues/AST-INC-003.md)):** DOM is static and read-only after initial load; `<script>` tags are skipped.
+- **Resolved in Stage 1:**
+  - **GPU Buffer Churn ([`AST-PERF-001`](issues/AST-PERF-001.md)):** **RESOLVED** via `GeometryBufferPool` retained GPU vertex/index buffer pool in `src/renderer/resources/buffer_pool.rs`.
+  - **Non-Functional Image Rendering ([`AST-DEF-002`](issues/AST-DEF-002.md)):** **RESOLVED** via `image = "0.25"` PNG/JPEG decoding and `RenderCommand::Image` activation.
+  - **URL Parser RFC 9110 Bug ([`AST-DEF-003`](issues/AST-DEF-003.md)):** **RESOLVED** via `Url::request_target()` stripping fragment identifiers over the wire.
+  - **Unbounded Network Buffer ([`AST-DEF-004`](issues/AST-DEF-004.md)):** **RESOLVED** via 100 MB body size ceiling (`MAX_RESPONSE_BODY_SIZE`) in `src/net/http.rs`.
+- **Active Deficiencies (Scheduled for Stage 2 & Stage 3):**
+  - **Immediate-Mode Redraw Lag ([`AST-DEF-001`](issues/AST-DEF-001.md)):** Scrolling and cursor motion rebuild all vertex buffers and iterate the entire display list on CPU, introducing frame stutter (Scheduled for Stage 3 via `SPEC-08`).
+  - **Font Metric Disconnect ([`AST-ARC-002`](issues/AST-ARC-002.md)):** Layout line breaks use hardcoded character ratios (`estimate_char_width_ratio`) rather than font metrics, desyncing line wraps from GPU glyphs (Scheduled for Stage 2 via `SPEC-06`).
+  - **Incomplete Flexbox & Missing Grid ([`AST-ARC-003`](issues/AST-ARC-003.md)):** Handcrafted flexbox lacks multi-line wrapping and flex-grow/shrink factors; CSS Grid is unimplemented (Scheduled for Stage 3 via `SPEC-10`).
+  - **Dead Memory Infrastructure ([`AST-INC-001`](issues/AST-INC-001.md)):** `FrameArena`, `Pool<T>`, and 140+ pre-seeded `Symbol` constants are completely unused in engine hot paths (Scheduled for Stage 3 via `SPEC-11`).
+  - **No JavaScript Engine ([`AST-INC-003`](issues/AST-INC-003.md)):** DOM is static and read-only after initial load; `<script>` tags are skipped (Scheduled for Stage 5 via `ENH-01`).
 
 ---
 
 ## 4. Current Build & Test Invariants
 
-Baseline empirical verification executed on October 11, 2026:
-- **Command:** `cargo test --no-run`
-- **Result:** Exit code `0` (Success) in 302.26s (~5m 02s).
-- **Artifacts:** Successfully compiled 11 test runner binaries in `target/debug/deps/`:
-  - `asteria-*.exe`, `css_tests-*.exe`, `dom_tests-*.exe`, `html_tests-*.exe`, `http_tests-*.exe`, `layout_tests-*.exe`, `pipeline_tests-*.exe`, `renderer_tests-*.exe`, `style_tests-*.exe`, `url_tests-*.exe`, `window_tests-*.exe`.
+Empirical verification executed on October 12, 2026:
+- **Command:** `cargo test`
+- **Result:** Exit code `0` (Success) across all 11 test suites.
+- **Artifacts:** Successfully compiled and executed all 11 test runner suites in `target/debug/deps/` with zero failures and zero regressions.
 
 ---
 

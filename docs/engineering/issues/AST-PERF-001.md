@@ -3,7 +3,7 @@
 - **Classification:** PERFORMANCE CONCERN
 - **Severity:** High
 - **Priority:** P0
-- **Status:** **CONFIRMED**
+- **Status:** **RESOLVED**
 - **Affected Subsystem:** GPU Renderer & Batch Builder
 - **Specification Link:** [`../specifications/SPEC-01.md`](../specifications/SPEC-01.md)
 
@@ -33,3 +33,11 @@ The renderer was written with a naive immediate-mode pattern instead of maintain
 
 ## 4. Desired Behaviour
 Implement a persistent `GeometryBufferPool` that retains pre-allocated vertex and index buffers across frames, updating existing VRAM via `queue.write_buffer()` and only resizing when geometry exceeds capacity.
+
+---
+
+## 5. Resolution & Verification
+- Implemented `GeometryBufferPool` in `src/renderer/resources/buffer_pool.rs` with geometric 1.5x buffer capacity expansion.
+- Integrated `GeometryBufferPool` into `RectPass` (`src/renderer/passes/rect_pass.rs`) and `ImagePass` (`src/renderer/passes/image_pass.rs`).
+- Connected queue write updates in `src/renderer/window/window.rs`.
+- Verified via `test_retained_buffer_pool`: 100 consecutive frames with static geometry make zero new calls to `device.create_buffer()`.

@@ -3,7 +3,7 @@
 - **Classification:** CONFIRMED DEFECT
 - **Severity:** High
 - **Priority:** P0
-- **Status:** **CONFIRMED**
+- **Status:** **RESOLVED**
 - **Affected Subsystem:** Networking Client & URL Parser
 - **Specification Link:** [`../specifications/SPEC-03.md`](../specifications/SPEC-03.md)
 
@@ -32,3 +32,11 @@ The URL parser fails to separate client-side fragments (`#`) from request target
 
 ## 4. Desired Behaviour
 Implement RFC 9110 request target normalization: strip fragments from the request line while preserving valid query strings (`?key=val`).
+
+---
+
+## 5. Resolution & Verification
+- Enhanced `Url::parse` in `src/net/http.rs` to parse path, query (`?`), and fragment (`#`) separately per RFC 3986.
+- Added `Url::request_target(&self) -> String` to format RFC 9110 compliant request lines (`path?query`), stripping `#fragment`.
+- Updated `HttpRequest::to_request_bytes()` to format request lines via `request_target()`.
+- Verified via unit tests: `test_url_request_target_strips_fragment`, `test_url_request_target_preserves_query`, and URL parsing tests.

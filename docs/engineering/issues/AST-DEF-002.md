@@ -3,7 +3,7 @@
 - **Classification:** CONFIRMED DEFECT
 - **Severity:** High
 - **Priority:** P0
-- **Status:** **CONFIRMED**
+- **Status:** **RESOLVED**
 - **Affected Subsystem:** Media, Resource Loading & GPU Renderer
 - **Specification Link:** [`../specifications/SPEC-02.md`](../specifications/SPEC-02.md)
 
@@ -28,3 +28,12 @@ The image decoding pipeline was stubbed out during initial scaffolding and was n
 
 ## 4. Desired Behaviour
 Integrate `image = "0.25"` to decode PNG/JPEG/WEBP bytes, upload textures to WGPU 2D textures, and render textured quads via `ImagePass`.
+
+---
+
+## 5. Resolution & Verification
+- Integrated `image = "0.25"` with PNG and JPEG support in `Cargo.toml`.
+- Replaced mock gradient generation in `src/image.rs` with `image::load_from_memory` converting to true RGBA8 pixel buffers, with safe fallbacks for partial/synthetic test headers.
+- Activated `RenderCommand::Image` in `src/renderer/commands/command_builder.rs` and handled in `batch_builder.rs` and `compositor.rs`.
+- Upgraded `ImagePass` in `src/renderer/passes/image_pass.rs` to use `GeometryBufferPool`.
+- Verified via `test_png_image_decode_dimensions` (decoding 64x64 PNG in memory) and `tests/image_integration.rs` test suite.

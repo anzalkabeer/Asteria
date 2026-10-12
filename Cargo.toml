@@ -24,4 +24,5 @@ webpki-roots = "0.26"
 rustls-pki-types = "1.7"
 lru = "0.12"
 arboard = "3.6.1"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
  

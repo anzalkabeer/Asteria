@@ -1,6 +1,6 @@
 use crate::renderer::graph::render_pass::RenderPass;
+use crate::renderer::resources::buffer_pool::GeometryBufferPool;
 use bytemuck::{Pod, Zeroable};
-use wgpu::util::DeviceExt;
 
 #[repr(C)]
 #[derive(Copy, Clone, Debug, Pod, Zeroable)]
@@ -13,8 +13,7 @@ pub struct ImagePass {
     pipeline: wgpu::RenderPipeline,
     bind_group_layout: wgpu::BindGroupLayout,
     sampler: wgpu::Sampler,
-    vertex_buffer: Option<wgpu::Buffer>,
-    index_buffer: Option<wgpu::Buffer>,
+    geometry_pool: GeometryBufferPool,
     bind_group: Option<wgpu::BindGroup>,
     num_indices: u32,
 }
@@ -112,8 +111,7 @@ impl ImagePass {
             pipeline,
             bind_group_layout,
             sampler,
-            vertex_buffer: None,
-            index_buffer: None,
+            geometry_pool: GeometryBufferPool::new(),
             bind_group: None,
             num_indices: 0,
         }
@@ -122,6 +120,7 @@ impl ImagePass {
     pub fn set_image_quad(
         &mut self,
         device: &wgpu::Device,
+        queue: &wgpu::Queue,
         view: &wgpu::TextureView,
         rect: [f32; 4],
     ) {
@@ -148,20 +147,11 @@ impl ImagePass {
 
         let indices: [u16; 6] = [0, 1, 2, 0, 2, 3];
 
-        self.vertex_buffer = Some(
-            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("Image Vertex Buffer"),
-                contents: bytemuck::cast_slice(&vertices),
-                usage: wgpu::BufferUsages::VERTEX,
-            }),
-        );
-
-        self.index_buffer = Some(
-            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("Image Index Buffer"),
-                contents: bytemuck::cast_slice(&indices),
-                usage: wgpu::BufferUsages::INDEX,
-            }),
+        self.geometry_pool.upload(
+            device,
+            queue,
+            bytemuck::cast_slice(&vertices),
+            bytemuck::cast_slice(&indices),
         );
 
         self.bind_group = Some(device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -181,6 +171,10 @@ impl ImagePass {
 
         self.num_indices = indices.len() as u32;
     }
+
+    pub fn geometry_pool(&self) -> &GeometryBufferPool {
+        &self.geometry_pool
+    }
 }
 
 impl RenderPass for ImagePass {
@@ -189,9 +183,11 @@ impl RenderPass for ImagePass {
     #[allow(clippy::collapsible_if)]
     fn render<'a>(&'a self, pass: &mut wgpu::RenderPass<'a>) {
         if self.num_indices > 0 {
-            if let (Some(vb), Some(ib), Some(bg)) =
-                (&self.vertex_buffer, &self.index_buffer, &self.bind_group)
-            {
+            if let (Some(vb), Some(ib), Some(bg)) = (
+                self.geometry_pool.vertex_buffer(),
+                self.geometry_pool.index_buffer(),
+                &self.bind_group,
+            ) {
                 pass.set_pipeline(&self.pipeline);
                 pass.set_bind_group(0, bg, &[]);
                 pass.set_vertex_buffer(0, vb.slice(..));

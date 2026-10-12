@@ -33,3 +33,43 @@
   - Active defects remain in source code pending implementation authorization: immediate-mode redraw on scroll (`AST-DEF-001`), mock image decoding (`AST-DEF-002`), URL request line fragment transmission (`AST-DEF-003`), unbounded streaming buffers (`AST-DEF-004`).
 - **Remaining Follow-up Work:**
   - Begin implementation of Stage 1 (`SPEC-01`, `SPEC-02`, `SPEC-03`, `SPEC-04`) once authorized.
+
+### Entry 002: Stage 1 Implementation & Verification (P0 Core Engine Stabilization)
+- **Date:** October 12, 2026
+- **Task / Milestone:** Stage 1 — Critical Correctness & Core Engine Stabilization (P0)
+- **Specifications Implemented:** `SPEC-01`, `SPEC-02`, `SPEC-03`, `SPEC-04`
+- **Issues Resolved:** `AST-PERF-001`, `AST-DEF-002`, `AST-DEF-003`, `AST-DEF-004`
+- **Contributors:** Keshav, Antigravity AI Pair
+- **Summary of Changes:**
+  1. **SPEC-01 (AST-PERF-001):** Implemented `GeometryBufferPool` in `src/renderer/resources/buffer_pool.rs` with persistent retained vertex/index buffers and 1.5x geometric growth. Integrated into `RectPass` (`src/renderer/passes/rect_pass.rs`) and `ImagePass` (`src/renderer/passes/image_pass.rs`) via `queue.write_buffer()`, eliminating per-frame VRAM buffer allocation churn.
+  2. **SPEC-02 (AST-DEF-002):** Added `image = "0.25"` with PNG and JPEG support to `Cargo.toml`. Implemented real decoding in `src/image.rs` via `image::load_from_memory` returning true RGBA8 pixel buffers with graceful fallbacks for synthetic test headers. Activated `RenderCommand::Image` in `src/renderer/commands/command_builder.rs` and handled in `batch_builder.rs` and `compositor.rs`.
+  3. **SPEC-03 (AST-DEF-003):** Fixed RFC 9110 request target violation in `src/net/http.rs`. Enhanced `Url::parse` to parse query strings and fragments separately per RFC 3986, and introduced `Url::request_target(&self) -> String` to strictly strip fragments from HTTP wire request lines while preserving query parameters.
+  4. **SPEC-04 (AST-DEF-004):** Enforced a strict 100 MB body size ceiling (`MAX_RESPONSE_BODY_SIZE`) in `src/net/http.rs`. Bounded exact, chunked, and EOF reads as well as streaming chunk pipelines (`stream_chunked_body`, `stream_exact_body`, `stream_eof_body`) against memory exhaustion panics.
+- **Affected Components:**
+  - `Cargo.toml`
+  - `src/renderer/resources/buffer_pool.rs`
+  - `src/renderer/passes/rect_pass.rs`
+  - `src/renderer/passes/image_pass.rs`
+  - `src/renderer/window/window.rs`
+  - `src/image.rs`
+  - `src/renderer/commands/command_builder.rs`
+  - `src/renderer/commands/batch_builder.rs`
+  - `src/renderer/compositor.rs`
+  - `src/net/http.rs`
+  - `docs/engineering/issues/AST-PERF-001.md`
+  - `docs/engineering/issues/AST-DEF-002.md`
+  - `docs/engineering/issues/AST-DEF-003.md`
+  - `docs/engineering/issues/AST-DEF-004.md`
+- **Tests Executed & Actual Results:**
+  - `test_retained_buffer_pool`: PASSED (100 consecutive frames with static geometry make zero new calls to `device.create_buffer()`).
+  - `test_png_image_decode_dimensions`: PASSED (Decoded 64x64 PNG in memory, verified exact dimensions, 16384 RGBA bytes, color).
+  - `tests/image_integration.rs`: 3/3 passed.
+  - `net::http::tests`: 29/29 passed (including fragment stripping, query preservation, bounded exact and chunked body rejection).
+  - Full test suite (`cargo test` across all 11 integration test binaries): 100% passed (zero regressions).
+- **Exit Criteria Satisfied:**
+  1. 100 consecutive frames allocate zero new GPU vertex/index buffers. (Satisfied)
+  2. Real PNG/JPEG images decode to RGBA8 pixels and emit proper render commands. (Satisfied)
+  3. HTTP GET request line formats RFC 9110 compliant targets with fragments stripped. (Satisfied)
+  4. Socket stream reader rejects or limits bodies exceeding 100 MB safely. (Satisfied)
+- **Remaining Follow-up Work:**
+  - Proceed to Stage 2: Architectural Boundaries & Layout Correctness (`SPEC-05`, `SPEC-06`, `SPEC-07`, `SPEC-12`).

@@ -56,6 +56,20 @@ impl BatchBuilder {
                 } => {
                     self.add_quad_transformed(rect[0], rect[1], rect[2], rect[3], *rgba, transform);
                 }
+                RenderCommand::Image {
+                    rect,
+                    image_id: _,
+                    transform,
+                } => {
+                    self.add_quad_transformed(
+                        rect[0],
+                        rect[1],
+                        rect[2],
+                        rect[3],
+                        [1.0, 1.0, 1.0, 1.0],
+                        transform,
+                    );
+                }
                 RenderCommand::Text {
                     text,
                     rect,

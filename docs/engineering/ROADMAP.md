@@ -47,20 +47,21 @@
 
 ## Stage Details & Execution Gates
 
-### Stage 1: Critical Correctness & Core Engine Stabilization (Priority: P0)
+### Stage 1: Critical Correctness & Core Engine Stabilization (Priority: P0) — **COMPLETE**
 - **Primary Objective:** Fix active rendering memory thrashing, complete non-functional image rendering, and repair broken HTTP networking.
+- **Status:** **COMPLETE** (Satisfied on October 12, 2026; see `IMPLEMENTATION_LOG.md` Entry 002).
 - **Included Issues:**
-  - [`AST-PERF-001`](issues/AST-PERF-001.md) — GPU Buffer Thrashing (`SPEC-01`)
-  - [`AST-DEF-002`](issues/AST-DEF-002.md) — Image Pipeline Non-Functional (`SPEC-02`)
-  - [`AST-DEF-003`](issues/AST-DEF-003.md) — RFC 9110 URL Query/Fragment Bug (`SPEC-03`)
-  - [`AST-DEF-004`](issues/AST-DEF-004.md) — Unbounded Socket Buffer Streaming (`SPEC-04`)
-- **Prerequisites:** None. Directly actionable on current codebase.
-- **Target Files:** `src/renderer/gpu/renderer.rs`, `src/image.rs`, `src/renderer/command_builder.rs`, `src/net/http.rs`, `src/net/fetch.rs`.
-- **Exit Criteria:**
-  1. 100 consecutive frames allocate zero new GPU vertex/index buffers.
-  2. HTML documents with `<img src="...">` render decoded PNG/JPEG bitmaps instead of grey placeholder boxes.
-  3. HTTP GET request line formats RFC 9110 compliant targets (fragments stripped).
-  4. Socket stream reader rejects or truncates bodies exceeding 100 MB safely.
+  - [`AST-PERF-001`](issues/AST-PERF-001.md) — GPU Buffer Thrashing (`SPEC-01`) — **RESOLVED**
+  - [`AST-DEF-002`](issues/AST-DEF-002.md) — Image Pipeline Non-Functional (`SPEC-02`) — **RESOLVED**
+  - [`AST-DEF-003`](issues/AST-DEF-003.md) — RFC 9110 URL Query/Fragment Bug (`SPEC-03`) — **RESOLVED**
+  - [`AST-DEF-004`](issues/AST-DEF-004.md) — Unbounded Socket Buffer Streaming (`SPEC-04`) — **RESOLVED**
+- **Prerequisites:** None.
+- **Target Files:** `src/renderer/resources/buffer_pool.rs`, `src/renderer/passes/rect_pass.rs`, `src/renderer/passes/image_pass.rs`, `src/image.rs`, `src/renderer/commands/command_builder.rs`, `src/net/http.rs`.
+- **Exit Criteria Status:**
+  1. 100 consecutive frames allocate zero new GPU vertex/index buffers. — **PASSED** (`test_retained_buffer_pool`)
+  2. HTML documents with `<img src="...">` render decoded PNG/JPEG bitmaps instead of grey placeholder boxes. — **PASSED** (`test_png_image_decode_dimensions`, `image_integration`)
+  3. HTTP GET request line formats RFC 9110 compliant targets (fragments stripped). — **PASSED** (`test_url_request_target_strips_fragment`)
+  4. Socket stream reader rejects or truncates bodies exceeding 100 MB safely. — **PASSED** (`test_read_exact_body_rejects_oversized`, `test_read_chunked_body_bounded_rejects_oversized`)
 
 ---
 
